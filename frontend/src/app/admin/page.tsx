@@ -467,7 +467,7 @@ export default function AdminPage() {
                           </select>
                         </td>
                         <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-                          {editSubExp?.id === u.id ? (
+                          {editSubExp?.id === u.id && editSubExp ? (
                             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                               <input
                                 type="datetime-local"
