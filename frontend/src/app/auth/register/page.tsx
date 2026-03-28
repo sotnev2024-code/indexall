@@ -23,8 +23,13 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      await axios.post(`${API_URL}/auth/register`, { name, email, password });
-      setSent(true);
+      const { data } = await axios.post(`${API_URL}/auth/register`, { name, email, password });
+      if (data.accessToken) {
+        localStorage.setItem('token', data.accessToken);
+        router.push('/projects');
+      } else {
+        setSent(true);
+      }
     } catch (err: any) {
       setError(err.response?.data?.message || 'Ошибка регистрации');
     } finally {

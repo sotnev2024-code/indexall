@@ -27,10 +27,6 @@ export class AuthService {
     const passwordOk = await bcrypt.compare(password, user.password);
     if (!passwordOk) return null;
 
-    if (!user.emailVerified) {
-      throw new UnauthorizedException({ unverified: true, email: user.email });
-    }
-
     await this.usersService.updateLastSeen(user.id);
     const { password: _, ...result } = user;
     return result;
@@ -68,14 +64,19 @@ export class AuthService {
       emailVerified: false,
     });
 
-    // Send confirmation email — non-fatal: if SMTP fails, user can still resend
+    // Send confirmation email — non-fatal, email verification is currently disabled
     try {
       await this.emailService.sendConfirmation(registerDto.email, token);
     } catch (emailErr) {
       this.logger.error(`SMTP error during registration for ${registerDto.email}: ${emailErr.message}`);
     }
 
-    return { message: 'Письмо с подтверждением отправлено на вашу почту' };
+    // Mark as verified immediately (email confirmation disabled)
+    await this.usersRepo.update(user.id, { emailVerified: true });
+
+    const updated = await this.usersRepo.findOne({ where: { id: user.id } });
+    const { password: _, ...safe } = updated;
+    return this.login(safe);
   }
 
   /** Confirm email by token → return JWT */
