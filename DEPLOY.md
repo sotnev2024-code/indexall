@@ -1,4 +1,4 @@
-# Деплой INDEXALL на VPS (nkupro.ru)
+# Деплой INDEXALL на VPS (nkubot.ru)
 
 ## Требования к серверу
 - Ubuntu 22.04 LTS (рекомендуется)
@@ -12,9 +12,9 @@
 Добавь A-записи, указывающие на IP вашего VPS:
 
 ```
-nkupro.ru       →  A  →  ВАШ_IP_VPS
-www.nkupro.ru   →  A  →  ВАШ_IP_VPS
-api.nkupro.ru   →  A  →  ВАШ_IP_VPS
+nkubot.ru       →  A  →  ВАШ_IP_VPS
+www.nkubot.ru   →  A  →  ВАШ_IP_VPS
+api.nkubot.ru   →  A  →  ВАШ_IP_VPS
 ```
 
 Дождись применения DNS (до 30 минут).
@@ -72,7 +72,7 @@ nano backend/.env.production
 ```bash
 # Frontend
 cp frontend/.env.production.example frontend/.env.production
-# Значения уже правильные (https://api.nkupro.ru/api)
+# Значения уже правильные (https://api.nkubot.ru/api)
 ```
 
 ---
@@ -101,7 +101,7 @@ docker run --rm \
   --webroot-path=/var/www/certbot \
   --email sotnev.aleksei@yandex.ru \
   --agree-tos --no-eff-email \
-  -d nkupro.ru -d www.nkupro.ru -d api.nkupro.ru
+  -d nkubot.ru -d www.nkubot.ru -d api.nkubot.ru
 
 # Останавливаем временный nginx
 docker stop nginx-temp
@@ -125,8 +125,8 @@ docker-compose -f docker-compose.prod.yml logs -f
 
 ## Шаг 7 — Проверка
 
-- Сайт: https://nkupro.ru
-- API:   https://api.nkupro.ru/api
+- Сайт: https://nkubot.ru
+- API:   https://api.nkubot.ru/api
 
 ---
 
