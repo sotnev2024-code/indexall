@@ -133,7 +133,25 @@ const SpecRow = memo(function SpecRow({
 export default function SpecPage() {
   const { id } = useParams();
   const router = useRouter();
-  const { activeProjectId, setUnsaved } = useAppStore();
+  const { activeProjectId, setUnsaved: _setUnsaved } = useAppStore();
+
+  const setUnsaved = useCallback((v: boolean) => {
+    _setUnsaved(v);
+    hasUnsavedRef.current = v;
+    if (v) {
+      // Debounced auto-save: 3s after last change
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+      autoSaveTimer.current = setTimeout(async () => {
+        if (!hasUnsavedRef.current) return;
+        const toSave = rowsRef.current.filter((r: any) => r.name || r.article);
+        try {
+          await sheetsApi.saveRows(Number(id), toSave);
+          hasUnsavedRef.current = false;
+          _setUnsaved(false);
+        } catch { /* silent, user can save manually */ }
+      }, 3000);
+    }
+  }, [_setUnsaved, id]);
   const [sheet, setSheet] = useState<any>(null);
   const [project, setProject] = useState<any>(null);
   const [rows, setRows] = useState<any[]>([]);
@@ -159,7 +177,9 @@ export default function SpecPage() {
 
   const inputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowsRef = useRef<any[]>([]);
+  const hasUnsavedRef = useRef(false);
   const focusSnapshotRef = useRef<any[] | null>(null);
   useEffect(() => { rowsRef.current = rows; }, [rows]);
 
@@ -210,6 +230,29 @@ export default function SpecPage() {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [handleUndo, handleRedo]);
+
+  // Auto-save: save on page hide/unload
+  useEffect(() => {
+    async function autoSaveNow() {
+      if (!hasUnsavedRef.current) return;
+      const toSave = rowsRef.current.filter((r: any) => r.name || r.article);
+      try {
+        await sheetsApi.saveRows(Number(id), toSave);
+        hasUnsavedRef.current = false;
+        setUnsaved(false);
+      } catch { /* silent */ }
+    }
+    const handleVisibility = () => { if (document.visibilityState === 'hidden') autoSaveNow(); };
+    const handleUnload = () => autoSaveNow();
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('beforeunload', handleUnload);
+    return () => {
+      autoSaveNow(); // save on component unmount (navigation)
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('beforeunload', handleUnload);
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    };
+  }, [id, setUnsaved]);
 
   useEffect(() => {
     loadData();
