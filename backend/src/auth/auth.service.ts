@@ -46,7 +46,7 @@ export class AuthService {
   }
 
   /** Register: create user, send confirmation email, do NOT return JWT yet */
-  async register(registerDto: RegisterDto): Promise<{ message: string }> {
+  async register(registerDto: RegisterDto): Promise<any> {
     const existing = await this.usersService.findByEmail(registerDto.email).catch(() => null);
     if (existing) {
       throw new BadRequestException('Пользователь с таким email уже существует');
