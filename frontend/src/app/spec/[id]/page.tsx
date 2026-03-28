@@ -171,9 +171,15 @@ export default function SpecPage() {
   const [renamingSheetId, setRenamingSheetId] = useState<number | null>(null);
   const [renameVal, setRenameVal] = useState('');
 
-  // Undo / Redo stacks
-  const [undoStack, setUndoStack] = useState<any[][]>([]);
-  const [redoStack, setRedoStack] = useState<any[][]>([]);
+  // Undo / Redo stacks — persisted in sessionStorage per sheet
+  const undoKey = `undo_${id}`;
+  const redoKey = `redo_${id}`;
+  const [undoStack, setUndoStack] = useState<any[][]>(() => {
+    try { const s = sessionStorage.getItem(`undo_${id}`); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
+  const [redoStack, setRedoStack] = useState<any[][]>(() => {
+    try { const s = sessionStorage.getItem(`redo_${id}`); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
 
   const inputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -182,6 +188,14 @@ export default function SpecPage() {
   const hasUnsavedRef = useRef(false);
   const focusSnapshotRef = useRef<any[] | null>(null);
   useEffect(() => { rowsRef.current = rows; }, [rows]);
+
+  // Persist undo/redo stacks to sessionStorage on every change
+  useEffect(() => {
+    try { sessionStorage.setItem(undoKey, JSON.stringify(undoStack)); } catch { /* quota exceeded — ignore */ }
+  }, [undoStack, undoKey]);
+  useEffect(() => {
+    try { sessionStorage.setItem(redoKey, JSON.stringify(redoStack)); } catch { /* quota exceeded — ignore */ }
+  }, [redoStack, redoKey]);
 
   const setInputRef = useCallback((el: HTMLInputElement | null, key: string) => {
     if (el) inputRefs.current.set(key, el);
