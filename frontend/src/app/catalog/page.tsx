@@ -184,7 +184,7 @@ export default function CatalogPage() {
 
   // ── Product helpers ────────────────────────────────────────
   function selectProduct(p: any) {
-    setSelectedProduct(prev => prev?.id === p.id ? null : p);
+    setSelectedProduct((prev: any) => prev?.id === p.id ? null : p);
     setTimeout(() => detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
   }
 
