@@ -1,0 +1,678 @@
+'use client';
+import { useEffect, useState, useRef, useCallback, memo } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import toast from 'react-hot-toast';
+import Header from '@/components/layout/Header';
+import { sheetsApi, projectsApi, catalogApi, exportApi, storesApi } from '@/lib/api';
+import { useAppStore } from '@/store/app.store';
+
+const MAX_UNDO = 30;
+
+const STATIC_BRANDS = ['IEK', 'EKF', 'Chint', 'КЗАЗ', 'DEKraft', 'DKC', 'TDM'];
+
+function fmtNum(n: number) {
+  return n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+}
+
+function calcTotal(price: string, qty: string, coef: string) {
+  const p = parseFloat(price) || 0;
+  const q = parseFloat(qty) || 0;
+  const c = parseFloat(coef) || 1;
+  return p && q ? fmtNum(p * q * c) : '';
+}
+
+// ── SpecRow ────────────────────────────────────────────────────
+interface RowProps {
+  row: any;
+  idx: number;
+  isFirst: boolean;
+  onUpdate: (i: number, field: string, value: any) => void;
+  onSearch: (q: string, rowIdx: number, field: string, el: HTMLInputElement) => void;
+  onKeyDown: (e: React.KeyboardEvent, rowIdx: number) => void;
+  onStoreClick: (rowIdx: number, el: HTMLSelectElement) => void;
+  inputRef: (el: HTMLInputElement | null, key: string) => void;
+  onFocus: () => void;
+  onBlur: () => void;
+}
+
+const SpecRow = memo(function SpecRow({
+  row, idx, isFirst, onUpdate, onSearch, onKeyDown, onStoreClick, inputRef, onFocus, onBlur,
+}: RowProps) {
+  return (
+    <tr>
+      <td className="col-num">{idx + 1}</td>
+      <td className="col-name" style={{ position: 'relative' }}>
+        <input
+          ref={el => inputRef(el, `name-${idx}`)}
+          value={row.name || ''}
+          placeholder={isFirst ? 'Можно вводить текст здесь и система подберёт варианты' : ''}
+          onChange={e => { onUpdate(idx, 'name', e.target.value); onSearch(e.target.value, idx, 'name', e.target as HTMLInputElement); }}
+          onKeyDown={e => onKeyDown(e, idx)}
+          onFocus={onFocus}
+          onBlur={onBlur}
+        />
+      </td>
+      <td className="col-brand">
+        <input
+          value={row.brand || ''}
+          onChange={e => onUpdate(idx, 'brand', e.target.value)}
+          onFocus={onFocus}
+          onBlur={onBlur}
+        />
+      </td>
+      <td className="col-article">
+        <input
+          value={row.article || ''}
+          onChange={e => { onUpdate(idx, 'article', e.target.value); onSearch(e.target.value, idx, 'article', e.target as HTMLInputElement); }}
+          onKeyDown={e => onKeyDown(e, idx)}
+          onFocus={onFocus}
+          onBlur={onBlur}
+        />
+      </td>
+      <td className="col-qty">
+        <input
+          value={row.qty || ''}
+          onChange={e => onUpdate(idx, 'qty', e.target.value)}
+          onFocus={onFocus}
+          onBlur={onBlur}
+        />
+      </td>
+      <td className="col-unit">
+        <input
+          value={row.unit || ''}
+          onChange={e => onUpdate(idx, 'unit', e.target.value)}
+          onFocus={onFocus}
+          onBlur={onBlur}
+        />
+      </td>
+      <td className="col-price">
+        <input
+          value={row.price || ''}
+          onChange={e => { onUpdate(idx, 'price', e.target.value); onUpdate(idx, 'auto_price', false); }}
+          onFocus={onFocus}
+          onBlur={onBlur}
+        />
+      </td>
+      <td className="col-store">
+        <select
+          value={row.store || 'ETM'}
+          onChange={e => onUpdate(idx, 'store', e.target.value)}
+          onClick={e => onStoreClick(idx, e.target as HTMLSelectElement)}
+          onFocus={onFocus}
+          onBlur={onBlur}
+        >
+          <option value="ETM">ETM</option>
+          <option value="EKF">EKF</option>
+          <option value="ЭТМ">ЭТМ</option>
+          <option value="">—</option>
+        </select>
+      </td>
+      <td className="col-coef">
+        <input
+          value={row.coef || '1'}
+          onChange={e => onUpdate(idx, 'coef', e.target.value)}
+          onFocus={onFocus}
+          onBlur={onBlur}
+        />
+      </td>
+      <td className="col-total">{row.total && row.total !== 'NaN' ? row.total : ''}</td>
+      <td className="col-deadline">
+        <input
+          value={row.deadline || ''}
+          placeholder="—"
+          onChange={e => onUpdate(idx, 'deadline', e.target.value)}
+          onFocus={onFocus}
+          onBlur={onBlur}
+        />
+      </td>
+    </tr>
+  );
+});
+
+// ── Page ──────────────────────────────────────────────────────
+export default function SpecPage() {
+  const { id } = useParams();
+  const router = useRouter();
+  const { activeProjectId, setUnsaved } = useAppStore();
+  const [sheet, setSheet] = useState<any>(null);
+  const [project, setProject] = useState<any>(null);
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [acDrops, setAcDrops] = useState<{ rowIdx: number; field: string; results: any[]; rect: DOMRect } | null>(null);
+  const [acFocus, setAcFocus] = useState(-1);
+  const [storeDropdown, setStoreDropdown] = useState<{ rowIdx: number; rect: DOMRect; offers: any[] } | null>(null);
+
+  // Brand filter + global search
+  const [brandFilter, setBrandFilter] = useState<string>('all');
+  const [brands, setBrands] = useState<string[]>(STATIC_BRANDS);
+  const [globalSearch, setGlobalSearch] = useState('');
+  const [globalResults, setGlobalResults] = useState<any[]>([]);
+  const globalSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Sheet tabs renaming
+  const [renamingSheetId, setRenamingSheetId] = useState<number | null>(null);
+  const [renameVal, setRenameVal] = useState('');
+
+  // Undo / Redo stacks
+  const [undoStack, setUndoStack] = useState<any[][]>([]);
+  const [redoStack, setRedoStack] = useState<any[][]>([]);
+
+  const inputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rowsRef = useRef<any[]>([]);
+  const focusSnapshotRef = useRef<any[] | null>(null);
+  useEffect(() => { rowsRef.current = rows; }, [rows]);
+
+  const setInputRef = useCallback((el: HTMLInputElement | null, key: string) => {
+    if (el) inputRefs.current.set(key, el);
+  }, []);
+
+  const pushHistorySnapshot = useCallback((snap: any[]) => {
+    const clone = JSON.parse(JSON.stringify(snap));
+    setUndoStack((u) => {
+      const last = u[u.length - 1];
+      if (last && JSON.stringify(last) === JSON.stringify(clone)) return u;
+      return [...u, clone].slice(-MAX_UNDO);
+    });
+    setRedoStack([]);
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    setUndoStack((stack) => {
+      if (stack.length === 0) return stack;
+      const snap = stack[stack.length - 1];
+      setRedoStack((r) => [...r, JSON.parse(JSON.stringify(rowsRef.current))]);
+      setRows(snap);
+      setUnsaved(true);
+      toast('↩ Действие отменено', { icon: '' });
+      return stack.slice(0, -1);
+    });
+  }, [setUnsaved]);
+
+  const handleRedo = useCallback(() => {
+    setRedoStack((stack) => {
+      if (stack.length === 0) return stack;
+      const snap = stack[stack.length - 1];
+      setUndoStack((s) => [...s, JSON.parse(JSON.stringify(rowsRef.current))]);
+      setRows(snap);
+      setUnsaved(true);
+      toast('↪ Действие повторено', { icon: '' });
+      return stack.slice(0, -1);
+    });
+  }, [setUnsaved]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); handleUndo(); }
+      else if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) { e.preventDefault(); handleRedo(); }
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [handleUndo, handleRedo]);
+
+  useEffect(() => {
+    loadData();
+    loadBrands();
+    const close = () => { setAcDrops(null); setStoreDropdown(null); setGlobalResults([]); };
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [id]);
+
+  async function loadBrands() {
+    try {
+      const { data } = await catalogApi.getManufacturers();
+      const names: string[] = (data as any[])
+        .filter((m: any) => m.is_active)
+        .map((m: any) => m.name)
+        .slice(0, 12);
+      if (names.length > 0) setBrands(names);
+    } catch { /* keep static list */ }
+  }
+
+  async function loadData() {
+    try {
+      const { data: s } = await sheetsApi.getOne(Number(id));
+      setSheet(s);
+      const dbRows = s.rows || [];
+      const cleanNum = (v: any, fallback = '') => {
+        if (v === null || v === undefined || v === '') return fallback;
+        const n = parseFloat(String(v));
+        return isNaN(n) ? fallback : String(n);
+      };
+      const normalizedRows = dbRows.map((r: any) => {
+        const qty   = cleanNum(r.qty);
+        const price = cleanNum(r.price);
+        const coef  = cleanNum(r.coef, '1') || '1';
+        return { ...r, qty, price, coef, total: calcTotal(price, qty, coef) };
+      });
+      const padded = [...normalizedRows];
+      while (padded.length < 25) {
+        padded.push({ row_number: padded.length + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ETM', coef: '1', total: '', deadline: '' });
+      }
+      setRows(padded);
+      rowsRef.current = padded;
+      setUndoStack([]);
+      setRedoStack([]);
+      if (activeProjectId) {
+        const { data: p } = await projectsApi.getOne(activeProjectId);
+        setProject(p);
+      }
+    } catch { toast.error('Ошибка загрузки листа'); }
+    finally { setLoading(false); }
+  }
+
+  const handleCellFocus = useCallback(() => {
+    focusSnapshotRef.current = JSON.parse(JSON.stringify(rowsRef.current));
+  }, []);
+
+  const handleCellBlur = useCallback(() => {
+    if (!focusSnapshotRef.current) return;
+    if (JSON.stringify(rowsRef.current) !== JSON.stringify(focusSnapshotRef.current)) {
+      pushHistorySnapshot(focusSnapshotRef.current);
+    }
+    focusSnapshotRef.current = null;
+  }, [pushHistorySnapshot]);
+
+  const updateRow = useCallback((i: number, field: string, value: any) => {
+    setRows((prev) => {
+      const next = [...prev];
+      next[i] = { ...next[i], [field]: value };
+      if (['price', 'qty', 'coef'].includes(field)) {
+        const r = next[i];
+        next[i].total = calcTotal(r.price, r.qty, r.coef);
+      }
+      return next;
+    });
+    setUnsaved(true);
+  }, [setUnsaved]);
+
+  const applyProduct = useCallback((i: number, p: any) => {
+    const snap = focusSnapshotRef.current ?? JSON.parse(JSON.stringify(rowsRef.current));
+    pushHistorySnapshot(snap);
+    focusSnapshotRef.current = null;
+    setRows((prev) => {
+      const next = [...prev];
+      const q = next[i].qty;
+      const c = next[i].coef;
+      next[i] = {
+        ...next[i],
+        name: p.name,
+        brand: p.manufacturer?.name || p.brand || '',
+        article: p.article || '',
+        unit: p.unit || '',
+        price: p.price ? String(p.price) : '',
+        store: 'ETM',
+        auto_price: true,
+        total: calcTotal(p.price ? String(p.price) : '', q, c),
+      };
+      return next;
+    });
+    setAcDrops(null);
+    setUnsaved(true);
+  }, [pushHistorySnapshot, setUnsaved]);
+
+  // Add product from global search to the next empty row
+  const addProductFromSearch = useCallback((p: any) => {
+    pushHistorySnapshot(rowsRef.current);
+    setRows((prev) => {
+      const next = [...prev];
+      const emptyIdx = next.findIndex(r => !r.name && !r.article);
+      const targetIdx = emptyIdx >= 0 ? emptyIdx : next.length - 1;
+      next[targetIdx] = {
+        ...next[targetIdx],
+        name: p.name,
+        brand: p.manufacturer?.name || p.brand || '',
+        article: p.article || '',
+        unit: p.unit || '',
+        price: p.price ? String(p.price) : '',
+        store: 'ETM',
+        auto_price: true,
+        total: calcTotal(p.price ? String(p.price) : '', next[targetIdx].qty || '', next[targetIdx].coef || '1'),
+      };
+      return next;
+    });
+    setGlobalSearch('');
+    setGlobalResults([]);
+    setUnsaved(true);
+  }, [pushHistorySnapshot, setUnsaved]);
+
+  async function searchCatalog(q: string, rowIdx: number, field: string, el: HTMLInputElement) {
+    if (!q || q.length < 2) { setAcDrops(null); return; }
+    const { data } = await catalogApi.search(q);
+    let results = data as any[];
+    if (brandFilter !== 'all') {
+      results = results.filter((p: any) =>
+        (p.manufacturer?.name || p.brand || '').toLowerCase() === brandFilter.toLowerCase()
+      );
+    }
+    if (results.length === 0) { setAcDrops(null); return; }
+    setAcDrops({ rowIdx, field, results, rect: el.getBoundingClientRect() });
+    setAcFocus(-1);
+  }
+
+  const debouncedSearch = useCallback((q: string, rowIdx: number, field: string, el: HTMLInputElement) => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => searchCatalog(q, rowIdx, field, el), 300);
+  }, [brandFilter]);
+
+  async function handleGlobalSearch(q: string) {
+    setGlobalSearch(q);
+    if (globalSearchTimer.current) clearTimeout(globalSearchTimer.current);
+    if (!q || q.length < 2) { setGlobalResults([]); return; }
+    globalSearchTimer.current = setTimeout(async () => {
+      try {
+        const { data } = await catalogApi.search(q);
+        let results = data as any[];
+        if (brandFilter !== 'all') {
+          results = results.filter((p: any) =>
+            (p.manufacturer?.name || p.brand || '').toLowerCase() === brandFilter.toLowerCase()
+          );
+        }
+        setGlobalResults(results.slice(0, 10));
+      } catch { setGlobalResults([]); }
+    }, 300);
+  }
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent, rowIdx: number) => {
+    setAcDrops(current => {
+      if (!current || current.rowIdx !== rowIdx) return current;
+      if (e.key === 'ArrowDown') { e.preventDefault(); setAcFocus(f => Math.min(f + 1, current.results.length - 1)); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setAcFocus(f => Math.max(f - 1, 0)); }
+      else if (e.key === 'Enter') {
+        e.preventDefault();
+        setAcFocus(f => { if (f >= 0) applyProduct(rowIdx, current.results[f]); return f; });
+      }
+      else if (e.key === 'Escape') return null;
+      return current;
+    });
+  }, [applyProduct]);
+
+  const openStoreDropdown = useCallback(async (rowIdx: number, el: HTMLSelectElement) => {
+    const article = rowsRef.current[rowIdx]?.article;
+    if (!article) return;
+    try {
+      const { data } = await storesApi.getOffersByArticle(article);
+      if (data.length > 0) setStoreDropdown({ rowIdx, rect: el.getBoundingClientRect(), offers: data });
+    } catch { /* no offers */ }
+  }, []);
+
+  function applyStoreOffer(rowIdx: number, offer: any) {
+    pushHistorySnapshot(rowsRef.current);
+    setRows((prev) => {
+      const next = [...prev];
+      const r = { ...next[rowIdx], store: offer.store_name };
+      if (offer.price) {
+        r.price = String(offer.price);
+        r.auto_price = false;
+        r.total = calcTotal(r.price, r.qty, r.coef);
+      }
+      next[rowIdx] = r;
+      return next;
+    });
+    setStoreDropdown(null);
+    setUnsaved(true);
+  }
+
+  async function addSheet() {
+    if (!activeProjectId) return;
+    try {
+      const { data } = await sheetsApi.create(activeProjectId);
+      setProject((p: any) => p ? { ...p, sheets: [...(p.sheets || []), data] } : p);
+      toast.success('Лист добавлен');
+    } catch { toast.error('Ошибка'); }
+  }
+
+  function startRenameSheet(s: any) {
+    setRenamingSheetId(s.id);
+    setRenameVal(s.name);
+  }
+
+  async function commitRenameSheet() {
+    if (!renamingSheetId || !renameVal.trim()) { setRenamingSheetId(null); return; }
+    try {
+      await sheetsApi.update(renamingSheetId, { name: renameVal.trim() });
+      setProject((p: any) => p ? {
+        ...p,
+        sheets: p.sheets?.map((s: any) => s.id === renamingSheetId ? { ...s, name: renameVal.trim() } : s),
+      } : p);
+      if (sheet?.id === renamingSheetId) setSheet((s: any) => s ? { ...s, name: renameVal.trim() } : s);
+    } catch { toast.error('Ошибка переименования'); }
+    setRenamingSheetId(null);
+  }
+
+  async function saveRows() {
+    try {
+      const toSave = rows.filter(r => r.name || r.article);
+      await sheetsApi.saveRows(Number(id), toSave);
+      setUnsaved(false);
+      toast.success('Сохранено');
+    } catch { toast.error('Ошибка сохранения'); }
+  }
+
+  async function handleExport() {
+    if (!activeProjectId) return;
+    const choice = confirm('Экспортировать весь проект?\nОК — весь проект, Отмена — только этот лист');
+    try {
+      const { data } = await exportApi.xlsx(activeProjectId, choice ? undefined : Number(id));
+      const url = URL.createObjectURL(new Blob([data]));
+      const a = document.createElement('a'); a.href = url; a.download = 'спецификация.xlsx'; a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error('Ошибка экспорта'); }
+  }
+
+  const sheetTotal = rows.reduce((s, r) => {
+    const p = parseFloat(r.price) || 0, q = parseFloat(r.qty) || 0, c = parseFloat(r.coef) || 1;
+    return s + p * q * c;
+  }, 0);
+
+  const projectSheets: any[] = project?.sheets || [];
+
+  if (loading) return <div style={{ paddingTop: 80, textAlign: 'center', color: 'var(--muted)' }}>Загрузка…</div>;
+
+  return (
+    <>
+      <Header
+        breadcrumb={`Проект: ${project?.name || '…'}`}
+        projectCost={project ? `Стоимость: ${fmtNum(project.total || 0)} ₽` : ''}
+        showSave
+        onSave={saveRows}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        canUndo={undoStack.length > 0}
+        canRedo={redoStack.length > 0}
+        undoCount={undoStack.length > 0 ? undoStack.length : undefined}
+      />
+
+      <div className="spec-screen">
+        {/* ── Main toolbar ── */}
+        <div className="spec-toolbar">
+          <button className="btn-primary" onClick={() => router.push('/catalog')}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            Добавить из каталога
+          </button>
+          <button className="btn-outline" onClick={() => router.push('/templates')}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Вставить шаблон
+          </button>
+          <div style={{ flex: 1 }} />
+          <div className="spec-summary">
+            <span className="spec-summary-item">
+              <span className="spec-summary-label">Сумма листа:</span>
+              <span className="spec-summary-value">{fmtNum(sheetTotal)} ₽</span>
+            </span>
+            <span className="spec-summary-sep">|</span>
+            <span className="spec-summary-item">
+              <span className="spec-summary-label">Срок:</span>
+              <span className="spec-summary-value">0 дн.</span>
+            </span>
+            <button className="btn-outline" style={{ marginLeft: 8, padding: '5px 10px', fontSize: 12 }} onClick={handleExport}>
+              ↓ Excel
+            </button>
+          </div>
+        </div>
+
+        {/* ── Brand filter chips ── */}
+        <div className="spec-brand-bar">
+          <button
+            className={`brand-chip${brandFilter === 'all' ? ' active' : ''}`}
+            onClick={() => setBrandFilter('all')}
+          >
+            Все бренды
+          </button>
+          {brands.map(b => (
+            <button
+              key={b}
+              className={`brand-chip${brandFilter === b ? ' active' : ''}`}
+              onClick={() => setBrandFilter(brandFilter === b ? 'all' : b)}
+            >
+              {b}
+            </button>
+          ))}
+          <button className="brand-chip" style={{ color: 'var(--muted)' }}>+ добавить фильтр</button>
+        </div>
+
+        {/* ── Global catalog search ── */}
+        <div className="spec-search-bar" onClick={e => e.stopPropagation()}>
+          <div className="spec-search-input-wrap">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth="2">
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            </svg>
+            <input
+              value={globalSearch}
+              onChange={e => handleGlobalSearch(e.target.value)}
+              placeholder="Введите название, артикул, или ключевые параметры. Например: ВА47 25А С или АВДТ 9Р-N 30мА С16"
+            />
+            {globalSearch && (
+              <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 16, padding: '0 4px' }} onClick={() => { setGlobalSearch(''); setGlobalResults([]); }}>×</button>
+            )}
+          </div>
+          {globalResults.length > 0 && (
+            <div className="global-search-dropdown">
+              {globalResults.map((p: any) => (
+                <div key={p.id} className="ac-item" onMouseDown={e => e.preventDefault()} onClick={() => addProductFromSearch(p)}>
+                  <span className="ac-item-brand">{p.manufacturer?.name || ''}</span>
+                  <span className="ac-item-name">{p.name}</span>
+                  <span className="ac-item-article">{p.article}</span>
+                  {p.price && <span className="ac-item-meta">{p.price} ₽</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── Sheet tabs ── */}
+        {projectSheets.length > 0 && (
+          <div className="sheet-tabs">
+            {projectSheets.map((s: any) => (
+              <div key={s.id} className={`sheet-tab${Number(id) === s.id ? ' active' : ''}`}>
+                {renamingSheetId === s.id ? (
+                  <input
+                    className="sheet-tab-rename"
+                    value={renameVal}
+                    onChange={e => setRenameVal(e.target.value)}
+                    onBlur={commitRenameSheet}
+                    onKeyDown={e => e.key === 'Enter' && commitRenameSheet()}
+                    autoFocus
+                    onClick={e => e.stopPropagation()}
+                  />
+                ) : (
+                  <span
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => { if (Number(id) !== s.id) { const { activeProjectId: proj } = useAppStore.getState(); router.push(`/spec/${s.id}`); } }}
+                    onDoubleClick={() => startRenameSheet(s)}
+                  >
+                    {s.name}
+                  </span>
+                )}
+                {Number(id) === s.id && (
+                  <button className="sheet-tab-edit" title="Переименовать" onClick={e => { e.stopPropagation(); startRenameSheet(s); }}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  </button>
+                )}
+              </div>
+            ))}
+            <button className="sheet-tab-add" title="Добавить лист" onClick={addSheet}>+</button>
+          </div>
+        )}
+
+        {/* ── Table ── */}
+        <div className="spec-table-wrap">
+          <table className="spec-table">
+            <thead>
+              <tr>
+                <th className="col-num">№</th>
+                <th className="col-name">Название</th>
+                <th className="col-brand">Бренд</th>
+                <th className="col-article">Артикул</th>
+                <th className="col-qty">Кол-во</th>
+                <th className="col-unit">Ед.изм</th>
+                <th className="col-price">Цена</th>
+                <th className="col-store">Магазин</th>
+                <th className="col-coef">Коэф.</th>
+                <th className="col-total">Итого</th>
+                <th className="col-deadline">Срок</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, i) => (
+                <SpecRow
+                  key={i}
+                  row={row}
+                  idx={i}
+                  isFirst={i === 0}
+                  onUpdate={updateRow}
+                  onSearch={debouncedSearch}
+                  onKeyDown={handleKeyDown}
+                  onStoreClick={openStoreDropdown}
+                  inputRef={setInputRef}
+                  onFocus={handleCellFocus}
+                  onBlur={handleCellBlur}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Autocomplete dropdown */}
+      {acDrops && (
+        <div
+          className="ac-dropdown"
+          style={{ top: acDrops.rect.bottom + 2, left: acDrops.rect.left }}
+          onMouseDown={e => e.preventDefault()}
+        >
+          {acDrops.results.map((p, i) => (
+            <div
+              key={p.id}
+              className={`ac-item${i === acFocus ? ' focused' : ''}`}
+              onClick={() => applyProduct(acDrops.rowIdx, p)}
+            >
+              <span className="ac-item-brand">{p.manufacturer?.name || ''}</span>
+              <span className="ac-item-name">{p.name}</span>
+              <span className="ac-item-article">{p.article}</span>
+              {p.price && <span className="ac-item-meta">{p.price} ₽</span>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Store offers dropdown */}
+      {storeDropdown && (
+        <div
+          className="store-dropdown"
+          style={{ top: storeDropdown.rect.bottom + 2, left: storeDropdown.rect.left }}
+          onMouseDown={e => e.preventDefault()}
+        >
+          {storeDropdown.offers.map((o, i) => (
+            <div key={i} className="store-offer-item" onClick={() => applyStoreOffer(storeDropdown.rowIdx, o)}>
+              <span className="store-offer-name">{o.store_name}</span>
+              <span className="store-offer-price">{o.price ? `${o.price} ₽` : '—'}</span>
+              <span className="store-offer-avail">{o.availability || ''}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}

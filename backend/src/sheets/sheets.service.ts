@@ -1,0 +1,152 @@
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Sheet } from './sheet.entity';
+import { EquipmentRow } from '../equipment/equipment-row.entity';
+import { Project } from '../projects/project.entity';
+import { TrashService } from '../trash/trash.service';
+
+@Injectable()
+export class SheetsService {
+  constructor(
+    @InjectRepository(Sheet) private sheetsRepo: Repository<Sheet>,
+    @InjectRepository(EquipmentRow) private rowsRepo: Repository<EquipmentRow>,
+    @InjectRepository(Project) private projectsRepo: Repository<Project>,
+    private readonly trashService: TrashService,
+  ) {}
+
+  async createSheet(projectId: number, userId: number, name?: string) {
+    await this.checkProjectOwner(projectId, userId);
+    const count = await this.sheetsRepo.count({ where: { projectId } });
+    if (count >= 200)
+      throw new BadRequestException('Максимум 200 листов в проекте');
+
+    const sheet = await this.sheetsRepo.save({
+      projectId,
+      name: name || `Спецификация${count + 1}`,
+    });
+    const rows = Array.from({ length: 25 }, () => ({
+      sheetId: sheet.id,
+      name: '',
+      brand: '',
+      article: '',
+      qty: '0',
+      unit: 'шт',
+      price: '0',
+      store: '',
+      coef: '1',
+      total: '0',
+    }));
+    await this.rowsRepo.save(rows);
+    return this.getSheetWithRows(sheet.id);
+  }
+
+  async getSheetWithRows(sheetId: number) {
+    const sheet = await this.sheetsRepo.findOne({
+      where: { id: sheetId },
+      relations: ['rows'],
+    });
+    if (!sheet) throw new NotFoundException('Лист не найден');
+    const total = (sheet.rows || []).reduce(
+      (sum, r) =>
+        sum +
+        parseFloat(r.price || '0') *
+          parseFloat(r.qty || '0') *
+          parseFloat(r.coef || '1'),
+      0,
+    );
+    return { ...sheet, total };
+  }
+
+  async updateSheet(sheetId: number, userId: number, data: { name?: string }) {
+    await this.checkSheetOwner(sheetId, userId);
+    await this.sheetsRepo.update(sheetId, data);
+    return this.getSheetWithRows(sheetId);
+  }
+
+  async duplicateSheet(sheetId: number, userId: number) {
+    await this.checkSheetOwner(sheetId, userId);
+    const original = await this.getSheetWithRows(sheetId);
+    const newSheet = await this.sheetsRepo.save({
+      projectId: original.projectId,
+      name: original.name + ' (копия)',
+    });
+    if (original.rows?.length) {
+      await this.rowsRepo.save(
+        original.rows.map((r) => ({
+          sheetId: newSheet.id,
+          name: r.name || '',
+          brand: r.brand || '',
+          article: r.article || '',
+          qty: r.qty || '0',
+          unit: r.unit || 'шт',
+          price: r.price || '0',
+          store: r.store || '',
+          coef: r.coef || '1',
+          total: r.total || '0',
+          _autoPrice: r._autoPrice,
+        })),
+      );
+    }
+    return this.getSheetWithRows(newSheet.id);
+  }
+
+  async removeSheet(sheetId: number, userId: number) {
+    const sheet = await this.checkSheetOwner(sheetId, userId);
+    const count = await this.sheetsRepo.count({
+      where: { projectId: sheet.projectId },
+    });
+    if (count <= 1)
+      throw new BadRequestException('Нельзя удалить последний лист');
+
+    await this.trashService.addToTrash({
+      entity_type: 'sheet',
+      entity_id: sheetId,
+      user_id: userId,
+      name: sheet.name,
+    });
+    await this.sheetsRepo.delete(sheetId);
+    return { success: true };
+  }
+
+  async saveRows(sheetId: number, userId: number, rows: any[]) {
+    await this.checkSheetOwner(sheetId, userId);
+    await this.rowsRepo.delete({ sheetId });
+    if (rows?.length) {
+      const toSave = rows.map((r) => ({
+        sheetId,
+        name: r.name || '',
+        brand: r.brand || '',
+        article: r.article || '',
+        qty: r.qty != null ? String(r.qty) : '0',
+        unit: r.unit || 'шт',
+        price: r.price != null ? String(r.price) : '0',
+        store: r.store || '',
+        coef: r.coef != null ? String(r.coef) : '1',
+        total: r.total != null ? String(r.total) : '0',
+        _autoPrice: r._autoPrice ?? r.auto_price ?? true,
+      }));
+      await this.rowsRepo.save(toSave);
+    }
+    return this.getSheetWithRows(sheetId);
+  }
+
+  private async checkProjectOwner(projectId: number, userId: number) {
+    const p = await this.projectsRepo.findOne({ where: { id: projectId } });
+    if (!p) throw new NotFoundException('Проект не найден');
+    if (p.userId !== userId) throw new ForbiddenException('Нет доступа');
+    return p;
+  }
+
+  private async checkSheetOwner(sheetId: number, userId: number) {
+    const sheet = await this.sheetsRepo.findOne({ where: { id: sheetId } });
+    if (!sheet) throw new NotFoundException('Лист не найден');
+    await this.checkProjectOwner(sheet.projectId, userId);
+    return sheet;
+  }
+}
