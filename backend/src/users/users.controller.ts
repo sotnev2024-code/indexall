@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { UsersService } from './users.service';
-import { RegisterDto } from '@indexall/shared';
+import { RegisterDto } from '../shared/types';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @ApiTags('users')

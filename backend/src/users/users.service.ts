@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './user.entity';
-import { RegisterDto } from '@indexall/shared';
+import { RegisterDto } from '../shared/types';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
