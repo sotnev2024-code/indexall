@@ -30,7 +30,7 @@ import { PaymentsModule } from './payments/payments.module';
       database: process.env.DATABASE_NAME || 'indexall',
       entities: [__dirname + '/**/*.entity{.ts,.js}', __dirname + '/**/*.entities{.ts,.js}'],
       migrations: [__dirname + '/database/migrations/*{.ts,.js}'],
-      synchronize: process.env.NODE_ENV !== 'production', // Auto-create tables in dev
+      synchronize: true, // Auto-create/update tables from entities
       logging: process.env.NODE_ENV === 'development',
     }),
     AuthModule,
