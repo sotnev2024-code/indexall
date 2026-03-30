@@ -33,8 +33,8 @@ export class SheetsController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Получить лист с строками' })
-  getOne(@Param('id', ParseIntPipe) id: number) {
-    return this.service.getSheetWithRows(id);
+  getOne(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    return this.service.getSheetWithRowsOwned(id, req.user.userId);
   }
 
   @Put(':id')

@@ -131,9 +131,14 @@ const SpecRow = memo(function SpecRow({
 
 // ── Page ──────────────────────────────────────────────────────
 export default function SpecPage() {
-  const { id } = useParams();
+  const { id: _routeId } = useParams();
   const router = useRouter();
   const { activeProjectId, setUnsaved: _setUnsaved } = useAppStore();
+
+  // Active sheet ID — drives all data loading without URL navigation
+  const [currentId, setCurrentId] = useState(() => Number(_routeId));
+  const currentIdRef = useRef(Number(_routeId));
+  useEffect(() => { currentIdRef.current = currentId; }, [currentId]);
 
   const setUnsaved = useCallback((v: boolean) => {
     _setUnsaved(v);
@@ -145,13 +150,13 @@ export default function SpecPage() {
         if (!hasUnsavedRef.current) return;
         const toSave = rowsRef.current.filter((r: any) => r.name || r.article);
         try {
-          await sheetsApi.saveRows(Number(id), toSave);
+          await sheetsApi.saveRows(currentIdRef.current, toSave);
           hasUnsavedRef.current = false;
           _setUnsaved(false);
         } catch { /* silent, user can save manually */ }
       }, 3000);
     }
-  }, [_setUnsaved, id]);
+  }, [_setUnsaved]);
   const [sheet, setSheet] = useState<any>(null);
   const [project, setProject] = useState<any>(null);
   const [rows, setRows] = useState<any[]>([]);
@@ -172,13 +177,13 @@ export default function SpecPage() {
   const [renameVal, setRenameVal] = useState('');
 
   // Undo / Redo stacks — persisted in sessionStorage per sheet
-  const undoKey = `undo_${id}`;
-  const redoKey = `redo_${id}`;
+  const undoKey = `undo_${currentId}`;
+  const redoKey = `redo_${currentId}`;
   const [undoStack, setUndoStack] = useState<any[][]>(() => {
-    try { const s = sessionStorage.getItem(`undo_${id}`); return s ? JSON.parse(s) : []; } catch { return []; }
+    try { const s = sessionStorage.getItem(`undo_${Number(_routeId)}`); return s ? JSON.parse(s) : []; } catch { return []; }
   });
   const [redoStack, setRedoStack] = useState<any[][]>(() => {
-    try { const s = sessionStorage.getItem(`redo_${id}`); return s ? JSON.parse(s) : []; } catch { return []; }
+    try { const s = sessionStorage.getItem(`redo_${Number(_routeId)}`); return s ? JSON.parse(s) : []; } catch { return []; }
   });
 
   const inputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
@@ -251,9 +256,9 @@ export default function SpecPage() {
       if (!hasUnsavedRef.current) return;
       const toSave = rowsRef.current.filter((r: any) => r.name || r.article);
       try {
-        await sheetsApi.saveRows(Number(id), toSave);
+        await sheetsApi.saveRows(currentIdRef.current, toSave);
         hasUnsavedRef.current = false;
-        setUnsaved(false);
+        _setUnsaved(false);
       } catch { /* silent */ }
     }
     const handleVisibility = () => { if (document.visibilityState === 'hidden') autoSaveNow(); };
@@ -266,15 +271,15 @@ export default function SpecPage() {
       window.removeEventListener('beforeunload', handleUnload);
       if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     };
-  }, [id, setUnsaved]);
+  }, [_setUnsaved]);
 
   useEffect(() => {
     loadData();
-    loadBrands();
+    if (currentId === Number(_routeId)) loadBrands(); // only on first mount
     const close = () => { setAcDrops(null); setStoreDropdown(null); setGlobalResults([]); };
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
-  }, [id]);
+  }, [currentId]);
 
   async function loadBrands() {
     try {
@@ -289,7 +294,8 @@ export default function SpecPage() {
 
   async function loadData() {
     try {
-      const { data: s } = await sheetsApi.getOne(Number(id));
+      setLoading(true);
+      const { data: s } = await sheetsApi.getOne(currentIdRef.current);
       setSheet(s);
       const dbRows = s.rows || [];
       const cleanNum = (v: any, fallback = '') => {
@@ -309,8 +315,16 @@ export default function SpecPage() {
       }
       setRows(padded);
       rowsRef.current = padded;
-      setUndoStack([]);
-      setRedoStack([]);
+      // Restore undo/redo from sessionStorage for this sheet
+      try {
+        const u = sessionStorage.getItem(`undo_${currentIdRef.current}`);
+        const r = sessionStorage.getItem(`redo_${currentIdRef.current}`);
+        setUndoStack(u ? JSON.parse(u) : []);
+        setRedoStack(r ? JSON.parse(r) : []);
+      } catch {
+        setUndoStack([]);
+        setRedoStack([]);
+      }
       if (activeProjectId) {
         const { data: p } = await projectsApi.getOne(activeProjectId);
         setProject(p);
@@ -501,7 +515,7 @@ export default function SpecPage() {
   async function saveRows() {
     try {
       const toSave = rows.filter(r => r.name || r.article);
-      await sheetsApi.saveRows(Number(id), toSave);
+      await sheetsApi.saveRows(currentIdRef.current, toSave);
       setUnsaved(false);
       toast.success('Сохранено');
     } catch { toast.error('Ошибка сохранения'); }
@@ -511,7 +525,7 @@ export default function SpecPage() {
     if (!activeProjectId) return;
     const choice = confirm('Экспортировать весь проект?\nОК — весь проект, Отмена — только этот лист');
     try {
-      const { data } = await exportApi.xlsx(activeProjectId, choice ? undefined : Number(id));
+      const { data } = await exportApi.xlsx(activeProjectId, choice ? undefined : currentIdRef.current);
       const url = URL.createObjectURL(new Blob([data]));
       const a = document.createElement('a'); a.href = url; a.download = 'спецификация.xlsx'; a.click();
       URL.revokeObjectURL(url);
@@ -622,7 +636,7 @@ export default function SpecPage() {
         {projectSheets.length > 0 && (
           <div className="sheet-tabs">
             {projectSheets.map((s: any) => (
-              <div key={s.id} className={`sheet-tab${Number(id) === s.id ? ' active' : ''}`}>
+              <div key={s.id} className={`sheet-tab${currentId === s.id ? ' active' : ''}`}>
                 {renamingSheetId === s.id ? (
                   <input
                     className="sheet-tab-rename"
@@ -636,13 +650,23 @@ export default function SpecPage() {
                 ) : (
                   <span
                     style={{ cursor: 'pointer' }}
-                    onClick={() => { if (Number(id) !== s.id) { const { activeProjectId: proj } = useAppStore.getState(); router.push(`/spec/${s.id}`); } }}
+                    onClick={async () => {
+                      if (currentId === s.id) return;
+                      // Auto-save current sheet before switching
+                      if (hasUnsavedRef.current) {
+                        const toSave = rowsRef.current.filter((r: any) => r.name || r.article);
+                        try { await sheetsApi.saveRows(currentIdRef.current, toSave); hasUnsavedRef.current = false; _setUnsaved(false); } catch {}
+                      }
+                      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+                      setCurrentId(s.id);
+                      window.history.replaceState(null, '', `/spec/${s.id}`);
+                    }}
                     onDoubleClick={() => startRenameSheet(s)}
                   >
                     {s.name}
                   </span>
                 )}
-                {Number(id) === s.id && (
+                {currentId === s.id && (
                   <button className="sheet-tab-edit" title="Переименовать" onClick={e => { e.stopPropagation(); startRenameSheet(s); }}>
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                   </button>

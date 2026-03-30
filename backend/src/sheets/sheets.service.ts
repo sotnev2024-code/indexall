@@ -46,6 +46,11 @@ export class SheetsService {
     return this.getSheetWithRows(sheet.id);
   }
 
+  async getSheetWithRowsOwned(sheetId: number, userId: number) {
+    await this.checkSheetOwner(sheetId, userId);
+    return this.getSheetWithRows(sheetId);
+  }
+
   async getSheetWithRows(sheetId: number) {
     const sheet = await this.sheetsRepo.findOne({
       where: { id: sheetId },
