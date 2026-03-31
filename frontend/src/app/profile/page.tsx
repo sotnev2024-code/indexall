@@ -326,7 +326,7 @@ export default function ProfilePage() {
   return (
     <>
       <Header breadcrumb="Профиль" />
-      <div style={{ maxWidth: 720, margin: '32px auto', padding: '0 20px' }}>
+      <div style={{ maxWidth: 720, margin: '72px auto 40px', padding: '0 20px' }}>
         <Suspense fallback={null}>
           <SuccessBanner onRefresh={refreshUser} />
         </Suspense>
