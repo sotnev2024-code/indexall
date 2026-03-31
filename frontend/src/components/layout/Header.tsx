@@ -41,7 +41,11 @@ export default function Header({ breadcrumb = 'Проекты', projectCost, sho
     <header className="app-header">
       {/* Logo */}
       <div className="logo-btn" onClick={handleLogoClick}>
-        <img src="/logo.png" alt="INDEXALL" style={{ height: 38, objectFit: 'contain' }} />
+        <img
+          src="/logo.png"
+          alt="INDEXALL"
+          style={{ height: 38, objectFit: 'contain', filter: 'invert(1)', mixBlendMode: 'screen' }}
+        />
       </div>
 
       {/* Undo/Redo */}
