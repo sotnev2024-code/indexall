@@ -521,6 +521,104 @@ export default function SpecPage() {
     } catch { toast.error('Ошибка сохранения'); }
   }
 
+  // ── Clipboard: copy sheet as TSV ──────────────────────────────
+  async function copySheetToClipboard() {
+    const COLS = ['Название', 'Бренд', 'Артикул', 'Кол-во', 'Ед.изм', 'Цена', 'Магазин', 'Коэф.', 'Итого'];
+    const dataRows = rows.filter(r => r.name || r.article);
+    const lines = [COLS.join('\t')];
+    dataRows.forEach(r => {
+      lines.push([
+        r.name || '', r.brand || '', r.article || '',
+        r.qty || '', r.unit || '', r.price || '',
+        r.store || '', r.coef || '1', r.total || '',
+      ].join('\t'));
+    });
+    const tsv = lines.join('\n');
+    try {
+      await navigator.clipboard.writeText(tsv);
+      toast.success(`Скопировано ${dataRows.length} строк — вставьте в Excel или Google Таблицы`);
+    } catch {
+      toast.error('Нет доступа к буферу обмена');
+    }
+  }
+
+  // ── Clipboard: paste TSV from Excel / Google Sheets ───────────
+  const HEADER_MAP: Record<string, string> = {
+    'название': 'name', 'name': 'name', 'наименование': 'name',
+    'бренд': 'brand', 'brand': 'brand', 'производитель': 'brand',
+    'артикул': 'article', 'article': 'article', 'арт': 'article',
+    'кол-во': 'qty', 'количество': 'qty', 'qty': 'qty', 'кол': 'qty',
+    'ед.изм': 'unit', 'ед. изм': 'unit', 'единица': 'unit', 'unit': 'unit',
+    'цена': 'price', 'price': 'price',
+    'магазин': 'store', 'store': 'store', 'поставщик': 'store',
+    'коэф.': 'coef', 'коэф': 'coef', 'коэффициент': 'coef', 'coef': 'coef',
+  };
+  const DEFAULT_ORDER = ['name', 'brand', 'article', 'qty', 'unit', 'price', 'store', 'coef'];
+
+  function parseTSV(text: string): any[] {
+    const lines = text.split('\n').map(l => l.replace(/\r$/, '').split('\t'));
+    if (lines.length === 0) return [];
+
+    // Detect if first row is headers
+    let fieldMap: string[] = DEFAULT_ORDER;
+    let startRow = 0;
+    const firstRow = lines[0].map(h => h.trim().toLowerCase());
+    const matchedCount = firstRow.filter(h => HEADER_MAP[h]).length;
+    if (matchedCount >= 2) {
+      fieldMap = firstRow.map(h => HEADER_MAP[h] || '');
+      startRow = 1;
+    }
+
+    return lines.slice(startRow)
+      .filter(cols => cols.some(c => c.trim()))
+      .map(cols => {
+        const row: any = { name: '', brand: '', article: '', qty: '', unit: 'шт', price: '', store: '', coef: '1' };
+        fieldMap.forEach((field, ci) => {
+          if (field && cols[ci] !== undefined) row[field] = cols[ci].trim();
+        });
+        row.total = calcTotal(row.price, row.qty, row.coef);
+        return row;
+      });
+  }
+
+  async function pasteFromClipboard() {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text.trim()) { toast('Буфер обмена пуст'); return; }
+      const parsed = parseTSV(text);
+      if (parsed.length === 0) { toast('Не удалось распознать данные'); return; }
+      pushHistorySnapshot(rowsRef.current);
+      setRows(prev => {
+        const existing = prev.filter(r => r.name || r.article);
+        const merged = [...existing, ...parsed];
+        while (merged.length < 25) merged.push({ name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ETM', coef: '1', total: '' });
+        return merged;
+      });
+      setUnsaved(true);
+      toast.success(`Вставлено ${parsed.length} строк`);
+    } catch {
+      toast.error('Нет доступа к буферу обмена. Используйте Ctrl+V в ячейке таблицы');
+    }
+  }
+
+  // Handle Ctrl+V on the table body — paste if clipboard has multi-column TSV
+  async function handleTablePaste(e: React.ClipboardEvent) {
+    const text = e.clipboardData.getData('text/plain');
+    if (!text.includes('\t')) return; // single cell — let browser handle it
+    const parsed = parseTSV(text);
+    if (parsed.length === 0) return;
+    e.preventDefault();
+    pushHistorySnapshot(rowsRef.current);
+    setRows(prev => {
+      const existing = prev.filter(r => r.name || r.article);
+      const merged = [...existing, ...parsed];
+      while (merged.length < 25) merged.push({ name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ETM', coef: '1', total: '' });
+      return merged;
+    });
+    setUnsaved(true);
+    toast.success(`Вставлено ${parsed.length} строк`);
+  }
+
   async function handleExport() {
     if (!activeProjectId) return;
     const choice = confirm('Экспортировать весь проект?\nОК — весь проект, Отмена — только этот лист');
@@ -565,6 +663,14 @@ export default function SpecPage() {
           <button className="btn-outline" onClick={() => router.push('/templates')}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             Вставить шаблон
+          </button>
+          <button className="btn-outline" title="Скопировать лист как таблицу (для Excel / Google Таблиц)" onClick={copySheetToClipboard}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            Копировать
+          </button>
+          <button className="btn-outline" title="Вставить строки из Excel / Google Таблиц (Ctrl+V)" onClick={pasteFromClipboard}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+            Вставить
           </button>
           <div style={{ flex: 1 }} />
           <div className="spec-summary">
@@ -695,7 +801,7 @@ export default function SpecPage() {
                 <th className="col-deadline">Срок</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody onPaste={handleTablePaste}>
               {rows.map((row, i) => (
                 <SpecRow
                   key={i}
