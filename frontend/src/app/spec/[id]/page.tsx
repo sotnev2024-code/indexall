@@ -176,6 +176,10 @@ export default function SpecPage() {
   const [renamingSheetId, setRenamingSheetId] = useState<number | null>(null);
   const [renameVal, setRenameVal] = useState('');
 
+  // Paste modal (fallback for HTTP — no clipboard API access)
+  const [showPasteModal, setShowPasteModal] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+
   // Undo / Redo stacks — persisted in sessionStorage per sheet
   const undoKey = `undo_${currentId}`;
   const redoKey = `redo_${currentId}`;
@@ -522,7 +526,7 @@ export default function SpecPage() {
   }
 
   // ── Clipboard: copy sheet as TSV ──────────────────────────────
-  async function copySheetToClipboard() {
+  function copySheetToClipboard() {
     const COLS = ['Название', 'Бренд', 'Артикул', 'Кол-во', 'Ед.изм', 'Цена', 'Магазин', 'Коэф.', 'Итого'];
     const dataRows = rows.filter(r => r.name || r.article);
     const lines = [COLS.join('\t')];
@@ -534,11 +538,31 @@ export default function SpecPage() {
       ].join('\t'));
     });
     const tsv = lines.join('\n');
+
+    // Try modern API first, fall back to execCommand
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(tsv)
+        .then(() => toast.success(`Скопировано ${dataRows.length} строк — вставьте в Excel или Google Таблицы`))
+        .catch(() => execCopy(tsv, dataRows.length));
+    } else {
+      execCopy(tsv, dataRows.length);
+    }
+  }
+
+  function execCopy(text: string, count: number) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
     try {
-      await navigator.clipboard.writeText(tsv);
-      toast.success(`Скопировано ${dataRows.length} строк — вставьте в Excel или Google Таблицы`);
+      document.execCommand('copy');
+      toast.success(`Скопировано ${count} строк — вставьте в Excel или Google Таблицы`);
     } catch {
-      toast.error('Нет доступа к буферу обмена');
+      toast.error('Не удалось скопировать. Выделите таблицу вручную (Ctrl+A) и скопируйте (Ctrl+C)');
+    } finally {
+      document.body.removeChild(ta);
     }
   }
 
@@ -581,24 +605,35 @@ export default function SpecPage() {
       });
   }
 
+  function applyParsedRows(text: string) {
+    if (!text.trim()) { toast('Буфер обмена пуст'); return; }
+    const parsed = parseTSV(text);
+    if (parsed.length === 0) { toast('Не удалось распознать данные — убедитесь, что скопированы строки из Excel или Google Таблиц'); return; }
+    pushHistorySnapshot(rowsRef.current);
+    setRows(prev => {
+      const existing = prev.filter(r => r.name || r.article);
+      const merged = [...existing, ...parsed];
+      while (merged.length < 25) merged.push({ name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ETM', coef: '1', total: '' });
+      return merged;
+    });
+    setUnsaved(true);
+    setShowPasteModal(false);
+    setPasteText('');
+    toast.success(`Вставлено ${parsed.length} строк`);
+  }
+
   async function pasteFromClipboard() {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (!text.trim()) { toast('Буфер обмена пуст'); return; }
-      const parsed = parseTSV(text);
-      if (parsed.length === 0) { toast('Не удалось распознать данные'); return; }
-      pushHistorySnapshot(rowsRef.current);
-      setRows(prev => {
-        const existing = prev.filter(r => r.name || r.article);
-        const merged = [...existing, ...parsed];
-        while (merged.length < 25) merged.push({ name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ETM', coef: '1', total: '' });
-        return merged;
-      });
-      setUnsaved(true);
-      toast.success(`Вставлено ${parsed.length} строк`);
-    } catch {
-      toast.error('Нет доступа к буферу обмена. Используйте Ctrl+V в ячейке таблицы');
+    // Try modern Clipboard API (works on HTTPS)
+    if (navigator.clipboard?.readText) {
+      try {
+        const text = await navigator.clipboard.readText();
+        applyParsedRows(text);
+        return;
+      } catch { /* fall through to modal */ }
     }
+    // Fallback: show modal where user pastes manually
+    setPasteText('');
+    setShowPasteModal(true);
   }
 
   // Handle Ctrl+V on the table body — paste if clipboard has multi-column TSV
@@ -858,6 +893,41 @@ export default function SpecPage() {
               <span className="store-offer-avail">{o.availability || ''}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Paste modal — fallback for HTTP (no clipboard API) */}
+      {showPasteModal && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setShowPasteModal(false)}
+        >
+          <div
+            style={{ background: '#fff', borderRadius: 12, padding: 28, width: 560, maxWidth: '95vw', boxShadow: '0 8px 40px rgba(0,0,0,0.18)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 700 }}>Вставить из Excel / Google Таблиц</h3>
+            <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--muted)' }}>
+              Скопируйте строки в Excel или Google Таблицах (Ctrl+C), затем нажмите в поле ниже и вставьте (Ctrl+V):
+            </p>
+            <textarea
+              autoFocus
+              value={pasteText}
+              onChange={e => setPasteText(e.target.value)}
+              onPaste={e => {
+                const text = e.clipboardData.getData('text/plain');
+                e.preventDefault();
+                setPasteText(text);
+                setTimeout(() => applyParsedRows(text), 0);
+              }}
+              placeholder="Нажмите сюда и вставьте данные (Ctrl+V)"
+              style={{ width: '100%', minHeight: 120, fontSize: 12, fontFamily: 'monospace', border: '1px solid var(--border)', borderRadius: 6, padding: 10, resize: 'vertical', boxSizing: 'border-box' }}
+            />
+            <div style={{ display: 'flex', gap: 10, marginTop: 14, justifyContent: 'flex-end' }}>
+              <button className="btn-outline" onClick={() => setShowPasteModal(false)}>Отмена</button>
+              <button className="btn-primary" onClick={() => applyParsedRows(pasteText)}>Вставить</button>
+            </div>
+          </div>
         </div>
       )}
     </>
