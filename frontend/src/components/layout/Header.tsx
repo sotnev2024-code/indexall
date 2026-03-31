@@ -108,7 +108,6 @@ export default function Header({ breadcrumb = 'Проекты', projectCost, sho
                 )}
               </div>
               <div className="user-menu-item" onClick={() => router.push('/profile')}>Профиль</div>
-              <div className="user-menu-item" onClick={() => router.push('/reset-password')}>Изменить пароль</div>
               <div className="user-menu-item" onClick={logout}>Выход</div>
             </div>
           )}
