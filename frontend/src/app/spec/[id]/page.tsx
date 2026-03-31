@@ -95,15 +95,14 @@ const SpecRow = memo(function SpecRow({
       </td>
       <td className="col-store">
         <select
-          value={row.store || 'ETM'}
+          value={row.store ?? ''}
           onChange={e => onUpdate(idx, 'store', e.target.value)}
           onClick={e => onStoreClick(idx, e.target as HTMLSelectElement)}
           onFocus={onFocus}
           onBlur={onBlur}
         >
-          <option value="ETM">ETM</option>
-          <option value="EKF">EKF</option>
           <option value="ЭТМ">ЭТМ</option>
+          <option value="EKF">EKF</option>
           <option value="">—</option>
         </select>
       </td>
@@ -133,7 +132,7 @@ const SpecRow = memo(function SpecRow({
 export default function SpecPage() {
   const { id: _routeId } = useParams();
   const router = useRouter();
-  const { activeProjectId, setUnsaved: _setUnsaved } = useAppStore();
+  const { activeProjectId, setUnsaved: _setUnsaved, setActive } = useAppStore();
 
   // Active sheet ID — drives all data loading without URL navigation
   const [currentId, setCurrentId] = useState(() => Number(_routeId));
@@ -196,6 +195,7 @@ export default function SpecPage() {
   const rowsRef = useRef<any[]>([]);
   const hasUnsavedRef = useRef(false);
   const focusSnapshotRef = useRef<any[] | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   useEffect(() => { rowsRef.current = rows; }, [rows]);
 
   // Persist undo/redo stacks to sessionStorage on every change
@@ -315,7 +315,7 @@ export default function SpecPage() {
       });
       const padded = [...normalizedRows];
       while (padded.length < 25) {
-        padded.push({ row_number: padded.length + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ETM', coef: '1', total: '', deadline: '' });
+        padded.push({ row_number: padded.length + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ЭТМ', coef: '1', total: '', deadline: '' });
       }
       setRows(padded);
       rowsRef.current = padded;
@@ -329,9 +329,13 @@ export default function SpecPage() {
         setUndoStack([]);
         setRedoStack([]);
       }
-      if (activeProjectId) {
-        const { data: p } = await projectsApi.getOne(activeProjectId);
+      // Load project — use activeProjectId from store or fall back to sheet's projectId
+      const projId = activeProjectId || s.projectId;
+      if (projId) {
+        const { data: p } = await projectsApi.getOne(projId);
         setProject(p);
+        // Always keep store in sync so catalog page can find the open sheet after refresh
+        setActive(projId, currentIdRef.current);
       }
     } catch { toast.error('Ошибка загрузки листа'); }
     finally { setLoading(false); }
@@ -377,7 +381,7 @@ export default function SpecPage() {
         article: p.article || '',
         unit: p.unit || '',
         price: p.price ? String(p.price) : '',
-        store: 'ETM',
+        store: 'ЭТМ',
         auto_price: true,
         total: calcTotal(p.price ? String(p.price) : '', q, c),
       };
@@ -401,7 +405,7 @@ export default function SpecPage() {
         article: p.article || '',
         unit: p.unit || '',
         price: p.price ? String(p.price) : '',
-        store: 'ETM',
+        store: 'ЭТМ',
         auto_price: true,
         total: calcTotal(p.price ? String(p.price) : '', next[targetIdx].qty || '', next[targetIdx].coef || '1'),
       };
@@ -613,11 +617,11 @@ export default function SpecPage() {
     setRows(prev => {
       const existing = prev.filter(r => r.name || r.article);
       const merged = [...existing, ...parsed];
-      while (merged.length < 25) merged.push({ name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ETM', coef: '1', total: '' });
-      return merged;
-    });
-    setUnsaved(true);
-    setShowPasteModal(false);
+      while (merged.length < 25) merged.push({ name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ЭТМ', coef: '1', total: '' });
+        return merged;
+      });
+      setUnsaved(true);
+      setShowPasteModal(false);
     setPasteText('');
     toast.success(`Вставлено ${parsed.length} строк`);
   }
@@ -647,7 +651,7 @@ export default function SpecPage() {
     setRows(prev => {
       const existing = prev.filter(r => r.name || r.article);
       const merged = [...existing, ...parsed];
-      while (merged.length < 25) merged.push({ name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ETM', coef: '1', total: '' });
+      while (merged.length < 25) merged.push({ name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ЭТМ', coef: '1', total: '' });
       return merged;
     });
     setUnsaved(true);
@@ -663,6 +667,39 @@ export default function SpecPage() {
       const a = document.createElement('a'); a.href = url; a.download = 'спецификация.xlsx'; a.click();
       URL.revokeObjectURL(url);
     } catch { toast.error('Ошибка экспорта'); }
+  }
+
+  async function handleRefreshPrices() {
+    const targets = rowsRef.current
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => r.article && r.auto_price !== false);
+    if (targets.length === 0) { toast('Нет строк с артикулом для обновления цены'); return; }
+    setRefreshing(true);
+    let updated = 0;
+    const snap = JSON.parse(JSON.stringify(rowsRef.current));
+    for (const { r, i } of targets) {
+      try {
+        const { data: offers } = await storesApi.getOffersByArticle(r.article);
+        const offer = (offers as any[]).find((o: any) => o.price);
+        if (offer?.price) {
+          setRows(prev => {
+            const next = [...prev];
+            const price = String(offer.price);
+            next[i] = { ...next[i], price, total: calcTotal(price, next[i].qty, next[i].coef), store: offer.store_name || next[i].store };
+            return next;
+          });
+          updated++;
+        }
+      } catch { /* skip this row */ }
+    }
+    setRefreshing(false);
+    if (updated > 0) {
+      pushHistorySnapshot(snap);
+      setUnsaved(true);
+      toast.success(`Обновлено цен: ${updated} из ${targets.length}`);
+    } else {
+      toast('Актуальные цены не найдены');
+    }
   }
 
   const sheetTotal = rows.reduce((s, r) => {
@@ -720,6 +757,15 @@ export default function SpecPage() {
             </span>
             <button className="btn-outline" style={{ marginLeft: 8, padding: '5px 10px', fontSize: 12 }} onClick={handleExport}>
               ↓ Excel
+            </button>
+            <button
+              className="btn-outline"
+              style={{ marginLeft: 6, padding: '5px 10px', fontSize: 12 }}
+              onClick={handleRefreshPrices}
+              disabled={refreshing}
+              title="Обновить цены по артикулам из ЭТМ"
+            >
+              {refreshing ? '…' : '↻ Цены'}
             </button>
           </div>
         </div>

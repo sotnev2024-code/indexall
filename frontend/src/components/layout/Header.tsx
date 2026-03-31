@@ -41,12 +41,7 @@ export default function Header({ breadcrumb = 'Проекты', projectCost, sho
     <header className="app-header">
       {/* Logo */}
       <div className="logo-btn" onClick={handleLogoClick}>
-        <div className="logo-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="#1a1a1a" strokeWidth="2.5" width="20" height="20">
-            <polygon points="13,2 3,14 12,14 11,22 21,10 12,10" />
-          </svg>
-        </div>
-        <span className="menu-label">INDEXALL</span>
+        <img src="/logo.png" alt="INDEXALL" style={{ height: 38, objectFit: 'contain' }} />
       </div>
 
       {/* Undo/Redo */}

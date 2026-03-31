@@ -198,7 +198,7 @@ export default function CatalogPage() {
         name: product.name, brand: product.manufacturer?.name || '',
         article: product.article || '', unit: product.unit || 'шт',
         price: product.price ? String(product.price) : '',
-        store: 'ETM', qty: '1', coef: '1',
+        store: 'ЭТМ', qty: '1', coef: '1',
       }]);
       toast.success(`«${product.name.slice(0, 40)}» добавлен в лист`);
     } catch { toast.error('Ошибка добавления в лист'); }

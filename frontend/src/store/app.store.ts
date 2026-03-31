@@ -25,9 +25,15 @@ export const useAppStore = create<AppStore>((set) => ({
     localStorage.removeItem('token');
     set({ user: null, token: null });
   },
-  activeProjectId: null,
-  activeSheetId: null,
-  setActive: (projectId, sheetId) => set({ activeProjectId: projectId, activeSheetId: sheetId }),
+  activeProjectId: typeof window !== 'undefined' ? (Number(localStorage.getItem('activeProjectId')) || null) : null,
+  activeSheetId:   typeof window !== 'undefined' ? (Number(localStorage.getItem('activeSheetId'))   || null) : null,
+  setActive: (projectId, sheetId) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('activeProjectId', String(projectId));
+      localStorage.setItem('activeSheetId',   String(sheetId));
+    }
+    set({ activeProjectId: projectId, activeSheetId: sheetId });
+  },
   hasUnsaved: false,
   setUnsaved: (v) => set({ hasUnsaved: v }),
 }));
