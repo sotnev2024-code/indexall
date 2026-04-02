@@ -310,17 +310,18 @@ export default function SpecPage() {
   }, [setUnsaved]);
 
   // ── Global keydown: Ctrl+Z/Y/C/V ─────────────────────────────
+  // Use e.code (physical key position) instead of e.key to support
+  // non-Latin keyboard layouts (Russian, etc.) where e.key = 'с'/'я'/etc.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!(e.ctrlKey || e.metaKey)) return;
-      if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); handleUndo(); }
-      else if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) { e.preventDefault(); handleRedo(); }
-      else if (e.key === 'c' && !isEditingRef.current && activeCellRef.current) {
-        // Ctrl+C: copy range (only when not editing a cell)
-        // Don't prevent default if user is selecting text in an input
+      const code = e.code;
+      if ((code === 'KeyZ') && !e.shiftKey) { e.preventDefault(); handleUndo(); }
+      else if ((code === 'KeyY') || (code === 'KeyZ' && e.shiftKey)) { e.preventDefault(); handleRedo(); }
+      else if (code === 'KeyC' && !isEditingRef.current && activeCellRef.current) {
         e.preventDefault();
         copyRangeWithRefs();
-      } else if (e.key === 'v' && !isEditingRef.current && activeCellRef.current) {
+      } else if (code === 'KeyV' && !isEditingRef.current && activeCellRef.current) {
         e.preventDefault();
         pasteAtActiveCell();
       }
@@ -868,9 +869,11 @@ export default function SpecPage() {
     const isCtrl = e.ctrlKey || e.metaKey;
 
     if (isCtrl) {
-      if (e.key === 'c') { e.preventDefault(); copyRange(); }
-      else if (e.key === 'v') { e.preventDefault(); pasteAtActiveCell(); }
-      else if (e.key === 'a') {
+      // Use e.code (physical key) to support non-Latin layouts (Russian, etc.)
+      const code = e.code;
+      if (code === 'KeyC') { e.preventDefault(); copyRange(); }
+      else if (code === 'KeyV') { e.preventDefault(); pasteAtActiveCell(); }
+      else if (code === 'KeyA') {
         e.preventDefault();
         const first = { row: 0, col: 0 };
         const last  = { row: rowsRef.current.length - 1, col: EDITABLE_COLS.length - 1 };
