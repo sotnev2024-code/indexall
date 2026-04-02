@@ -145,16 +145,6 @@ export default function LoginPage() {
             {loading ? 'Вход…' : 'Войти'}
           </button>
         </form>
-
-        <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-          <p className="text-xs text-muted mb-2 font-semibold">Демо доступ:</p>
-          <code className="text-xs bg-white px-2 py-1 rounded block mb-1">
-            Email: demo@indexall.com
-          </code>
-          <code className="text-xs bg-white px-2 py-1 rounded block">
-            Password: demo123
-          </code>
-        </div>
       </div>
     </div>
   );
