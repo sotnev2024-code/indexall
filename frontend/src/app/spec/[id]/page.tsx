@@ -696,6 +696,22 @@ export default function SpecPage() {
   }, [updateRow]);
 
   function exitEditMode() {
+    // Normalize dot → comma in numeric fields on exit (Russian locale display)
+    if (activeCellRef.current) {
+      const { row, col } = activeCellRef.current;
+      const field = EDITABLE_COLS[col] as string;
+      if (['price', 'qty', 'coef'].includes(field)) {
+        const val = String(rowsRef.current[row]?.[field] ?? '');
+        const normalized = val.replace('.', ',');
+        if (normalized !== val) {
+          setRows(prev => {
+            const next = [...prev];
+            next[row] = { ...next[row], [field]: normalized };
+            return next;
+          });
+        }
+      }
+    }
     setIsEditing(false);
     isEditingRef.current = false;
     setTimeout(() => tableWrapRef.current?.focus(), 0);
