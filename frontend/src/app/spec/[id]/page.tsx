@@ -251,8 +251,16 @@ export default function SpecPage() {
   const focusSnapshotRef = useRef<any[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   useEffect(() => { rowsRef.current = rows; }, [rows]);
-  useEffect(() => { selAnchorRef.current = selAnchor; }, [selAnchor]);
-  useEffect(() => { selFocusRef.current  = selFocus;  }, [selFocus]);
+
+  // Sync helpers: update both React state AND ref synchronously
+  function updSelAnchor(cell: { row: number; col: number } | null) {
+    selAnchorRef.current = cell;
+    setSelAnchor(cell);
+  }
+  function updSelFocus(cell: { row: number; col: number } | null) {
+    selFocusRef.current = cell;
+    setSelFocus(cell);
+  }
 
   useEffect(() => {
     try { sessionStorage.setItem(undoKey, JSON.stringify(undoStack)); } catch { /* quota exceeded */ }
@@ -631,14 +639,14 @@ export default function SpecPage() {
     setIsEditing(false);
     isEditingRef.current = false;
 
-    if (extend && selAnchor) {
-      setSelFocus(cell);
+    if (extend && selAnchorRef.current) {
+      updSelFocus(cell);
     } else {
-      setSelAnchor(cell);
-      setSelFocus(cell);
+      updSelAnchor(cell);
+      updSelFocus(cell);
     }
     setTimeout(() => tableWrapRef.current?.focus(), 0);
-  }, [selAnchor]);
+  }, []);
 
   // Enter edit mode for the active cell
   const enterEditMode = useCallback((initialChar?: string) => {
@@ -716,19 +724,33 @@ export default function SpecPage() {
     const text = lines.join('\n');
     const rowCount = r2 - r1 + 1, colCount = c2 - c1 + 1;
 
+    const showToast = () => toast.success(
+      rowCount === 1 && colCount === 1
+        ? 'Ячейка скопирована'
+        : `Скопировано: ${rowCount} × ${colCount}`
+    );
+
     if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(text).then(() => {
-        if (rowCount > 1 || colCount > 1) toast.success(`Скопировано: ${rowCount} × ${colCount}`);
-      });
+      navigator.clipboard.writeText(text)
+        .then(showToast)
+        .catch(() => {
+          // Clipboard API blocked (HTTP / permissions) — fallback
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.cssText = 'position:fixed;top:-9999px;opacity:0';
+          document.body.appendChild(ta);
+          ta.focus(); ta.select();
+          try { document.execCommand('copy'); showToast(); } catch { toast.error('Не удалось скопировать'); }
+          document.body.removeChild(ta);
+        });
     } else {
       const ta = document.createElement('textarea');
       ta.value = text;
       ta.style.cssText = 'position:fixed;top:-9999px;opacity:0';
       document.body.appendChild(ta);
       ta.focus(); ta.select();
-      try { document.execCommand('copy'); } catch { /* ignore */ }
+      try { document.execCommand('copy'); showToast(); } catch { toast.error('Не удалось скопировать'); }
       document.body.removeChild(ta);
-      if (rowCount > 1 || colCount > 1) toast.success(`Скопировано: ${rowCount} × ${colCount}`);
     }
   }
 
@@ -782,11 +804,11 @@ export default function SpecPage() {
     e.preventDefault(); // prevent native focus on input
     isDraggingRef.current = true;
 
-    if (e.shiftKey && selAnchor) {
+    if (e.shiftKey && selAnchorRef.current) {
       const cell = { row: rowIdx, col: colIdx };
       setActiveCell(cell);
       activeCellRef.current = cell;
-      setSelFocus(cell);
+      updSelFocus(cell);
       setIsEditing(false);
       isEditingRef.current = false;
       tableWrapRef.current?.focus();
@@ -794,28 +816,28 @@ export default function SpecPage() {
       const cell = { row: rowIdx, col: colIdx };
       setActiveCell(cell);
       activeCellRef.current = cell;
-      setSelAnchor(cell);
-      setSelFocus(cell);
+      updSelAnchor(cell);
+      updSelFocus(cell);
       setIsEditing(false);
       isEditingRef.current = false;
       tableWrapRef.current?.focus();
     }
-  }, [selAnchor]);
+  }, []);
 
   const handleCellMouseEnter = useCallback((rowIdx: number, colIdx: number) => {
     if (!isDraggingRef.current) return;
     const cell = { row: rowIdx, col: colIdx };
     setActiveCell(cell);
     activeCellRef.current = cell;
-    setSelFocus(cell);
+    updSelFocus(cell);
   }, []);
 
   const handleCellDoubleClick = useCallback((rowIdx: number, colIdx: number) => {
     const cell = { row: rowIdx, col: colIdx };
     setActiveCell(cell);
     activeCellRef.current = cell;
-    setSelAnchor(cell);
-    setSelFocus(cell);
+    updSelAnchor(cell);
+    updSelFocus(cell);
     setIsEditing(false);
     isEditingRef.current = false;
     enterEditMode();
@@ -827,10 +849,8 @@ export default function SpecPage() {
     e.preventDefault();
     setActiveCell(null);
     activeCellRef.current = null;
-    setSelAnchor(null);
-    setSelFocus(null);
-    selAnchorRef.current = null;
-    selFocusRef.current = null;
+    updSelAnchor(null);
+    updSelFocus(null);
     setIsEditing(false);
     isEditingRef.current = false;
     isDraggingRef.current = false;
@@ -850,9 +870,12 @@ export default function SpecPage() {
       else if (e.key === 'v') { e.preventDefault(); pasteAtActiveCell(); }
       else if (e.key === 'a') {
         e.preventDefault();
-        // Select all cells
-        setSelAnchor({ row: 0, col: 0 });
-        setSelFocus({ row: rowsRef.current.length - 1, col: EDITABLE_COLS.length - 1 });
+        const first = { row: 0, col: 0 };
+        const last  = { row: rowsRef.current.length - 1, col: EDITABLE_COLS.length - 1 };
+        setActiveCell(first);
+        activeCellRef.current = first;
+        updSelAnchor(first);
+        updSelFocus(last);
       }
       return;
     }
@@ -877,8 +900,8 @@ export default function SpecPage() {
       case 'Escape':
         setActiveCell(null);
         activeCellRef.current = null;
-        setSelAnchor(null);
-        setSelFocus(null);
+        updSelAnchor(null);
+        updSelFocus(null);
         break;
       default:
         // Printable char → enter edit mode immediately
