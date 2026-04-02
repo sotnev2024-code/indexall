@@ -709,10 +709,54 @@ export default function SpecPage() {
 
   const projectSheets: any[] = project?.sheets || [];
 
-  if (loading) return <div style={{ paddingTop: 80, textAlign: 'center', color: 'var(--muted)' }}>Загрузка…</div>;
+  if (loading) return (
+    <div className="spec-screen">
+      {/* Toolbar skeleton */}
+      <div className="spec-toolbar">
+        {[140, 120, 90, 80].map((w, i) => (
+          <div key={i} className="skeleton" style={{ width: w, height: 32, borderRadius: 6 }} />
+        ))}
+        <div style={{ flex: 1 }} />
+        <div className="skeleton" style={{ width: 260, height: 20, borderRadius: 4 }} />
+      </div>
+      {/* Brand bar skeleton */}
+      <div className="spec-brand-bar">
+        {[70, 50, 55, 70, 65, 55, 65, 50].map((w, i) => (
+          <div key={i} className="skeleton" style={{ width: w, height: 26, borderRadius: 13 }} />
+        ))}
+      </div>
+      {/* Sheet tabs skeleton */}
+      <div className="sheet-tabs">
+        {[90, 80, 100].map((w, i) => (
+          <div key={i} style={{ padding: '8px 14px', display: 'flex', alignItems: 'center' }}>
+            <div className="skeleton" style={{ width: w, height: 16, borderRadius: 4 }} />
+          </div>
+        ))}
+      </div>
+      {/* Table skeleton */}
+      <div className="spec-table-wrap">
+        <div style={{ display: 'flex', gap: 1, padding: '8px 6px', borderBottom: '2px solid var(--border)', background: 'var(--white)' }}>
+          {[30, 360, 90, 120, 60, 60, 80, 90, 80, 90].map((w, i) => (
+            <div key={i} className="skeleton" style={{ width: w, height: 14, borderRadius: 3, flexShrink: 0 }} />
+          ))}
+        </div>
+        {Array.from({ length: 18 }).map((_, i) => (
+          <div key={i} style={{ display: 'flex', gap: 1, padding: '7px 6px', background: i % 2 === 0 ? 'var(--row-odd)' : 'var(--row-even)', borderBottom: '1px solid #f0f0f0' }}>
+            <div className="skeleton" style={{ width: 30, height: 13, borderRadius: 3, flexShrink: 0, opacity: 0.5 }} />
+            <div className="skeleton" style={{ width: 360 - (i % 3) * 40, height: 13, borderRadius: 3, flexShrink: 0 }} />
+            <div className="skeleton" style={{ width: 90, height: 13, borderRadius: 3, flexShrink: 0, opacity: i % 4 === 0 ? 0 : 0.7 }} />
+            <div className="skeleton" style={{ width: 120 - (i % 2) * 30, height: 13, borderRadius: 3, flexShrink: 0, opacity: i % 3 === 0 ? 0.4 : 1 }} />
+            {[60, 60, 80, 90, 80, 90].map((w, j) => (
+              <div key={j} className="skeleton" style={{ width: w, height: 13, borderRadius: 3, flexShrink: 0, opacity: i % 4 === 0 && j > 2 ? 0 : 0.6 }} />
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
-    <>
+    <div className="page-fade-in">
       <Header
         breadcrumb={`Проект: ${project?.name || '…'}`}
         projectCost={project ? `Стоимость: ${fmtNum(project.total || 0)} ₽` : ''}
@@ -976,6 +1020,6 @@ export default function SpecPage() {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

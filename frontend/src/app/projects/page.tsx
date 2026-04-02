@@ -128,6 +128,7 @@ export default function ProjectsPage() {
 
   function openSheet(projId: number, sheetId: number) {
     setActive(projId, sheetId);
+    window.dispatchEvent(new Event('navigation:start'));
     router.push(`/spec/${sheetId}`);
   }
 

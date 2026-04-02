@@ -1164,3 +1164,40 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .store-offer-name { font-weight: 600; min-width: 50px; }
 .store-offer-price { flex: 1; text-align: right; font-weight: 600; }
 .store-offer-avail { font-size: 11px; color: var(--muted); }
+
+/* ===== NAVIGATION PROGRESS BAR ===== */
+.nav-progress-bar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  z-index: 9999;
+  pointer-events: none;
+}
+.nav-progress-fill {
+  height: 100%;
+  background: var(--yellow);
+  box-shadow: 0 0 8px rgba(245, 200, 0, 0.7);
+  transition: width 0.25s ease-out;
+  will-change: width;
+}
+
+/* ===== SKELETON SHIMMER ===== */
+@keyframes skeleton-shimmer {
+  0%   { background-position: -600px 0; }
+  100% { background-position: 600px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #e8e8e8 25%, #f4f4f4 50%, #e8e8e8 75%);
+  background-size: 1200px 100%;
+  animation: skeleton-shimmer 1.6s infinite linear;
+  border-radius: 4px;
+}
+
+/* ===== PAGE FADE-IN ===== */
+@keyframes page-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.page-fade-in {
+  animation: page-fade-in 0.2s ease-out both;
+}

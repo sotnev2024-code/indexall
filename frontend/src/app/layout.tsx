@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import { Toaster } from 'react-hot-toast';
 import Providers from '@/components/Providers';
+import NavigationProgress from '@/components/NavigationProgress';
 
 const inter = Inter({ subsets: ['latin', 'cyrillic'] });
 
@@ -16,6 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="ru">
       <body className={inter.className}>
         <Providers>
+          <NavigationProgress />
           {children}
           <Toaster position="bottom-right" toastOptions={{ duration: 2500 }} />
         </Providers>
