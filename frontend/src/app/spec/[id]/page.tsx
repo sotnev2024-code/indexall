@@ -36,6 +36,7 @@ interface RowProps {
   inputRef: (el: HTMLElement | null, key: string) => void;
   onFocus: () => void;
   onBlur: () => void;
+  onNonEditableMouseDown: (e: React.MouseEvent) => void;
   // Selection
   activeCellRow: number;
   activeCellCol: number;
@@ -48,6 +49,7 @@ interface RowProps {
 
 const SpecRow = memo(function SpecRow({
   row, idx, isFirst, onUpdate, onSearch, onInputKeyDown, onStoreClick, inputRef, onFocus, onBlur,
+  onNonEditableMouseDown,
   activeCellRow, activeCellCol, isEditing, selR1, selC1, selR2, selC2,
   onCellMouseDown, onCellMouseEnter, onCellDoubleClick,
 }: RowProps) {
@@ -80,7 +82,7 @@ const SpecRow = memo(function SpecRow({
 
   return (
     <tr>
-      <td className="col-num">{idx + 1}</td>
+      <td className="col-num" onMouseDown={onNonEditableMouseDown}>{idx + 1}</td>
 
       <td {...tdAttrs(0, 'col-name', { position: 'relative' })}>
         <input
@@ -156,7 +158,9 @@ const SpecRow = memo(function SpecRow({
         />
       </td>
 
-      <td className="col-total">{row.total && row.total !== 'NaN' ? row.total : ''}</td>
+      <td className="col-total" onMouseDown={onNonEditableMouseDown}>
+        {row.total && row.total !== 'NaN' ? row.total : ''}
+      </td>
 
       <td {...tdAttrs(8, 'col-deadline')}>
         <input
@@ -233,6 +237,8 @@ export default function SpecPage() {
   const [isEditing, setIsEditing] = useState(false);
 
   const activeCellRef = useRef<{ row: number; col: number } | null>(null);
+  const selAnchorRef = useRef<{ row: number; col: number } | null>(null);
+  const selFocusRef  = useRef<{ row: number; col: number } | null>(null);
   const isEditingRef = useRef(false);
   const isDraggingRef = useRef(false);
   const tableWrapRef = useRef<HTMLDivElement>(null);
@@ -245,6 +251,8 @@ export default function SpecPage() {
   const focusSnapshotRef = useRef<any[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   useEffect(() => { rowsRef.current = rows; }, [rows]);
+  useEffect(() => { selAnchorRef.current = selAnchor; }, [selAnchor]);
+  useEffect(() => { selFocusRef.current  = selFocus;  }, [selFocus]);
 
   useEffect(() => {
     try { sessionStorage.setItem(undoKey, JSON.stringify(undoStack)); } catch { /* quota exceeded */ }
@@ -297,9 +305,19 @@ export default function SpecPage() {
       if (!(e.ctrlKey || e.metaKey)) return;
       if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); handleUndo(); }
       else if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) { e.preventDefault(); handleRedo(); }
+      else if (e.key === 'c' && !isEditingRef.current && activeCellRef.current) {
+        // Ctrl+C: copy range (only when not editing a cell)
+        // Don't prevent default if user is selecting text in an input
+        e.preventDefault();
+        copyRangeWithRefs();
+      } else if (e.key === 'v' && !isEditingRef.current && activeCellRef.current) {
+        e.preventDefault();
+        pasteAtActiveCell();
+      }
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handleUndo, handleRedo]);
 
   // ── Global mouseup — end drag selection ──────────────────────
@@ -575,13 +593,25 @@ export default function SpecPage() {
     };
   }
 
-  // Returns selection bounds (sentinel values mean nothing is selected)
+  // Returns selection bounds from React state (for rendering)
   function getSelBounds() {
     if (!selAnchor || !selFocus) {
       if (!activeCell) return { r1: -1, c1: -1, r2: -2, c2: -2 };
       return { r1: activeCell.row, c1: activeCell.col, r2: activeCell.row, c2: activeCell.col };
     }
     return normalizeRange(selAnchor, selFocus);
+  }
+
+  // Returns selection bounds from refs (for event handlers — avoids stale closures)
+  function getSelBoundsFromRefs() {
+    const anchor = selAnchorRef.current;
+    const focus  = selFocusRef.current;
+    const cell   = activeCellRef.current;
+    if (!anchor || !focus) {
+      if (!cell) return { r1: -1, c1: -1, r2: -2, c2: -2 };
+      return { r1: cell.row, c1: cell.col, r2: cell.row, c2: cell.col };
+    }
+    return normalizeRange(anchor, focus);
   }
 
   // Move active cell (navigation mode)
@@ -647,7 +677,7 @@ export default function SpecPage() {
 
   // Clear values in selected range (Delete/Backspace)
   function clearRange() {
-    const { r1, c1, r2, c2 } = getSelBounds();
+    const { r1, c1, r2, c2 } = getSelBoundsFromRefs();
     if (r1 < 0) return;
     pushHistorySnapshot(rowsRef.current);
     setRows(prev => {
@@ -666,9 +696,14 @@ export default function SpecPage() {
     setUnsaved(true);
   }
 
-  // Copy selected range as TSV
+  // Copy selected range as TSV — uses state (called from JSX handlers)
   function copyRange() {
-    const { r1, c1, r2, c2 } = getSelBounds();
+    copyRangeWithRefs();
+  }
+
+  // Copy using refs — safe to call from global event listeners (no stale closure)
+  function copyRangeWithRefs() {
+    const { r1, c1, r2, c2 } = getSelBoundsFromRefs();
     if (r1 < 0) return;
     const lines: string[] = [];
     for (let r = r1; r <= r2; r++) {
@@ -785,6 +820,22 @@ export default function SpecPage() {
     isEditingRef.current = false;
     enterEditMode();
   }, [enterEditMode]);
+
+  // Non-editable columns (col-num, col-total): clicking them clears selection
+  const handleNonEditableCellMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    setActiveCell(null);
+    activeCellRef.current = null;
+    setSelAnchor(null);
+    setSelFocus(null);
+    selAnchorRef.current = null;
+    selFocusRef.current = null;
+    setIsEditing(false);
+    isEditingRef.current = false;
+    isDraggingRef.current = false;
+    tableWrapRef.current?.focus();
+  }, []);
 
   // ── Keyboard handler for the table wrapper (navigation mode) ──
   function handleTableWrapKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
@@ -1285,6 +1336,7 @@ export default function SpecPage() {
                   inputRef={setInputRef}
                   onFocus={handleCellFocus}
                   onBlur={handleCellBlur}
+                  onNonEditableMouseDown={handleNonEditableCellMouseDown}
                   activeCellRow={activeCell?.row ?? -1}
                   activeCellCol={activeCell?.col ?? -1}
                   isEditing={isEditing}
