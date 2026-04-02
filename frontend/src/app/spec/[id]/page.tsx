@@ -56,6 +56,8 @@ const SpecRow = memo(function SpecRow({
   const isActive = (col: number) => activeCellRow === idx && activeCellCol === col;
   const inRange = (col: number) => idx >= selR1 && idx <= selR2 && col >= selC1 && col <= selC2;
   const cellEditing = (col: number) => isActive(col) && isEditing;
+  // "Итого" sits between coef (col 7) and deadline (col 8) — highlight when selection spans both sides
+  const isTotalInRange = idx >= selR1 && idx <= selR2 && selC1 <= 7 && selC2 >= 8;
 
   const tdAttrs = (col: number, baseClass: string, extraStyle?: React.CSSProperties) => {
     const classes = [baseClass];
@@ -158,7 +160,7 @@ const SpecRow = memo(function SpecRow({
         />
       </td>
 
-      <td className="col-total" onMouseDown={onNonEditableMouseDown}>
+      <td className={`col-total${isTotalInRange ? ' cell-selected' : ''}`}>
         {row.total && row.total !== 'NaN' ? row.total : ''}
       </td>
 
