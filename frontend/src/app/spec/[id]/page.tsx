@@ -17,10 +17,17 @@ function fmtNum(n: number) {
   return n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
 }
 
+// Accepts both "1.2" and "1,2" (Russian locale decimal separator)
+function parseNum(v: any, fallback = 0): number {
+  if (v === null || v === undefined || v === '') return fallback;
+  const n = parseFloat(String(v).replace(',', '.'));
+  return isNaN(n) ? fallback : n;
+}
+
 function calcTotal(price: string, qty: string, coef: string) {
-  const p = parseFloat(price) || 0;
-  const q = parseFloat(qty) || 0;
-  const c = parseFloat(coef) || 1;
+  const p = parseNum(price);
+  const q = parseNum(qty);
+  const c = parseNum(coef, 1);
   return p && q ? fmtNum(p * q * c) : '';
 }
 
@@ -186,6 +193,14 @@ export default function SpecPage() {
   const currentIdRef = useRef(Number(_routeId));
   useEffect(() => { currentIdRef.current = currentId; }, [currentId]);
 
+  // Normalize decimal separators (comma→dot) in numeric fields before saving
+  const normRowForSave = (r: any) => ({
+    ...r,
+    qty:   String(r.qty   ?? '').replace(',', '.'),
+    price: String(r.price ?? '').replace(',', '.'),
+    coef:  String(r.coef  ?? '1').replace(',', '.'),
+  });
+
   const setUnsaved = useCallback((v: boolean) => {
     _setUnsaved(v);
     hasUnsavedRef.current = v;
@@ -193,7 +208,7 @@ export default function SpecPage() {
       if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
       autoSaveTimer.current = setTimeout(async () => {
         if (!hasUnsavedRef.current) return;
-        const toSave = rowsRef.current.filter((r: any) => r.name || r.article);
+        const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
         try {
           await sheetsApi.saveRows(currentIdRef.current, toSave);
           hasUnsavedRef.current = false;
@@ -342,7 +357,7 @@ export default function SpecPage() {
   useEffect(() => {
     async function autoSaveNow() {
       if (!hasUnsavedRef.current) return;
-      const toSave = rowsRef.current.filter((r: any) => r.name || r.article);
+      const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
       try {
         await sheetsApi.saveRows(currentIdRef.current, toSave);
         hasUnsavedRef.current = false;
@@ -389,7 +404,7 @@ export default function SpecPage() {
       const dbRows = s.rows || [];
       const cleanNum = (v: any, fallback = '') => {
         if (v === null || v === undefined || v === '') return fallback;
-        const n = parseFloat(String(v));
+        const n = parseFloat(String(v).replace(',', '.'));
         return isNaN(n) ? fallback : String(n);
       };
       const normalizedRows = dbRows.map((r: any) => {
@@ -589,7 +604,7 @@ export default function SpecPage() {
 
   async function saveRows() {
     try {
-      const toSave = rows.filter(r => r.name || r.article);
+      const toSave = rows.filter(r => r.name || r.article).map(normRowForSave);
       await sheetsApi.saveRows(currentIdRef.current, toSave);
       setUnsaved(false);
       toast.success('Сохранено');
@@ -1133,8 +1148,7 @@ export default function SpecPage() {
   }
 
   const sheetTotal = rows.reduce((s, r) => {
-    const p = parseFloat(r.price) || 0, q = parseFloat(r.qty) || 0, c = parseFloat(r.coef) || 1;
-    return s + p * q * c;
+    return s + parseNum(r.price) * parseNum(r.qty) * parseNum(r.coef, 1);
   }, 0);
 
   const projectSheets: any[] = project?.sheets || [];
@@ -1310,7 +1324,7 @@ export default function SpecPage() {
                     onClick={async () => {
                       if (currentId === s.id) return;
                       if (hasUnsavedRef.current) {
-                        const toSave = rowsRef.current.filter((r: any) => r.name || r.article);
+                        const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
                         try { await sheetsApi.saveRows(currentIdRef.current, toSave); hasUnsavedRef.current = false; _setUnsaved(false); } catch {}
                       }
                       if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
