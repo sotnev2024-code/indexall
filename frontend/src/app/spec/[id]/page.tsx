@@ -7,8 +7,11 @@ import { sheetsApi, projectsApi, catalogApi, exportApi, storesApi } from '@/lib/
 import { useAppStore } from '@/store/app.store';
 
 const MAX_UNDO = 30;
-
 const STATIC_BRANDS = ['IEK', 'EKF', 'Chint', 'КЗАЗ', 'DEKraft', 'DKC', 'TDM'];
+
+// Column order for the editable cells (col indices 0-8)
+const EDITABLE_COLS = ['name', 'brand', 'article', 'qty', 'unit', 'price', 'store', 'coef', 'deadline'] as const;
+type EditableCol = typeof EDITABLE_COLS[number];
 
 function fmtNum(n: number) {
   return n.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
@@ -28,76 +31,114 @@ interface RowProps {
   isFirst: boolean;
   onUpdate: (i: number, field: string, value: any) => void;
   onSearch: (q: string, rowIdx: number, field: string, el: HTMLInputElement) => void;
-  onKeyDown: (e: React.KeyboardEvent, rowIdx: number) => void;
+  onInputKeyDown: (e: React.KeyboardEvent<HTMLInputElement>, rowIdx: number, colIdx: number) => void;
   onStoreClick: (rowIdx: number, el: HTMLSelectElement) => void;
-  inputRef: (el: HTMLInputElement | null, key: string) => void;
+  inputRef: (el: HTMLElement | null, key: string) => void;
   onFocus: () => void;
   onBlur: () => void;
+  // Selection
+  activeCellRow: number;
+  activeCellCol: number;
+  isEditing: boolean;
+  selR1: number; selC1: number; selR2: number; selC2: number;
+  onCellMouseDown: (rowIdx: number, colIdx: number, e: React.MouseEvent) => void;
+  onCellMouseEnter: (rowIdx: number, colIdx: number) => void;
+  onCellDoubleClick: (rowIdx: number, colIdx: number) => void;
 }
 
 const SpecRow = memo(function SpecRow({
-  row, idx, isFirst, onUpdate, onSearch, onKeyDown, onStoreClick, inputRef, onFocus, onBlur,
+  row, idx, isFirst, onUpdate, onSearch, onInputKeyDown, onStoreClick, inputRef, onFocus, onBlur,
+  activeCellRow, activeCellCol, isEditing, selR1, selC1, selR2, selC2,
+  onCellMouseDown, onCellMouseEnter, onCellDoubleClick,
 }: RowProps) {
+  const isActive = (col: number) => activeCellRow === idx && activeCellCol === col;
+  const inRange = (col: number) => idx >= selR1 && idx <= selR2 && col >= selC1 && col <= selC2;
+  const cellEditing = (col: number) => isActive(col) && isEditing;
+
+  const tdAttrs = (col: number, baseClass: string, extraStyle?: React.CSSProperties) => {
+    const classes = [baseClass];
+    if (inRange(col)) classes.push('cell-selected');
+    if (isActive(col)) classes.push('cell-active');
+    return {
+      className: classes.join(' '),
+      style: extraStyle,
+      onMouseDown: (e: React.MouseEvent) => onCellMouseDown(idx, col, e),
+      onMouseEnter: () => onCellMouseEnter(idx, col),
+      onDoubleClick: () => onCellDoubleClick(idx, col),
+    };
+  };
+
+  const inputAttrs = (col: number, field: EditableCol) => ({
+    ref: (el: HTMLInputElement | null) => inputRef(el, `${field}-${idx}`),
+    readOnly: !cellEditing(col),
+    tabIndex: -1,
+    style: { pointerEvents: cellEditing(col) ? 'auto' as const : 'none' as const },
+    onFocus,
+    onBlur,
+    onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => onInputKeyDown(e, idx, col),
+  });
+
   return (
     <tr>
       <td className="col-num">{idx + 1}</td>
-      <td className="col-name" style={{ position: 'relative' }}>
+
+      <td {...tdAttrs(0, 'col-name', { position: 'relative' })}>
         <input
-          ref={el => inputRef(el, `name-${idx}`)}
+          {...inputAttrs(0, 'name')}
           value={row.name || ''}
-          placeholder={isFirst ? 'Можно вводить текст здесь и система подберёт варианты' : ''}
+          placeholder={isFirst && !row.name ? 'Можно вводить текст здесь и система подберёт варианты' : ''}
           onChange={e => { onUpdate(idx, 'name', e.target.value); onSearch(e.target.value, idx, 'name', e.target as HTMLInputElement); }}
-          onKeyDown={e => onKeyDown(e, idx)}
-          onFocus={onFocus}
-          onBlur={onBlur}
         />
       </td>
-      <td className="col-brand">
+
+      <td {...tdAttrs(1, 'col-brand')}>
         <input
+          {...inputAttrs(1, 'brand')}
           value={row.brand || ''}
           onChange={e => onUpdate(idx, 'brand', e.target.value)}
-          onFocus={onFocus}
-          onBlur={onBlur}
         />
       </td>
-      <td className="col-article">
+
+      <td {...tdAttrs(2, 'col-article')}>
         <input
+          {...inputAttrs(2, 'article')}
           value={row.article || ''}
           onChange={e => { onUpdate(idx, 'article', e.target.value); onSearch(e.target.value, idx, 'article', e.target as HTMLInputElement); }}
-          onKeyDown={e => onKeyDown(e, idx)}
-          onFocus={onFocus}
-          onBlur={onBlur}
         />
       </td>
-      <td className="col-qty">
+
+      <td {...tdAttrs(3, 'col-qty')}>
         <input
+          {...inputAttrs(3, 'qty')}
           value={row.qty || ''}
           onChange={e => onUpdate(idx, 'qty', e.target.value)}
-          onFocus={onFocus}
-          onBlur={onBlur}
         />
       </td>
-      <td className="col-unit">
+
+      <td {...tdAttrs(4, 'col-unit')}>
         <input
+          {...inputAttrs(4, 'unit')}
           value={row.unit || ''}
           onChange={e => onUpdate(idx, 'unit', e.target.value)}
-          onFocus={onFocus}
-          onBlur={onBlur}
         />
       </td>
-      <td className="col-price">
+
+      <td {...tdAttrs(5, 'col-price')}>
         <input
+          {...inputAttrs(5, 'price')}
           value={row.price || ''}
           onChange={e => { onUpdate(idx, 'price', e.target.value); onUpdate(idx, 'auto_price', false); }}
-          onFocus={onFocus}
-          onBlur={onBlur}
         />
       </td>
-      <td className="col-store">
+
+      <td {...tdAttrs(6, 'col-store')}>
         <select
+          ref={el => inputRef(el, `store-${idx}`)}
           value={row.store ?? ''}
+          tabIndex={-1}
+          style={{ pointerEvents: cellEditing(6) ? 'auto' : 'none' }}
           onChange={e => onUpdate(idx, 'store', e.target.value)}
-          onClick={e => onStoreClick(idx, e.target as HTMLSelectElement)}
+          onClick={e => cellEditing(6) && onStoreClick(idx, e.target as HTMLSelectElement)}
           onFocus={onFocus}
           onBlur={onBlur}
         >
@@ -106,22 +147,23 @@ const SpecRow = memo(function SpecRow({
           <option value="">—</option>
         </select>
       </td>
-      <td className="col-coef">
+
+      <td {...tdAttrs(7, 'col-coef')}>
         <input
+          {...inputAttrs(7, 'coef')}
           value={row.coef || '1'}
           onChange={e => onUpdate(idx, 'coef', e.target.value)}
-          onFocus={onFocus}
-          onBlur={onBlur}
         />
       </td>
+
       <td className="col-total">{row.total && row.total !== 'NaN' ? row.total : ''}</td>
-      <td className="col-deadline">
+
+      <td {...tdAttrs(8, 'col-deadline')}>
         <input
+          {...inputAttrs(8, 'deadline')}
           value={row.deadline || ''}
           placeholder="—"
           onChange={e => onUpdate(idx, 'deadline', e.target.value)}
-          onFocus={onFocus}
-          onBlur={onBlur}
         />
       </td>
     </tr>
@@ -134,7 +176,6 @@ export default function SpecPage() {
   const router = useRouter();
   const { activeProjectId, setUnsaved: _setUnsaved, setActive } = useAppStore();
 
-  // Active sheet ID — drives all data loading without URL navigation
   const [currentId, setCurrentId] = useState(() => Number(_routeId));
   const currentIdRef = useRef(Number(_routeId));
   useEffect(() => { currentIdRef.current = currentId; }, [currentId]);
@@ -143,7 +184,6 @@ export default function SpecPage() {
     _setUnsaved(v);
     hasUnsavedRef.current = v;
     if (v) {
-      // Debounced auto-save: 3s after last change
       if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
       autoSaveTimer.current = setTimeout(async () => {
         if (!hasUnsavedRef.current) return;
@@ -152,10 +192,11 @@ export default function SpecPage() {
           await sheetsApi.saveRows(currentIdRef.current, toSave);
           hasUnsavedRef.current = false;
           _setUnsaved(false);
-        } catch { /* silent, user can save manually */ }
+        } catch { /* silent */ }
       }, 3000);
     }
   }, [_setUnsaved]);
+
   const [sheet, setSheet] = useState<any>(null);
   const [project, setProject] = useState<any>(null);
   const [rows, setRows] = useState<any[]>([]);
@@ -164,22 +205,18 @@ export default function SpecPage() {
   const [acFocus, setAcFocus] = useState(-1);
   const [storeDropdown, setStoreDropdown] = useState<{ rowIdx: number; rect: DOMRect; offers: any[] } | null>(null);
 
-  // Brand filter + global search
   const [brandFilter, setBrandFilter] = useState<string>('all');
   const [brands, setBrands] = useState<string[]>(STATIC_BRANDS);
   const [globalSearch, setGlobalSearch] = useState('');
   const [globalResults, setGlobalResults] = useState<any[]>([]);
   const globalSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Sheet tabs renaming
   const [renamingSheetId, setRenamingSheetId] = useState<number | null>(null);
   const [renameVal, setRenameVal] = useState('');
 
-  // Paste modal (fallback for HTTP — no clipboard API access)
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pasteText, setPasteText] = useState('');
 
-  // Undo / Redo stacks — persisted in sessionStorage per sheet
   const undoKey = `undo_${currentId}`;
   const redoKey = `redo_${currentId}`;
   const [undoStack, setUndoStack] = useState<any[][]>(() => {
@@ -189,7 +226,18 @@ export default function SpecPage() {
     try { const s = sessionStorage.getItem(`redo_${Number(_routeId)}`); return s ? JSON.parse(s) : []; } catch { return []; }
   });
 
-  const inputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
+  // ── Cell selection state ──────────────────────────────────────
+  const [activeCell, setActiveCell] = useState<{ row: number; col: number } | null>(null);
+  const [selAnchor, setSelAnchor] = useState<{ row: number; col: number } | null>(null);
+  const [selFocus, setSelFocus] = useState<{ row: number; col: number } | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+
+  const activeCellRef = useRef<{ row: number; col: number } | null>(null);
+  const isEditingRef = useRef(false);
+  const isDraggingRef = useRef(false);
+  const tableWrapRef = useRef<HTMLDivElement>(null);
+
+  const inputRefs = useRef<Map<string, HTMLElement>>(new Map());
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowsRef = useRef<any[]>([]);
@@ -198,16 +246,15 @@ export default function SpecPage() {
   const [refreshing, setRefreshing] = useState(false);
   useEffect(() => { rowsRef.current = rows; }, [rows]);
 
-  // Persist undo/redo stacks to sessionStorage on every change
   useEffect(() => {
-    try { sessionStorage.setItem(undoKey, JSON.stringify(undoStack)); } catch { /* quota exceeded — ignore */ }
+    try { sessionStorage.setItem(undoKey, JSON.stringify(undoStack)); } catch { /* quota exceeded */ }
   }, [undoStack, undoKey]);
   useEffect(() => {
-    try { sessionStorage.setItem(redoKey, JSON.stringify(redoStack)); } catch { /* quota exceeded — ignore */ }
+    try { sessionStorage.setItem(redoKey, JSON.stringify(redoStack)); } catch { /* quota exceeded */ }
   }, [redoStack, redoKey]);
 
-  const setInputRef = useCallback((el: HTMLInputElement | null, key: string) => {
-    if (el) inputRefs.current.set(key, el);
+  const setInputRef = useCallback((el: HTMLElement | null, key: string) => {
+    if (el) inputRefs.current.set(key, el); else inputRefs.current.delete(key);
   }, []);
 
   const pushHistorySnapshot = useCallback((snap: any[]) => {
@@ -244,6 +291,7 @@ export default function SpecPage() {
     });
   }, [setUnsaved]);
 
+  // ── Global keydown: Ctrl+Z/Y/C/V ─────────────────────────────
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!(e.ctrlKey || e.metaKey)) return;
@@ -254,7 +302,14 @@ export default function SpecPage() {
     return () => document.removeEventListener('keydown', onKey);
   }, [handleUndo, handleRedo]);
 
-  // Auto-save: save on page hide/unload
+  // ── Global mouseup — end drag selection ──────────────────────
+  useEffect(() => {
+    const onMouseUp = () => { isDraggingRef.current = false; };
+    document.addEventListener('mouseup', onMouseUp);
+    return () => document.removeEventListener('mouseup', onMouseUp);
+  }, []);
+
+  // ── Auto-save on hide/unload ──────────────────────────────────
   useEffect(() => {
     async function autoSaveNow() {
       if (!hasUnsavedRef.current) return;
@@ -270,16 +325,17 @@ export default function SpecPage() {
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('beforeunload', handleUnload);
     return () => {
-      autoSaveNow(); // save on component unmount (navigation)
+      autoSaveNow();
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('beforeunload', handleUnload);
       if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     };
   }, [_setUnsaved]);
 
+  // ── Load data on sheet change ─────────────────────────────────
   useEffect(() => {
     loadData();
-    if (currentId === Number(_routeId)) loadBrands(); // only on first mount
+    if (currentId === Number(_routeId)) loadBrands();
     const close = () => { setAcDrops(null); setStoreDropdown(null); setGlobalResults([]); };
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
@@ -319,7 +375,6 @@ export default function SpecPage() {
       }
       setRows(padded);
       rowsRef.current = padded;
-      // Restore undo/redo from sessionStorage for this sheet
       try {
         const u = sessionStorage.getItem(`undo_${currentIdRef.current}`);
         const r = sessionStorage.getItem(`redo_${currentIdRef.current}`);
@@ -329,12 +384,10 @@ export default function SpecPage() {
         setUndoStack([]);
         setRedoStack([]);
       }
-      // Load project — use activeProjectId from store or fall back to sheet's projectId
       const projId = activeProjectId || s.projectId;
       if (projId) {
         const { data: p } = await projectsApi.getOne(projId);
         setProject(p);
-        // Always keep store in sync so catalog page can find the open sheet after refresh
         setActive(projId, currentIdRef.current);
       }
     } catch { toast.error('Ошибка загрузки листа'); }
@@ -391,7 +444,6 @@ export default function SpecPage() {
     setUnsaved(true);
   }, [pushHistorySnapshot, setUnsaved]);
 
-  // Add product from global search to the next empty row
   const addProductFromSearch = useCallback((p: any) => {
     pushHistorySnapshot(rowsRef.current);
     setRows((prev) => {
@@ -452,20 +504,6 @@ export default function SpecPage() {
       } catch { setGlobalResults([]); }
     }, 300);
   }
-
-  const handleKeyDown = useCallback((e: React.KeyboardEvent, rowIdx: number) => {
-    setAcDrops(current => {
-      if (!current || current.rowIdx !== rowIdx) return current;
-      if (e.key === 'ArrowDown') { e.preventDefault(); setAcFocus(f => Math.min(f + 1, current.results.length - 1)); }
-      else if (e.key === 'ArrowUp') { e.preventDefault(); setAcFocus(f => Math.max(f - 1, 0)); }
-      else if (e.key === 'Enter') {
-        e.preventDefault();
-        setAcFocus(f => { if (f >= 0) applyProduct(rowIdx, current.results[f]); return f; });
-      }
-      else if (e.key === 'Escape') return null;
-      return current;
-    });
-  }, [applyProduct]);
 
   const openStoreDropdown = useCallback(async (rowIdx: number, el: HTMLSelectElement) => {
     const article = rowsRef.current[rowIdx]?.article;
@@ -529,7 +567,308 @@ export default function SpecPage() {
     } catch { toast.error('Ошибка сохранения'); }
   }
 
-  // ── Clipboard: copy sheet as TSV ──────────────────────────────
+  // ── Selection helpers ─────────────────────────────────────────
+  function normalizeRange(a: { row: number; col: number }, b: { row: number; col: number }) {
+    return {
+      r1: Math.min(a.row, b.row), r2: Math.max(a.row, b.row),
+      c1: Math.min(a.col, b.col), c2: Math.max(a.col, b.col),
+    };
+  }
+
+  // Returns selection bounds (sentinel values mean nothing is selected)
+  function getSelBounds() {
+    if (!selAnchor || !selFocus) {
+      if (!activeCell) return { r1: -1, c1: -1, r2: -2, c2: -2 };
+      return { r1: activeCell.row, c1: activeCell.col, r2: activeCell.row, c2: activeCell.col };
+    }
+    return normalizeRange(selAnchor, selFocus);
+  }
+
+  // Move active cell (navigation mode)
+  const moveTo = useCallback((row: number, col: number, extend = false) => {
+    const maxRow = rowsRef.current.length - 1;
+    const maxCol = EDITABLE_COLS.length - 1;
+    // Wrap columns across rows
+    let r = row, c = col;
+    if (c < 0) { c = maxCol; r -= 1; }
+    if (c > maxCol) { c = 0; r += 1; }
+    r = Math.max(0, Math.min(maxRow, r));
+    c = Math.max(0, Math.min(maxCol, c));
+
+    const cell = { row: r, col: c };
+    setActiveCell(cell);
+    activeCellRef.current = cell;
+    setIsEditing(false);
+    isEditingRef.current = false;
+
+    if (extend && selAnchor) {
+      setSelFocus(cell);
+    } else {
+      setSelAnchor(cell);
+      setSelFocus(cell);
+    }
+    setTimeout(() => tableWrapRef.current?.focus(), 0);
+  }, [selAnchor]);
+
+  // Enter edit mode for the active cell
+  const enterEditMode = useCallback((initialChar?: string) => {
+    if (!activeCellRef.current) return;
+    const { row, col } = activeCellRef.current;
+    const field = EDITABLE_COLS[col];
+
+    if (field !== 'store' && initialChar !== undefined) {
+      // Clear current value and start typing
+      updateRow(row, field, initialChar);
+    }
+
+    setIsEditing(true);
+    isEditingRef.current = true;
+
+    const key = `${field}-${row}`;
+    setTimeout(() => {
+      const el = inputRefs.current.get(key);
+      if (!el) return;
+      el.focus();
+      if (el instanceof HTMLInputElement) {
+        if (initialChar !== undefined) {
+          el.setSelectionRange(1, 1);
+        } else {
+          el.select();
+        }
+      }
+    }, 0);
+  }, [updateRow]);
+
+  function exitEditMode() {
+    setIsEditing(false);
+    isEditingRef.current = false;
+    setTimeout(() => tableWrapRef.current?.focus(), 0);
+  }
+
+  // Clear values in selected range (Delete/Backspace)
+  function clearRange() {
+    const { r1, c1, r2, c2 } = getSelBounds();
+    if (r1 < 0) return;
+    pushHistorySnapshot(rowsRef.current);
+    setRows(prev => {
+      const next = [...prev];
+      for (let r = r1; r <= r2; r++) {
+        for (let c = c1; c <= c2; c++) {
+          const field = EDITABLE_COLS[c];
+          next[r] = { ...next[r], [field]: '' };
+          if (['price', 'qty', 'coef'].includes(field)) {
+            next[r].total = calcTotal(next[r].price, next[r].qty, next[r].coef);
+          }
+        }
+      }
+      return next;
+    });
+    setUnsaved(true);
+  }
+
+  // Copy selected range as TSV
+  function copyRange() {
+    const { r1, c1, r2, c2 } = getSelBounds();
+    if (r1 < 0) return;
+    const lines: string[] = [];
+    for (let r = r1; r <= r2; r++) {
+      const cells: string[] = [];
+      for (let c = c1; c <= c2; c++) {
+        cells.push(String(rowsRef.current[r]?.[EDITABLE_COLS[c]] ?? ''));
+      }
+      lines.push(cells.join('\t'));
+    }
+    const text = lines.join('\n');
+    const rowCount = r2 - r1 + 1, colCount = c2 - c1 + 1;
+
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        if (rowCount > 1 || colCount > 1) toast.success(`Скопировано: ${rowCount} × ${colCount}`);
+      });
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;top:-9999px;opacity:0';
+      document.body.appendChild(ta);
+      ta.focus(); ta.select();
+      try { document.execCommand('copy'); } catch { /* ignore */ }
+      document.body.removeChild(ta);
+      if (rowCount > 1 || colCount > 1) toast.success(`Скопировано: ${rowCount} × ${colCount}`);
+    }
+  }
+
+  // Paste TSV starting at active cell
+  async function pasteAtActiveCell() {
+    if (!activeCellRef.current) return;
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text.trim()) return;
+      applyPasteAt(text, activeCellRef.current.row, activeCellRef.current.col);
+    } catch {
+      setPasteText('');
+      setShowPasteModal(true);
+    }
+  }
+
+  function applyPasteAt(text: string, startRow: number, startCol: number) {
+    const lines = text.split('\n').map(l => l.replace(/\r$/, '').split('\t'));
+    if (lines.length === 0 || (lines.length === 1 && lines[0].length === 0)) return;
+    pushHistorySnapshot(rowsRef.current);
+    setRows(prev => {
+      const next = [...prev];
+      // Ensure we have enough rows
+      const neededRows = startRow + lines.length;
+      while (next.length < neededRows) {
+        next.push({ row_number: next.length + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ЭТМ', coef: '1', total: '', deadline: '' });
+      }
+      lines.forEach((cells, ri) => {
+        cells.forEach((val, ci) => {
+          const r = startRow + ri;
+          const c = startCol + ci;
+          if (r < next.length && c < EDITABLE_COLS.length) {
+            const field = EDITABLE_COLS[c];
+            next[r] = { ...next[r], [field]: val.trim() };
+            if (['price', 'qty', 'coef'].includes(field)) {
+              next[r].total = calcTotal(next[r].price, next[r].qty, next[r].coef);
+            }
+          }
+        });
+      });
+      return next;
+    });
+    setUnsaved(true);
+    const rCount = lines.length, cCount = Math.max(...lines.map(l => l.length));
+    toast.success(`Вставлено: ${rCount} × ${cCount}`);
+  }
+
+  // ── Cell mouse events ─────────────────────────────────────────
+  const handleCellMouseDown = useCallback((rowIdx: number, colIdx: number, e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault(); // prevent native focus on input
+    isDraggingRef.current = true;
+
+    if (e.shiftKey && selAnchor) {
+      const cell = { row: rowIdx, col: colIdx };
+      setActiveCell(cell);
+      activeCellRef.current = cell;
+      setSelFocus(cell);
+      setIsEditing(false);
+      isEditingRef.current = false;
+      tableWrapRef.current?.focus();
+    } else {
+      const cell = { row: rowIdx, col: colIdx };
+      setActiveCell(cell);
+      activeCellRef.current = cell;
+      setSelAnchor(cell);
+      setSelFocus(cell);
+      setIsEditing(false);
+      isEditingRef.current = false;
+      tableWrapRef.current?.focus();
+    }
+  }, [selAnchor]);
+
+  const handleCellMouseEnter = useCallback((rowIdx: number, colIdx: number) => {
+    if (!isDraggingRef.current) return;
+    const cell = { row: rowIdx, col: colIdx };
+    setActiveCell(cell);
+    activeCellRef.current = cell;
+    setSelFocus(cell);
+  }, []);
+
+  const handleCellDoubleClick = useCallback((rowIdx: number, colIdx: number) => {
+    const cell = { row: rowIdx, col: colIdx };
+    setActiveCell(cell);
+    activeCellRef.current = cell;
+    setSelAnchor(cell);
+    setSelFocus(cell);
+    setIsEditing(false);
+    isEditingRef.current = false;
+    enterEditMode();
+  }, [enterEditMode]);
+
+  // ── Keyboard handler for the table wrapper (navigation mode) ──
+  function handleTableWrapKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (isEditing) return; // let inputs handle it
+    const cell = activeCellRef.current;
+    if (!cell) return;
+
+    const isCtrl = e.ctrlKey || e.metaKey;
+
+    if (isCtrl) {
+      if (e.key === 'c') { e.preventDefault(); copyRange(); }
+      else if (e.key === 'v') { e.preventDefault(); pasteAtActiveCell(); }
+      else if (e.key === 'a') {
+        e.preventDefault();
+        // Select all cells
+        setSelAnchor({ row: 0, col: 0 });
+        setSelFocus({ row: rowsRef.current.length - 1, col: EDITABLE_COLS.length - 1 });
+      }
+      return;
+    }
+
+    switch (e.key) {
+      case 'ArrowRight': e.preventDefault(); moveTo(cell.row, cell.col + 1, e.shiftKey); break;
+      case 'ArrowLeft':  e.preventDefault(); moveTo(cell.row, cell.col - 1, e.shiftKey); break;
+      case 'ArrowDown':  e.preventDefault(); moveTo(cell.row + 1, cell.col, e.shiftKey); break;
+      case 'ArrowUp':    e.preventDefault(); moveTo(cell.row - 1, cell.col, e.shiftKey); break;
+      case 'Tab':
+        e.preventDefault();
+        moveTo(cell.row, cell.col + (e.shiftKey ? -1 : 1));
+        break;
+      case 'Enter': case 'F2':
+        e.preventDefault();
+        enterEditMode();
+        break;
+      case 'Delete': case 'Backspace':
+        e.preventDefault();
+        clearRange();
+        break;
+      case 'Escape':
+        setActiveCell(null);
+        activeCellRef.current = null;
+        setSelAnchor(null);
+        setSelFocus(null);
+        break;
+      default:
+        // Printable char → enter edit mode immediately
+        if (e.key.length === 1 && !isCtrl) {
+          enterEditMode(e.key);
+        }
+    }
+  }
+
+  // ── Input keydown handler (edit mode) ────────────────────────
+  const handleInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>, rowIdx: number, colIdx: number) => {
+    // Autocomplete navigation takes priority
+    if (acDrops && acDrops.rowIdx === rowIdx) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setAcFocus(f => Math.min(f + 1, acDrops.results.length - 1)); return; }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); setAcFocus(f => Math.max(f - 1, 0)); return; }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        setAcFocus(f => { if (f >= 0) applyProduct(rowIdx, acDrops.results[f]); return f; });
+        return;
+      }
+      if (e.key === 'Escape') { e.preventDefault(); setAcDrops(null); return; }
+    }
+
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      setAcDrops(null);
+      exitEditMode();
+      moveTo(rowIdx, colIdx + (e.shiftKey ? -1 : 1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      setAcDrops(null);
+      exitEditMode();
+      moveTo(rowIdx + 1, colIdx);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setAcDrops(null);
+      exitEditMode();
+    }
+  }, [acDrops, applyProduct, moveTo]);
+
+  // ── Clipboard: copy whole sheet as TSV (toolbar button) ───────
   function copySheetToClipboard() {
     const COLS = ['Название', 'Бренд', 'Артикул', 'Кол-во', 'Ед.изм', 'Цена', 'Магазин', 'Коэф.', 'Итого'];
     const dataRows = rows.filter(r => r.name || r.article);
@@ -542,8 +881,6 @@ export default function SpecPage() {
       ].join('\t'));
     });
     const tsv = lines.join('\n');
-
-    // Try modern API first, fall back to execCommand
     if (navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(tsv)
         .then(() => toast.success(`Скопировано ${dataRows.length} строк — вставьте в Excel или Google Таблицы`))
@@ -558,19 +895,18 @@ export default function SpecPage() {
     ta.value = text;
     ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
     document.body.appendChild(ta);
-    ta.focus();
-    ta.select();
+    ta.focus(); ta.select();
     try {
       document.execCommand('copy');
       toast.success(`Скопировано ${count} строк — вставьте в Excel или Google Таблицы`);
     } catch {
-      toast.error('Не удалось скопировать. Выделите таблицу вручную (Ctrl+A) и скопируйте (Ctrl+C)');
+      toast.error('Не удалось скопировать');
     } finally {
       document.body.removeChild(ta);
     }
   }
 
-  // ── Clipboard: paste TSV from Excel / Google Sheets ───────────
+  // ── Clipboard: paste TSV from Excel (toolbar button / modal) ──
   const HEADER_MAP: Record<string, string> = {
     'название': 'name', 'name': 'name', 'наименование': 'name',
     'бренд': 'brand', 'brand': 'brand', 'производитель': 'brand',
@@ -586,8 +922,6 @@ export default function SpecPage() {
   function parseTSV(text: string): any[] {
     const lines = text.split('\n').map(l => l.replace(/\r$/, '').split('\t'));
     if (lines.length === 0) return [];
-
-    // Detect if first row is headers
     let fieldMap: string[] = DEFAULT_ORDER;
     let startRow = 0;
     const firstRow = lines[0].map(h => h.trim().toLowerCase());
@@ -596,7 +930,6 @@ export default function SpecPage() {
       fieldMap = firstRow.map(h => HEADER_MAP[h] || '');
       startRow = 1;
     }
-
     return lines.slice(startRow)
       .filter(cols => cols.some(c => c.trim()))
       .map(cols => {
@@ -612,41 +945,7 @@ export default function SpecPage() {
   function applyParsedRows(text: string) {
     if (!text.trim()) { toast('Буфер обмена пуст'); return; }
     const parsed = parseTSV(text);
-    if (parsed.length === 0) { toast('Не удалось распознать данные — убедитесь, что скопированы строки из Excel или Google Таблиц'); return; }
-    pushHistorySnapshot(rowsRef.current);
-    setRows(prev => {
-      const existing = prev.filter(r => r.name || r.article);
-      const merged = [...existing, ...parsed];
-      while (merged.length < 25) merged.push({ name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ЭТМ', coef: '1', total: '' });
-        return merged;
-      });
-      setUnsaved(true);
-      setShowPasteModal(false);
-    setPasteText('');
-    toast.success(`Вставлено ${parsed.length} строк`);
-  }
-
-  async function pasteFromClipboard() {
-    // Try modern Clipboard API (works on HTTPS)
-    if (navigator.clipboard?.readText) {
-      try {
-        const text = await navigator.clipboard.readText();
-        applyParsedRows(text);
-        return;
-      } catch { /* fall through to modal */ }
-    }
-    // Fallback: show modal where user pastes manually
-    setPasteText('');
-    setShowPasteModal(true);
-  }
-
-  // Handle Ctrl+V on the table body — paste if clipboard has multi-column TSV
-  async function handleTablePaste(e: React.ClipboardEvent) {
-    const text = e.clipboardData.getData('text/plain');
-    if (!text.includes('\t')) return; // single cell — let browser handle it
-    const parsed = parseTSV(text);
-    if (parsed.length === 0) return;
-    e.preventDefault();
+    if (parsed.length === 0) { toast('Не удалось распознать данные'); return; }
     pushHistorySnapshot(rowsRef.current);
     setRows(prev => {
       const existing = prev.filter(r => r.name || r.article);
@@ -655,7 +954,52 @@ export default function SpecPage() {
       return merged;
     });
     setUnsaved(true);
+    setShowPasteModal(false);
+    setPasteText('');
     toast.success(`Вставлено ${parsed.length} строк`);
+  }
+
+  async function pasteFromClipboard() {
+    if (navigator.clipboard?.readText) {
+      try {
+        const text = await navigator.clipboard.readText();
+        // If an active cell is selected, paste at that position
+        if (activeCellRef.current) {
+          const lines = text.split('\n');
+          const hasMultiCols = lines.some(l => l.includes('\t'));
+          if (hasMultiCols) {
+            applyPasteAt(text, activeCellRef.current.row, activeCellRef.current.col);
+            return;
+          }
+        }
+        applyParsedRows(text);
+        return;
+      } catch { /* fall through */ }
+    }
+    setPasteText('');
+    setShowPasteModal(true);
+  }
+
+  // tbody onPaste (Ctrl+V when focus is inside table body)
+  async function handleTablePaste(e: React.ClipboardEvent) {
+    const text = e.clipboardData.getData('text/plain');
+    if (!text.includes('\t')) return;
+    e.preventDefault();
+    if (activeCellRef.current) {
+      applyPasteAt(text, activeCellRef.current.row, activeCellRef.current.col);
+    } else {
+      const parsed = parseTSV(text);
+      if (parsed.length === 0) return;
+      pushHistorySnapshot(rowsRef.current);
+      setRows(prev => {
+        const existing = prev.filter(r => r.name || r.article);
+        const merged = [...existing, ...parsed];
+        while (merged.length < 25) merged.push({ name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ЭТМ', coef: '1', total: '' });
+        return merged;
+      });
+      setUnsaved(true);
+      toast.success(`Вставлено ${parsed.length} строк`);
+    }
   }
 
   async function handleExport() {
@@ -690,7 +1034,7 @@ export default function SpecPage() {
           });
           updated++;
         }
-      } catch { /* skip this row */ }
+      } catch { /* skip */ }
     }
     setRefreshing(false);
     if (updated > 0) {
@@ -709,9 +1053,11 @@ export default function SpecPage() {
 
   const projectSheets: any[] = project?.sheets || [];
 
+  // Compute selection bounds once for rendering
+  const selBounds = getSelBounds();
+
   if (loading) return (
     <div className="spec-screen">
-      {/* Toolbar skeleton */}
       <div className="spec-toolbar">
         {[140, 120, 90, 80].map((w, i) => (
           <div key={i} className="skeleton" style={{ width: w, height: 32, borderRadius: 6 }} />
@@ -719,13 +1065,11 @@ export default function SpecPage() {
         <div style={{ flex: 1 }} />
         <div className="skeleton" style={{ width: 260, height: 20, borderRadius: 4 }} />
       </div>
-      {/* Brand bar skeleton */}
       <div className="spec-brand-bar">
         {[70, 50, 55, 70, 65, 55, 65, 50].map((w, i) => (
           <div key={i} className="skeleton" style={{ width: w, height: 26, borderRadius: 13 }} />
         ))}
       </div>
-      {/* Sheet tabs skeleton */}
       <div className="sheet-tabs">
         {[90, 80, 100].map((w, i) => (
           <div key={i} style={{ padding: '8px 14px', display: 'flex', alignItems: 'center' }}>
@@ -733,7 +1077,6 @@ export default function SpecPage() {
           </div>
         ))}
       </div>
-      {/* Table skeleton */}
       <div className="spec-table-wrap">
         <div style={{ display: 'flex', gap: 1, padding: '8px 6px', borderBottom: '2px solid var(--border)', background: 'var(--white)' }}>
           {[30, 360, 90, 120, 60, 60, 80, 90, 80, 90].map((w, i) => (
@@ -782,7 +1125,7 @@ export default function SpecPage() {
           </button>
           <button className="btn-outline" title="Скопировать лист как таблицу (для Excel / Google Таблиц)" onClick={copySheetToClipboard}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-            Копировать
+            Копировать лист
           </button>
           <button className="btn-outline" title="Вставить строки из Excel / Google Таблиц (Ctrl+V)" onClick={pasteFromClipboard}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
@@ -816,10 +1159,7 @@ export default function SpecPage() {
 
         {/* ── Brand filter chips ── */}
         <div className="spec-brand-bar">
-          <button
-            className={`brand-chip${brandFilter === 'all' ? ' active' : ''}`}
-            onClick={() => setBrandFilter('all')}
-          >
+          <button className={`brand-chip${brandFilter === 'all' ? ' active' : ''}`} onClick={() => setBrandFilter('all')}>
             Все бренды
           </button>
           {brands.map(b => (
@@ -883,7 +1223,6 @@ export default function SpecPage() {
                     style={{ cursor: 'pointer' }}
                     onClick={async () => {
                       if (currentId === s.id) return;
-                      // Auto-save current sheet before switching
                       if (hasUnsavedRef.current) {
                         const toSave = rowsRef.current.filter((r: any) => r.name || r.article);
                         try { await sheetsApi.saveRows(currentIdRef.current, toSave); hasUnsavedRef.current = false; _setUnsaved(false); } catch {}
@@ -909,8 +1248,14 @@ export default function SpecPage() {
         )}
 
         {/* ── Table ── */}
-        <div className="spec-table-wrap">
-          <table className="spec-table">
+        <div
+          ref={tableWrapRef}
+          className="spec-table-wrap"
+          tabIndex={0}
+          onKeyDown={handleTableWrapKeyDown}
+          style={{ outline: 'none' }}
+        >
+          <table className="spec-table" style={{ userSelect: 'none' }}>
             <thead>
               <tr>
                 <th className="col-num">№</th>
@@ -935,11 +1280,21 @@ export default function SpecPage() {
                   isFirst={i === 0}
                   onUpdate={updateRow}
                   onSearch={debouncedSearch}
-                  onKeyDown={handleKeyDown}
+                  onInputKeyDown={handleInputKeyDown}
                   onStoreClick={openStoreDropdown}
                   inputRef={setInputRef}
                   onFocus={handleCellFocus}
                   onBlur={handleCellBlur}
+                  activeCellRow={activeCell?.row ?? -1}
+                  activeCellCol={activeCell?.col ?? -1}
+                  isEditing={isEditing}
+                  selR1={selBounds.r1}
+                  selC1={selBounds.c1}
+                  selR2={selBounds.r2}
+                  selC2={selBounds.c2}
+                  onCellMouseDown={handleCellMouseDown}
+                  onCellMouseEnter={handleCellMouseEnter}
+                  onCellDoubleClick={handleCellDoubleClick}
                 />
               ))}
             </tbody>
@@ -986,7 +1341,7 @@ export default function SpecPage() {
         </div>
       )}
 
-      {/* Paste modal — fallback for HTTP (no clipboard API) */}
+      {/* Paste modal */}
       {showPasteModal && (
         <div
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}

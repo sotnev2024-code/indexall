@@ -1165,6 +1165,53 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .store-offer-price { flex: 1; text-align: right; font-weight: 600; }
 .store-offer-avail { font-size: 11px; color: var(--muted); }
 
+/* ===== EXCEL-LIKE CELL SELECTION ===== */
+
+/* Selected range — light yellow fill */
+.spec-table td.cell-selected {
+  background: rgba(245, 200, 0, 0.18) !important;
+}
+
+/* Active cell — yellow border outline */
+.spec-table td.cell-active {
+  position: relative;
+  z-index: 2;
+  box-shadow: inset 0 0 0 2px var(--yellow);
+  background: rgba(245, 200, 0, 0.08) !important;
+}
+
+/* Active + selected = active cell inside a range */
+.spec-table td.cell-active.cell-selected {
+  background: rgba(245, 200, 0, 0.22) !important;
+}
+
+/* In navigation mode, inputs are invisible overlays — the TD is the visual unit */
+.spec-table td input[readonly],
+.spec-table td input[readOnly] {
+  background: transparent;
+  border-color: transparent;
+  cursor: default;
+  caret-color: transparent;
+  user-select: none;
+}
+
+/* In edit mode, show normal input styling */
+.spec-table td.cell-active input:not([readonly]):not([readOnly]) {
+  background: #fff;
+  border-color: transparent;
+  caret-color: auto;
+  user-select: auto;
+  cursor: text;
+}
+
+/* Table wrapper focus ring — subtle */
+.spec-table-wrap:focus {
+  outline: none;
+}
+.spec-table-wrap:focus-within .spec-table td.cell-active {
+  box-shadow: inset 0 0 0 2px var(--yellow);
+}
+
 /* ===== NAVIGATION PROGRESS BAR ===== */
 .nav-progress-bar {
   position: fixed;
