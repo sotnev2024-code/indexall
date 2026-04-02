@@ -32,6 +32,10 @@ export default function ProjectsPage() {
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [page, setPage] = useState(1);
 
+  // ── Drag & Drop ──────────────────────────────────────────────
+  const [dragItem, setDragItem] = useState<{ type: 'project' | 'sheet'; id: number; projId?: number } | null>(null);
+  const [dropZone, setDropZone] = useState<{ type: 'project' | 'sheet'; id: number; projId?: number; half: 'top' | 'bottom' } | null>(null);
+
   useEffect(() => { loadProjects(); }, []);
 
   async function loadProjects() {
@@ -172,6 +176,122 @@ export default function ProjectsPage() {
     });
   }
 
+  function onDragStart(e: React.DragEvent, type: 'project' | 'sheet', id: number, projId?: number) {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', '');
+    setDragItem({ type, id, projId });
+  }
+
+  function onDragOver(e: React.DragEvent, type: 'project' | 'sheet', id: number, projId?: number) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const half = e.clientY < rect.top + rect.height / 2 ? 'top' : 'bottom';
+    setDropZone(prev => {
+      if (prev?.id === id && prev?.half === half) return prev;
+      return { type, id, projId, half };
+    });
+  }
+
+  function onDragLeave(e: React.DragEvent) {
+    if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
+      setDropZone(null);
+    }
+  }
+
+  function onDragEnd() {
+    setDragItem(null);
+    setDropZone(null);
+  }
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!dragItem || !dropZone || dragItem.id === dropZone.id) { onDragEnd(); return; }
+
+    saveSnapshot(projects);
+
+    if (dragItem.type === 'project' && dropZone.type === 'project') {
+      // Reorder projects
+      setProjects(prev => {
+        const next = [...prev];
+        const fromIdx = next.findIndex(p => p.id === dragItem.id);
+        const [item] = next.splice(fromIdx, 1);
+        let toIdx = next.findIndex(p => p.id === dropZone.id);
+        if (dropZone.half === 'bottom') toIdx++;
+        next.splice(toIdx, 0, item);
+        return next;
+      });
+
+    } else if (dragItem.type === 'sheet') {
+      const srcProjId = dragItem.projId!;
+
+      if (dropZone.type === 'sheet') {
+        const dstProjId = dropZone.projId!;
+
+        if (srcProjId === dstProjId) {
+          // Reorder sheets within same project
+          setProjects(prev => prev.map(p => {
+            if (p.id !== srcProjId) return p;
+            const sheets = [...(p.sheets || [])];
+            const fromIdx = sheets.findIndex((s: any) => s.id === dragItem.id);
+            const [item] = sheets.splice(fromIdx, 1);
+            let toIdx = sheets.findIndex((s: any) => s.id === dropZone.id);
+            if (dropZone.half === 'bottom') toIdx++;
+            sheets.splice(toIdx, 0, item);
+            return { ...p, sheets };
+          }));
+        } else {
+          // Move sheet to different project
+          let movedSheet: any = null;
+          setProjects(prev => {
+            const p1 = prev.map(p => {
+              if (p.id !== srcProjId) return p;
+              const sheets = (p.sheets || []).filter((s: any) => {
+                if (s.id === dragItem.id) { movedSheet = s; return false; }
+                return true;
+              });
+              return { ...p, sheets };
+            });
+            if (!movedSheet) return p1;
+            return p1.map(p => {
+              if (p.id !== dstProjId) return p;
+              const sheets = [...(p.sheets || [])];
+              let toIdx = sheets.findIndex((s: any) => s.id === dropZone.id);
+              if (dropZone.half === 'bottom') toIdx++;
+              sheets.splice(toIdx, 0, { ...movedSheet, projectId: dstProjId });
+              return { ...p, sheets };
+            });
+          });
+          sheetsApi.update(dragItem.id, { projectId: dstProjId }).catch(() => {});
+        }
+
+      } else if (dropZone.type === 'project' && dropZone.id !== srcProjId) {
+        // Drop sheet onto project header → append to that project
+        let movedSheet: any = null;
+        setProjects(prev => {
+          const p1 = prev.map(p => {
+            if (p.id !== srcProjId) return p;
+            const sheets = (p.sheets || []).filter((s: any) => {
+              if (s.id === dragItem.id) { movedSheet = s; return false; }
+              return true;
+            });
+            return { ...p, sheets };
+          });
+          if (!movedSheet) return p1;
+          return p1.map(p => {
+            if (p.id !== dropZone.id) return p;
+            return { ...p, sheets: [...(p.sheets || []), { ...movedSheet, projectId: dropZone.id }] };
+          });
+        });
+        sheetsApi.update(dragItem.id, { projectId: dropZone.id }).catch(() => {});
+      }
+    }
+
+    onDragEnd();
+  }
+
   const formatMoney = (n: number) => n ? n.toLocaleString('ru-RU', { minimumFractionDigits: 2 }) + ' ₽' : '–';
   const formatDate = (d: string) => d ? new Date(d).toLocaleDateString('ru-RU') : '';
 
@@ -272,11 +392,25 @@ export default function ProjectsPage() {
             {pagedProjects.map(proj => {
               const isCollapsed = collapsed.has(proj.id);
               const sheets: any[] = proj.sheets || [];
+              const isDraggingThisProj = dragItem?.type === 'project' && dragItem.id === proj.id;
+              const projDropClass =
+                dropZone?.type === 'project' && dropZone.id === proj.id
+                  ? (dragItem?.type === 'sheet' ? ' drop-into' : dropZone.half === 'top' ? ' drop-before' : ' drop-after')
+                  : '';
               return (
                 <div key={proj.id}>
                   {/* Project row */}
-                  <div className="project-row project-header">
+                  <div
+                    className={`project-row project-header${isDraggingThisProj ? ' is-dragging' : ''}${projDropClass}`}
+                    draggable
+                    onDragStart={e => onDragStart(e, 'project', proj.id)}
+                    onDragOver={e => onDragOver(e, 'project', proj.id)}
+                    onDragLeave={onDragLeave}
+                    onDrop={onDrop}
+                    onDragEnd={onDragEnd}
+                  >
                     <div className="project-name">
+                      <span className="drag-handle" title="Переместить">⠿</span>
                       <button
                         className="collapse-btn"
                         onClick={e => { e.stopPropagation(); toggleCollapse(proj.id); }}
@@ -303,11 +437,26 @@ export default function ProjectsPage() {
                     <>
                       {sheets.map((sheet: any, si: number) => {
                         const isLast = si === sheets.length - 1;
+                        const isDraggingThisSheet = dragItem?.type === 'sheet' && dragItem.id === sheet.id;
+                        const sheetDropClass =
+                          dropZone?.type === 'sheet' && dropZone.id === sheet.id
+                            ? (dropZone.half === 'top' ? ' drop-before' : ' drop-after')
+                            : '';
                         return (
-                          <div key={sheet.id} className="project-row sheet-row"
+                          <div
+                            key={sheet.id}
+                            className={`project-row sheet-row${isDraggingThisSheet ? ' is-dragging' : ''}${sheetDropClass}`}
+                            draggable
+                            onDragStart={e => onDragStart(e, 'sheet', sheet.id, proj.id)}
+                            onDragOver={e => onDragOver(e, 'sheet', sheet.id, proj.id)}
+                            onDragLeave={onDragLeave}
+                            onDrop={onDrop}
+                            onDragEnd={onDragEnd}
                             onDoubleClick={() => openSheet(proj.id, sheet.id)}
-                            onContextMenu={e => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, type: 'sheet', id: sheet.id, projId: proj.id }); }}>
+                            onContextMenu={e => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, type: 'sheet', id: sheet.id, projId: proj.id }); }}
+                          >
                             <div className="project-name">
+                              <span className="drag-handle" title="Переместить">⠿</span>
                               <span className="sheet-tree-line">{isLast ? '└' : '├'}</span>
                               <span className="sheet-icon">≡</span>
                               {renamingId === sheet.id && renameType === 'sheet'

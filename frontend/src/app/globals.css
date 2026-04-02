@@ -406,12 +406,47 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
   border-bottom: 1px solid var(--border);
   align-items: center;
   transition: background .1s;
+  position: relative;
 }
 .project-row:last-child { border-bottom: none; }
 .project-row:hover { background: var(--bg); }
 .project-row.project-header { background: #f0f0f0; font-weight: 600; }
 .project-row.sheet-row { background: var(--white); padding-left: 40px; }
 .project-row.sheet-row:hover { background: var(--bg); }
+
+/* ===== DRAG & DROP ===== */
+.drag-handle {
+  cursor: grab;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  opacity: 0;
+  transition: opacity .15s;
+  user-select: none;
+  flex-shrink: 0;
+}
+.project-row:hover .drag-handle { opacity: 1; }
+.project-row.is-dragging { opacity: 0.35; }
+.project-row.is-dragging .drag-handle { cursor: grabbing; opacity: 1; }
+
+.project-row.drop-before::before,
+.project-row.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  height: 2px;
+  background: var(--yellow);
+  z-index: 10;
+  pointer-events: none;
+}
+.project-row.drop-before::before { top: -1px; }
+.project-row.drop-after::after { bottom: -1px; }
+
+.project-row.drop-into {
+  background: rgba(245, 200, 0, 0.12) !important;
+  box-shadow: inset 0 0 0 2px var(--yellow);
+}
 .project-name { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .project-icon { font-size: 16px; }
 .sheet-icon { font-size: 14px; color: var(--muted); }
