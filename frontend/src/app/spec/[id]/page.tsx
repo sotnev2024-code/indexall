@@ -717,15 +717,22 @@ export default function SpecPage() {
     const { r1, c1, r2, c2 } = getSelBoundsFromRefs();
     if (r1 < 0) return;
     const lines: string[] = [];
+    // "Итого" sits between coef (col 7) and deadline (col 8) in the DOM but
+    // is not in EDITABLE_COLS — inject it when selection spans both sides
+    const includeTotal = c1 <= 7 && c2 >= 8;
     for (let r = r1; r <= r2; r++) {
       const cells: string[] = [];
       for (let c = c1; c <= c2; c++) {
         cells.push(String(rowsRef.current[r]?.[EDITABLE_COLS[c]] ?? ''));
+        if (c === 7 && includeTotal) {
+          cells.push(String(rowsRef.current[r]?.total ?? ''));
+        }
       }
       lines.push(cells.join('\t'));
     }
     const text = lines.join('\n');
-    const rowCount = r2 - r1 + 1, colCount = c2 - c1 + 1;
+    const visibleColCount = c2 - c1 + 1 + (includeTotal ? 1 : 0);
+    const rowCount = r2 - r1 + 1, colCount = visibleColCount;
 
     const showToast = () => toast.success(
       rowCount === 1 && colCount === 1
