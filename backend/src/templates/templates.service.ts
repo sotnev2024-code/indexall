@@ -22,7 +22,7 @@ export class TemplatesService {
       templateData.meta = JSON.stringify(rows);
     }
     const template = this.templatesRepository.create(templateData);
-    const saved = await this.templatesRepository.save(template) as Template;
+    const saved = await this.templatesRepository.save(template) as unknown as Template;
     return this.withRows(saved);
   }
 
