@@ -624,7 +624,20 @@ export default function SpecPage() {
   async function saveAsTemplate() {
     if (!tplName.trim() || !tplModal) return;
     try {
-      await templatesApi.createFromSheet({ name: tplName.trim(), sheetId: tplModal.sheetId });
+      // Load the sheet's rows, then create a template storing them in `meta`
+      const { data: sheetData } = await sheetsApi.getOne(tplModal.sheetId);
+      const rows = (sheetData.rows || []).map((r: any) => ({
+        name: r.name || '',
+        brand: r.brand || '',
+        article: r.article || '',
+        qty: r.qty || '',
+        unit: r.unit || '',
+        price: r.price || '',
+        store: r.store || '',
+        coef: r.coef || '1',
+        deadline: r.deadline || '',
+      })).filter((r: any) => r.name || r.article);
+      await templatesApi.create({ name: tplName.trim(), rows });
       toast.success(`Шаблон «${tplName.trim()}» сохранён`);
       setTplModal(null);
       setTplName('');

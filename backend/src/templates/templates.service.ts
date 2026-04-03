@@ -10,27 +10,41 @@ export class TemplatesService {
     private templatesRepository: Repository<Template>,
   ) {}
 
-  async create(data: Partial<Template>): Promise<Template> {
-    const template = this.templatesRepository.create(data);
-    return this.templatesRepository.save(template);
+  private withRows(t: Template): any {
+    let rows: any[] = [];
+    try { const parsed = JSON.parse(t.meta); if (Array.isArray(parsed)) rows = parsed; } catch {}
+    return { ...t, rows };
   }
 
-  async findAll(scope?: string): Promise<Template[]> {
+  async create(data: any): Promise<any> {
+    const { rows, ...templateData } = data;
+    if (rows !== undefined && !templateData.meta) {
+      templateData.meta = JSON.stringify(rows);
+    }
+    const template = this.templatesRepository.create(templateData);
+    const saved = await this.templatesRepository.save(template);
+    return this.withRows(saved);
+  }
+
+  async findAll(scope?: string): Promise<any[]> {
+    let templates: Template[];
     if (scope === 'common') {
-      return this.templatesRepository.find({
+      templates = await this.templatesRepository.find({
         where: { userId: IsNull() },
         order: { createdAt: 'DESC' },
       });
+    } else {
+      templates = await this.templatesRepository.find({ order: { createdAt: 'DESC' } });
     }
-    return this.templatesRepository.find({ order: { createdAt: 'DESC' } });
+    return templates.map(t => this.withRows(t));
   }
 
-  async findOne(id: number): Promise<Template> {
+  async findOne(id: number): Promise<any> {
     const template = await this.templatesRepository.findOne({ where: { id } });
     if (!template) {
       throw new NotFoundException(`Template with ID ${id} not found`);
     }
-    return template;
+    return this.withRows(template);
   }
 
   async update(id: number, updateData: Partial<Template>): Promise<Template> {
