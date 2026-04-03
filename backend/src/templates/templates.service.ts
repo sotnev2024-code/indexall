@@ -58,6 +58,13 @@ export class TemplatesService {
     await this.templatesRepository.remove(template);
   }
 
+  async toggleFavorite(id: number): Promise<any> {
+    const template = await this.findOne(id);
+    template.is_favorite = !template.is_favorite;
+    const saved = await this.templatesRepository.save(template) as unknown as Template;
+    return this.withRows(saved);
+  }
+
   async addFile(id: number): Promise<Template> {
     const template = await this.findOne(id);
     template.files += 1;

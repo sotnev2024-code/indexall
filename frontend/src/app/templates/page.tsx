@@ -29,12 +29,19 @@ export default function TemplatesPage() {
   }
 
   async function applyTemplate(mode: 'new' | 'replace' | 'append') {
-    if (!selected || !activeSheetId) { toast.error('Сначала откройте лист'); return; }
-    if (mode === 'new') {
-      await sheetsApi.create(activeProjectId!, selected.name);
-      toast.success('Шаблон вставлен на новый лист');
-    } else {
-      const rows = (selected.rows || []).map((r: any, i: number) => ({ ...r, row_number: i + 1 }));
+    if (!selected) { toast.error('Выберите шаблон'); return; }
+    const rows = (selected.rows || []).map((r: any, i: number) => ({ ...r, row_number: i + 1 }));
+    try {
+      if (mode === 'new') {
+        if (!activeProjectId) { toast.error('Сначала откройте проект'); return; }
+        const { data: newSheet } = await sheetsApi.create(activeProjectId, selected.name);
+        if (rows.length > 0) await sheetsApi.saveRows(newSheet.id, rows);
+        toast.success('Шаблон вставлен на новый лист');
+        setApplyModalOpen(false);
+        router.push(`/spec/${newSheet.id}`);
+        return;
+      }
+      if (!activeSheetId) { toast.error('Сначала откройте лист'); return; }
       if (mode === 'replace') {
         await sheetsApi.saveRows(activeSheetId, rows);
         toast.success('Лист заменён шаблоном');
@@ -44,15 +51,37 @@ export default function TemplatesPage() {
         await sheetsApi.saveRows(activeSheetId, [...existing, ...rows]);
         toast.success('Шаблон добавлен в конец листа');
       }
-    }
-    setApplyModalOpen(false);
-    router.push(`/spec/${activeSheetId}`);
+      setApplyModalOpen(false);
+      router.push(`/spec/${activeSheetId}`);
+    } catch { toast.error('Ошибка применения шаблона'); }
+  }
+
+  async function deleteTemplate() {
+    if (!selected || !confirm(`Удалить шаблон «${selected.name}»?`)) return;
+    try {
+      await templatesApi.remove(selected.id);
+      const next = templates.filter(t => t.id !== selected.id);
+      setTemplates(next);
+      setSelected(next[0] || null);
+      toast.success('Шаблон удалён');
+    } catch { toast.error('Ошибка удаления'); }
+  }
+
+  async function toggleFavorite() {
+    if (!selected) return;
+    try {
+      await templatesApi.toggleFavorite(selected.id);
+      const updated = { ...selected, is_favorite: !selected.is_favorite };
+      setSelected(updated);
+      setTemplates(prev => prev.map(t => t.id === selected.id ? updated : t));
+      toast.success(updated.is_favorite ? 'Добавлено в избранное' : 'Убрано из избранного');
+    } catch { toast.error('Ошибка'); }
   }
 
   const groups = [
-    { key: 'my', label: 'Мои шаблоны' },
-    { key: 'fav', label: 'Избранное' },
-    { key: 'common', label: 'Общие шаблоны' },
+    { key: 'my',     label: 'Мои шаблоны',    filter: (t: any) => !t.scope || t.scope === 'my' },
+    { key: 'fav',    label: 'Избранное',       filter: (t: any) => !!t.is_favorite },
+    { key: 'common', label: 'Общие шаблоны',   filter: (t: any) => t.scope === 'common' },
   ];
 
   const filtered = templates.filter(t => !search || t.name.toLowerCase().includes(search.toLowerCase()));
@@ -88,7 +117,7 @@ export default function TemplatesPage() {
           {/* Left */}
           <div className="templates-left">
             {groups.map(g => {
-              const items = filtered.filter(t => t.scope === g.key || (g.key === 'my' && !t.scope));
+              const items = filtered.filter(g.filter);
               return (
                 <div key={g.key} className="template-group">
                   <div className="template-group-title">
@@ -114,14 +143,14 @@ export default function TemplatesPage() {
                   {selected.meta_json ? Object.values(selected.meta_json).filter(Boolean).join(' – ') : selected.sheet_type || ''}
                 </div>
                 <div className="template-actions">
-                  <button className="btn-outline" style={{ fontSize: 12 }}>✎ Редактировать</button>
-                  <button className="btn-outline" style={{ fontSize: 12 }}>📁 Файлы ({selected.files?.length || 0})</button>
-                  <button className="btn-primary" style={{ fontSize: 12 }} onClick={() => setApplyModalOpen(true)}>+ Добавить в лист</button>
-                  <button className="btn-outline" style={{ fontSize: 12 }} onClick={async () => {
-                    await templatesApi.toggleFavorite(selected.id);
-                    toast.success(selected.is_favorite ? 'Убрано из избранного' : 'Добавлено в избранное');
-                  }}>
+                  <button className="btn-primary" style={{ fontSize: 12 }} onClick={() => setApplyModalOpen(true)}>
+                    + Добавить в лист
+                  </button>
+                  <button className="btn-outline" style={{ fontSize: 12 }} onClick={toggleFavorite}>
                     {selected.is_favorite ? '★' : '☆'} В избранное
+                  </button>
+                  <button className="btn-danger" style={{ fontSize: 12 }} onClick={deleteTemplate}>
+                    🗑 Удалить
                   </button>
                 </div>
                 <table className="template-table">

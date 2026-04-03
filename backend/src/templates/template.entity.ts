@@ -29,6 +29,9 @@ export class Template {
   @Column({ default: 0 })
   used_count: number;
 
+  @Column({ default: false })
+  is_favorite: boolean;
+
   @Column({ nullable: true })
   userId: number;
 

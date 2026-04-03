@@ -51,6 +51,12 @@ export class TemplatesController {
     return this.templatesService.remove(+id);
   }
 
+  @Post(':id/favorite')
+  @ApiOperation({ summary: 'Переключить избранное' })
+  toggleFavorite(@Param('id') id: string) {
+    return this.templatesService.toggleFavorite(+id);
+  }
+
   @Post(':id/files')
   @ApiOperation({ summary: 'Добавить файл к шаблону' })
   addFile(@Param('id') id: string) {
