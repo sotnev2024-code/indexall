@@ -620,6 +620,27 @@ export default function SpecPage() {
     setRenamingSheetId(null);
   }
 
+  // ── Delete sheet ─────────────────────────────────────────────
+  async function deleteSheet(sheetId: number) {
+    const s = projectSheets.find((x: any) => x.id === sheetId);
+    if (!confirm(`Удалить лист «${s?.name || sheetId}»? Это действие необратимо.`)) return;
+    try {
+      await sheetsApi.remove(sheetId);
+      setProject((p: any) => p ? { ...p, sheets: p.sheets.filter((x: any) => x.id !== sheetId) } : p);
+      // If deleted the active sheet, switch to first remaining one
+      if (currentId === sheetId) {
+        const remaining = projectSheets.filter((x: any) => x.id !== sheetId);
+        if (remaining.length > 0) {
+          setCurrentId(remaining[0].id);
+          window.history.replaceState(null, '', `/spec/${remaining[0].id}`);
+        } else {
+          router.push('/projects');
+        }
+      }
+      toast.success('Лист удалён');
+    } catch { toast.error('Ошибка удаления листа'); }
+  }
+
   // ── Save as template ─────────────────────────────────────────
   async function saveAsTemplate() {
     if (!tplName.trim() || !tplModal) return;
@@ -1593,6 +1614,18 @@ export default function SpecPage() {
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8, flexShrink: 0 }}><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v14a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
             Сохранить как шаблон
+          </div>
+          <div
+            className="sheet-tab-ctx-item"
+            style={{ color: '#e53935', borderTop: '1px solid var(--border)', marginTop: 4, paddingTop: 8 }}
+            onClick={() => {
+              const id = tabMenu.id;
+              setTabMenu(null);
+              deleteSheet(id);
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8, flexShrink: 0 }}><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+            Удалить лист
           </div>
         </div>
       )}
