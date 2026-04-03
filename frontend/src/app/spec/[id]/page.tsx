@@ -391,7 +391,14 @@ export default function SpecPage() {
   useEffect(() => {
     loadData();
     if (currentId === Number(_routeId)) loadBrands();
-    const close = () => { setAcDrops(null); setStoreDropdown(null); setGlobalResults([]); setTabMenu(null); };
+    const close = (e: Event) => {
+      setAcDrops(null); setStoreDropdown(null); setGlobalResults([]);
+      // Don't close tab menu when clicking inside it or on its trigger button
+      const t = e.target as HTMLElement;
+      if (!t.closest('.sheet-tab-menu-btn') && !t.closest('.sheet-tab-ctx-menu')) {
+        setTabMenu(null);
+      }
+    };
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
   }, [currentId]);
