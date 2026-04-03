@@ -3,7 +3,7 @@ import { useEffect, useState, useRef, useCallback, memo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
-import { sheetsApi, projectsApi, catalogApi, exportApi, storesApi } from '@/lib/api';
+import { sheetsApi, projectsApi, catalogApi, exportApi, storesApi, templatesApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 
 const MAX_UNDO = 30;
@@ -235,6 +235,17 @@ export default function SpecPage() {
   const [renamingSheetId, setRenamingSheetId] = useState<number | null>(null);
   const [renameVal, setRenameVal] = useState('');
 
+  // ── Sheet tab context menu ────────────────────────────────────
+  const [tabMenu, setTabMenu] = useState<{ id: number; x: number; y: number } | null>(null);
+
+  // ── Save as template modal ────────────────────────────────────
+  const [tplModal, setTplModal] = useState<{ sheetId: number } | null>(null);
+  const [tplName, setTplName] = useState('');
+
+  // ── Sheet tab drag-and-drop ───────────────────────────────────
+  const [tabDrag, setTabDrag] = useState<number | null>(null);
+  const [tabDropSide, setTabDropSide] = useState<{ id: number; side: 'left' | 'right' } | null>(null);
+
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pasteText, setPasteText] = useState('');
 
@@ -380,7 +391,7 @@ export default function SpecPage() {
   useEffect(() => {
     loadData();
     if (currentId === Number(_routeId)) loadBrands();
-    const close = () => { setAcDrops(null); setStoreDropdown(null); setGlobalResults([]); };
+    const close = () => { setAcDrops(null); setStoreDropdown(null); setGlobalResults([]); setTabMenu(null); };
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
   }, [currentId]);
@@ -600,6 +611,61 @@ export default function SpecPage() {
       if (sheet?.id === renamingSheetId) setSheet((s: any) => s ? { ...s, name: renameVal.trim() } : s);
     } catch { toast.error('Ошибка переименования'); }
     setRenamingSheetId(null);
+  }
+
+  // ── Save as template ─────────────────────────────────────────
+  async function saveAsTemplate() {
+    if (!tplName.trim() || !tplModal) return;
+    try {
+      await templatesApi.createFromSheet({ name: tplName.trim(), sheetId: tplModal.sheetId });
+      toast.success(`Шаблон «${tplName.trim()}» сохранён`);
+      setTplModal(null);
+      setTplName('');
+    } catch { toast.error('Ошибка сохранения шаблона'); }
+  }
+
+  // ── Sheet tab drag-and-drop ───────────────────────────────────
+  function onTabDragStart(e: React.DragEvent, id: number) {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', '');
+    setTabDrag(id);
+  }
+
+  function onTabDragOver(e: React.DragEvent, id: number) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (tabDrag === id) { setTabDropSide(null); return; }
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const side = e.clientX < rect.left + rect.width / 2 ? 'left' : 'right';
+    setTabDropSide(prev => prev?.id === id && prev?.side === side ? prev : { id, side });
+  }
+
+  function onTabDragLeave(e: React.DragEvent) {
+    if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
+      setTabDropSide(null);
+    }
+  }
+
+  function onTabDrop(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!tabDrag || !tabDropSide || tabDrag === tabDropSide.id) { onTabDragEnd(); return; }
+    setProject((prev: any) => {
+      if (!prev) return prev;
+      const sheets = [...(prev.sheets || [])];
+      const fromIdx = sheets.findIndex((s: any) => s.id === tabDrag);
+      const [item] = sheets.splice(fromIdx, 1);
+      let toIdx = sheets.findIndex((s: any) => s.id === tabDropSide.id);
+      if (tabDropSide.side === 'right') toIdx++;
+      sheets.splice(toIdx, 0, item);
+      return { ...prev, sheets };
+    });
+    onTabDragEnd();
+  }
+
+  function onTabDragEnd() {
+    setTabDrag(null);
+    setTabDropSide(null);
   }
 
   async function saveRows() {
@@ -1322,43 +1388,63 @@ export default function SpecPage() {
         {/* ── Sheet tabs ── */}
         {projectSheets.length > 0 && (
           <div className="sheet-tabs">
-            {projectSheets.map((s: any) => (
-              <div key={s.id} className={`sheet-tab${currentId === s.id ? ' active' : ''}`}>
-                {renamingSheetId === s.id ? (
-                  <input
-                    className="sheet-tab-rename"
-                    value={renameVal}
-                    onChange={e => setRenameVal(e.target.value)}
-                    onBlur={commitRenameSheet}
-                    onKeyDown={e => e.key === 'Enter' && commitRenameSheet()}
-                    autoFocus
-                    onClick={e => e.stopPropagation()}
-                  />
-                ) : (
-                  <span
-                    style={{ cursor: 'pointer' }}
-                    onClick={async () => {
-                      if (currentId === s.id) return;
-                      if (hasUnsavedRef.current) {
-                        const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
-                        try { await sheetsApi.saveRows(currentIdRef.current, toSave); hasUnsavedRef.current = false; _setUnsaved(false); } catch {}
-                      }
-                      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-                      setCurrentId(s.id);
-                      window.history.replaceState(null, '', `/spec/${s.id}`);
+            {projectSheets.map((s: any) => {
+              const isDraggingThis = tabDrag === s.id;
+              const dropClass = tabDropSide?.id === s.id ? ` drop-${tabDropSide.side}` : '';
+              return (
+                <div
+                  key={s.id}
+                  className={`sheet-tab${currentId === s.id ? ' active' : ''}${isDraggingThis ? ' tab-dragging' : ''}${dropClass}`}
+                  draggable
+                  onDragStart={e => onTabDragStart(e, s.id)}
+                  onDragOver={e => onTabDragOver(e, s.id)}
+                  onDragLeave={onTabDragLeave}
+                  onDrop={onTabDrop}
+                  onDragEnd={onTabDragEnd}
+                >
+                  {renamingSheetId === s.id ? (
+                    <input
+                      className="sheet-tab-rename"
+                      value={renameVal}
+                      onChange={e => setRenameVal(e.target.value)}
+                      onBlur={commitRenameSheet}
+                      onKeyDown={e => e.key === 'Enter' && commitRenameSheet()}
+                      autoFocus
+                      onClick={e => e.stopPropagation()}
+                    />
+                  ) : (
+                    <span
+                      style={{ cursor: 'pointer' }}
+                      onClick={async () => {
+                        if (currentId === s.id) return;
+                        if (hasUnsavedRef.current) {
+                          const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
+                          try { await sheetsApi.saveRows(currentIdRef.current, toSave); hasUnsavedRef.current = false; _setUnsaved(false); } catch {}
+                        }
+                        if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+                        setCurrentId(s.id);
+                        window.history.replaceState(null, '', `/spec/${s.id}`);
+                      }}
+                      onDoubleClick={() => startRenameSheet(s)}
+                    >
+                      {s.name}
+                    </span>
+                  )}
+                  <button
+                    className="sheet-tab-menu-btn"
+                    title="Действия с листом"
+                    onClick={e => {
+                      e.stopPropagation();
+                      setTabMenu(prev => prev?.id === s.id ? null : { id: s.id, x: e.clientX, y: e.clientY });
                     }}
-                    onDoubleClick={() => startRenameSheet(s)}
                   >
-                    {s.name}
-                  </span>
-                )}
-                {currentId === s.id && (
-                  <button className="sheet-tab-edit" title="Переименовать" onClick={e => { e.stopPropagation(); startRenameSheet(s); }}>
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                      <circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
+                    </svg>
                   </button>
-                )}
-              </div>
-            ))}
+                </div>
+              );
+            })}
             <button className="sheet-tab-add" title="Добавить лист" onClick={addSheet}>+</button>
           </div>
         )}
@@ -1455,6 +1541,67 @@ export default function SpecPage() {
               <span className="store-offer-avail">{o.availability || ''}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* ── Sheet tab context menu ── */}
+      {tabMenu && (
+        <div
+          className="sheet-tab-ctx-menu"
+          style={{ top: tabMenu.y + 4, left: tabMenu.x }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div
+            className="sheet-tab-ctx-item"
+            onClick={() => {
+              const s = projectSheets.find((x: any) => x.id === tabMenu.id);
+              if (s) startRenameSheet(s);
+              setTabMenu(null);
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8, flexShrink: 0 }}><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            Переименовать
+          </div>
+          <div
+            className="sheet-tab-ctx-item"
+            onClick={() => {
+              const s = projectSheets.find((x: any) => x.id === tabMenu.id);
+              setTplName(s?.name || '');
+              setTplModal({ sheetId: tabMenu.id });
+              setTabMenu(null);
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8, flexShrink: 0 }}><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v14a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            Сохранить как шаблон
+          </div>
+        </div>
+      )}
+
+      {/* ── Save as template modal ── */}
+      {tplModal && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setTplModal(null)}
+        >
+          <div
+            style={{ background: '#fff', borderRadius: 12, padding: 28, width: 420, maxWidth: '95vw', boxShadow: '0 8px 40px rgba(0,0,0,0.18)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700 }}>Сохранить как шаблон</h3>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--muted)' }}>Введите название шаблона</p>
+            <input
+              autoFocus
+              value={tplName}
+              onChange={e => setTplName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') saveAsTemplate(); if (e.key === 'Escape') setTplModal(null); }}
+              placeholder="Название шаблона"
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, boxSizing: 'border-box', marginBottom: 16 }}
+            />
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="btn-outline" onClick={() => setTplModal(null)}>Отмена</button>
+              <button className="btn-primary" onClick={saveAsTemplate} disabled={!tplName.trim()}>Сохранить</button>
+            </div>
+          </div>
         </div>
       )}
 

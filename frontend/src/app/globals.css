@@ -600,23 +600,66 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
   overflow-x: auto;
 }
 .sheet-tab {
-  display: flex; align-items: center; gap: 6px;
-  padding: 8px 14px;
+  display: flex; align-items: center; gap: 4px;
+  padding: 8px 10px 8px 14px;
   cursor: pointer; font-size: 13px;
   border-bottom: 2px solid transparent;
   color: var(--muted);
   white-space: nowrap;
   transition: color .15s, border-color .15s;
+  position: relative;
+  user-select: none;
 }
 .sheet-tab:hover { color: var(--text); }
 .sheet-tab.active { color: var(--text); border-bottom-color: var(--yellow); font-weight: 600; }
-.sheet-tab-edit {
+
+/* ··· menu button on tab */
+.sheet-tab-menu-btn {
   background: none; border: none; cursor: pointer;
-  color: var(--muted); padding: 0; display: flex; align-items: center;
-  opacity: 0; transition: opacity .15s;
+  color: var(--muted); padding: 2px 3px;
+  display: flex; align-items: center; border-radius: 3px;
+  opacity: 0; transition: opacity .15s, background .1s;
+  flex-shrink: 0;
 }
-.sheet-tab:hover .sheet-tab-edit,
-.sheet-tab.active .sheet-tab-edit { opacity: 1; }
+.sheet-tab:hover .sheet-tab-menu-btn,
+.sheet-tab.active .sheet-tab-menu-btn { opacity: 1; }
+.sheet-tab-menu-btn:hover { background: var(--border); color: var(--text); }
+
+/* Tab context menu dropdown */
+.sheet-tab-ctx-menu {
+  position: fixed;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.13);
+  z-index: 500;
+  min-width: 200px;
+  padding: 4px 0;
+  animation: page-fade-in .1s ease;
+}
+.sheet-tab-ctx-item {
+  display: flex; align-items: center;
+  padding: 9px 14px;
+  font-size: 13px; cursor: pointer; color: var(--text);
+  transition: background .1s;
+}
+.sheet-tab-ctx-item:hover { background: var(--bg); }
+
+/* Drag-and-drop indicators on tabs */
+.sheet-tab.tab-dragging { opacity: 0.35; }
+.sheet-tab.drop-left::before,
+.sheet-tab.drop-right::after {
+  content: '';
+  position: absolute;
+  top: 4px; bottom: 4px;
+  width: 2px;
+  background: var(--yellow);
+  border-radius: 2px;
+  pointer-events: none;
+}
+.sheet-tab.drop-left::before { left: 0; }
+.sheet-tab.drop-right::after { right: 0; }
+
 .sheet-tab-rename {
   border: none; border-bottom: 2px solid var(--yellow);
   outline: none; font-size: 13px; background: transparent;
