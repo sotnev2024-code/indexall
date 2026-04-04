@@ -54,8 +54,11 @@ export default function ImportModal({ open, onClose, onImport }: Props) {
   const [mode, setMode] = useState<'append' | 'replace'>('append');
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
+  // Row range (1-indexed, user-facing)
+  const [rowFrom, setRowFrom] = useState(1);
+  const [rowTo, setRowTo] = useState(1000);
 
-  const reset = () => { setParsed(null); setMapping([]); };
+  const reset = () => { setParsed(null); setMapping([]); setRowFrom(1); setRowTo(1000); };
 
   const close = () => { reset(); onClose(); };
 
@@ -92,8 +95,11 @@ export default function ImportModal({ open, onClose, onImport }: Props) {
         return AUTO_MAP[key] || '';
       });
 
-      setParsed({ fileName: file.name, headers, rows: dataRows.slice(0, 1000) });
+      const limitedRows = dataRows.slice(0, 1000);
+      setParsed({ fileName: file.name, headers, rows: limitedRows });
       setMapping(autoMapping);
+      setRowFrom(1);
+      setRowTo(limitedRows.length);
     } catch {
       toast.error('Не удалось прочитать файл. Убедитесь, что это .xlsx, .xls или .csv');
     } finally {
@@ -117,9 +123,14 @@ export default function ImportModal({ open, onClose, onImport }: Props) {
   const mappedCount = mapping.filter(m => m !== '').length;
   const hasName = mapping.some(m => m === 'name') || mapping.some(m => m === 'article');
 
+  // Clamp and normalize the range (1-indexed → 0-indexed slice)
+  const clampFrom = Math.max(1, Math.min(rowFrom, parsed?.rows.length ?? 1));
+  const clampTo   = Math.max(clampFrom, Math.min(rowTo, parsed?.rows.length ?? 1));
+  const selectedRows = parsed ? parsed.rows.slice(clampFrom - 1, clampTo) : [];
+
   const doImport = () => {
     if (!parsed) return;
-    const processedRows = parsed.rows
+    const processedRows = selectedRows
       .map(row => {
         const r: any = { coef: '1', store: 'ЭТМ' };
         mapping.forEach((field, ci) => {
@@ -133,7 +144,7 @@ export default function ImportModal({ open, onClose, onImport }: Props) {
       .filter(r => r.name || r.article);
 
     if (processedRows.length === 0) {
-      toast.error('Нет строк для импорта. Сопоставьте хотя бы колонку «Название» или «Артикул».');
+      toast.error('В выбранном диапазоне нет строк с данными. Проверьте диапазон и маппинг колонок.');
       return;
     }
     onImport(processedRows, mode);
@@ -195,6 +206,49 @@ export default function ImportModal({ open, onClose, onImport }: Props) {
               <button className="import-change-file" onClick={reset}>Изменить файл</button>
             </div>
 
+            {/* Row range */}
+            <div className="import-range-row">
+              <span className="import-range-label">Диапазон строк:</span>
+              <span className="import-range-group">
+                <span style={{ fontSize: 13, color: 'var(--muted)' }}>с</span>
+                <input
+                  type="number"
+                  className="import-range-input"
+                  min={1}
+                  max={parsed.rows.length}
+                  value={rowFrom}
+                  onChange={e => {
+                    const v = Math.max(1, Math.min(Number(e.target.value) || 1, parsed.rows.length));
+                    setRowFrom(v);
+                    if (rowTo < v) setRowTo(v);
+                  }}
+                />
+                <span style={{ fontSize: 13, color: 'var(--muted)' }}>по</span>
+                <input
+                  type="number"
+                  className="import-range-input"
+                  min={rowFrom}
+                  max={parsed.rows.length}
+                  value={rowTo}
+                  onChange={e => {
+                    const v = Math.max(rowFrom, Math.min(Number(e.target.value) || rowFrom, parsed.rows.length));
+                    setRowTo(v);
+                  }}
+                />
+              </span>
+              <span className="import-range-hint">
+                {clampTo - clampFrom + 1} строк из {parsed.rows.length}
+              </span>
+              {(clampFrom !== 1 || clampTo !== parsed.rows.length) && (
+                <button
+                  className="import-change-file"
+                  onClick={() => { setRowFrom(1); setRowTo(parsed.rows.length); }}
+                >
+                  Сбросить
+                </button>
+              )}
+            </div>
+
             {/* Column mapping */}
             <p className="import-section-label">Сопоставьте колонки файла с полями спецификации:</p>
             <div className="import-mapping-grid">
@@ -220,11 +274,14 @@ export default function ImportModal({ open, onClose, onImport }: Props) {
             </div>
 
             {/* Preview */}
-            <p className="import-section-label" style={{ marginTop: 18 }}>Превью (первые 3 строки):</p>
+            <p className="import-section-label" style={{ marginTop: 18 }}>
+              Превью (строки {clampFrom}–{Math.min(clampFrom + 2, clampTo)}):
+            </p>
             <div className="import-preview-wrap">
               <table className="import-preview-table">
                 <thead>
                   <tr>
+                    <th style={{ color: 'var(--muted)', fontWeight: 500, minWidth: 32 }}>#</th>
                     {parsed.headers.map((_, ci) => (
                       <th key={ci}>
                         {mapping[ci]
@@ -235,8 +292,9 @@ export default function ImportModal({ open, onClose, onImport }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {parsed.rows.slice(0, 3).map((row, ri) => (
+                  {selectedRows.slice(0, 3).map((row, ri) => (
                     <tr key={ri}>
+                      <td style={{ color: 'var(--muted)', fontSize: 11 }}>{clampFrom + ri}</td>
                       {parsed.headers.map((_, ci) => (
                         <td key={ci} style={{ opacity: mapping[ci] ? 1 : 0.3 }}>
                           {String(row[ci] ?? '')}
@@ -263,7 +321,7 @@ export default function ImportModal({ open, onClose, onImport }: Props) {
             {/* Footer */}
             <div className="import-modal-footer">
               <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-                {mappedCount} кол. сопоставлено · {parsed.rows.length} строк
+                {mappedCount} кол. сопоставлено · строки {clampFrom}–{clampTo} ({clampTo - clampFrom + 1} шт.)
               </span>
               <div style={{ display: 'flex', gap: 10 }}>
                 <button className="btn-outline" onClick={close}>Отмена</button>
