@@ -626,6 +626,106 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .sheet-tab-menu-btn:hover { background: var(--border); color: var(--text); }
 
 /* Tab context menu dropdown */
+/* ── Import modal ─────────────────────────────────────────────── */
+.import-modal {
+  background: var(--white);
+  border-radius: 14px;
+  padding: 28px;
+  width: 680px;
+  max-width: 96vw;
+  box-shadow: 0 12px 50px rgba(0,0,0,0.22);
+  animation: page-fade-in .15s ease;
+}
+.import-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 20px;
+}
+.import-modal-header h3 { margin: 0; font-size: 17px; font-weight: 700; }
+.import-modal-close {
+  background: none; border: none; cursor: pointer; font-size: 22px;
+  color: var(--muted); line-height: 1; padding: 0 4px;
+}
+.import-modal-close:hover { color: var(--text); }
+
+.import-dropzone {
+  border: 2px dashed var(--border);
+  border-radius: 10px;
+  padding: 48px 24px;
+  text-align: center;
+  cursor: default;
+  transition: border-color .15s, background .15s;
+}
+.import-dropzone.dragging {
+  border-color: var(--primary);
+  background: rgba(var(--primary-rgb, 59,130,246), 0.04);
+}
+
+.import-file-info {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--bg); border-radius: 8px; padding: 8px 12px;
+  font-size: 13px; margin-bottom: 16px;
+}
+.import-change-file {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  font-size: 12px; color: var(--primary); padding: 2px 4px;
+}
+.import-change-file:hover { text-decoration: underline; }
+
+.import-section-label {
+  font-size: 12px; font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em;
+  margin: 0 0 10px;
+}
+
+.import-mapping-grid {
+  display: grid; gap: 6px;
+  max-height: 260px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px;
+}
+.import-mapping-row {
+  display: grid; grid-template-columns: 1fr 20px 1fr; align-items: center; gap: 8px;
+}
+.import-col-name {
+  font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text);
+}
+.import-mapping-row select {
+  font-size: 13px; padding: 4px 6px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--white); color: var(--text);
+  width: 100%;
+}
+.import-mapping-row select:focus { outline: none; border-color: var(--primary); }
+
+.import-preview-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border); border-radius: 8px;
+  margin-bottom: 16px; max-height: 160px; overflow-y: auto;
+}
+.import-preview-table {
+  border-collapse: collapse; font-size: 12px; width: 100%; min-width: 400px;
+}
+.import-preview-table th {
+  background: var(--bg); padding: 6px 10px; text-align: left;
+  font-weight: 600; white-space: nowrap; border-bottom: 1px solid var(--border);
+  position: sticky; top: 0;
+}
+.import-preview-table td {
+  padding: 5px 10px; border-bottom: 1px solid var(--border);
+  white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis;
+}
+.import-preview-table tr:last-child td { border-bottom: none; }
+
+.import-mode-row {
+  display: flex; gap: 20px; font-size: 13px;
+  margin-bottom: 20px;
+}
+.import-mode-row label { cursor: pointer; display: flex; align-items: center; gap: 4px; }
+
+.import-modal-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  border-top: 1px solid var(--border); padding-top: 16px;
+}
+
 /* Row context menu */
 .row-ctx-menu {
   position: fixed;

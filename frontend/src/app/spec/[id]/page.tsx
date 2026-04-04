@@ -3,6 +3,7 @@ import { useEffect, useState, useRef, useCallback, memo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
+import ImportModal from '@/components/ImportModal';
 import { sheetsApi, projectsApi, catalogApi, exportApi, storesApi, templatesApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 
@@ -252,6 +253,7 @@ export default function SpecPage() {
 
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pasteText, setPasteText] = useState('');
+  const [importModalOpen, setImportModalOpen] = useState(false);
 
   const undoKey = `undo_${currentId}`;
   const redoKey = `redo_${currentId}`;
@@ -535,6 +537,36 @@ export default function SpecPage() {
     setGlobalResults([]);
     setUnsaved(true);
   }, [pushHistorySnapshot, setUnsaved]);
+
+  // ── Import from price-list file ──────────────────────────────
+  function handleImport(importedRows: any[], importMode: 'append' | 'replace') {
+    pushHistorySnapshot(rowsRef.current);
+    const MIN_ROWS = 25;
+    const emptyRowPad = (i: number) => ({ row_number: i + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ЭТМ', coef: '1', total: '', deadline: '' });
+
+    const processed = importedRows.map(r => ({
+      ...r,
+      coef:  r.coef  || '1',
+      store: r.store || 'ЭТМ',
+      qty:   r.qty   || '',
+      price: r.price || '',
+      total: calcTotal(r.price || '', r.qty || '', r.coef || '1'),
+    }));
+
+    setRows(prev => {
+      let next: any[];
+      if (importMode === 'replace') {
+        next = [...processed];
+      } else {
+        const existing = prev.filter((r: any) => r.name || r.article);
+        next = [...existing, ...processed];
+      }
+      while (next.length < MIN_ROWS) next.push(emptyRowPad(next.length));
+      return next;
+    });
+    setUnsaved(true);
+    toast.success(`Импортировано ${processed.length} строк`);
+  }
 
   async function searchCatalog(q: string, rowIdx: number, field: string, el: HTMLInputElement) {
     if (!q || q.length < 2) { setAcDrops(null); return; }
@@ -1393,6 +1425,10 @@ export default function SpecPage() {
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
             Вставить
           </button>
+          <button className="btn-outline" title="Загрузить прайс-лист из файла (.xlsx, .csv)" onClick={() => setImportModalOpen(true)}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+            Прайс-лист
+          </button>
           <div style={{ flex: 1 }} />
           <div className="spec-summary">
             <span className="spec-summary-item">
@@ -1755,6 +1791,12 @@ export default function SpecPage() {
           </div>
         </div>
       )}
+
+      <ImportModal
+        open={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        onImport={handleImport}
+      />
     </div>
   );
 }
