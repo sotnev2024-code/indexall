@@ -52,13 +52,14 @@ interface RowProps {
   onCellMouseDown: (rowIdx: number, colIdx: number, e: React.MouseEvent) => void;
   onCellMouseEnter: (rowIdx: number, colIdx: number) => void;
   onCellDoubleClick: (rowIdx: number, colIdx: number) => void;
+  onRowContextMenu: (rowIdx: number, x: number, y: number) => void;
 }
 
 const SpecRow = memo(function SpecRow({
   row, idx, isFirst, onUpdate, onSearch, onInputKeyDown, onStoreClick, inputRef, onFocus, onBlur,
   onNonEditableMouseDown,
   activeCellRow, activeCellCol, isEditing, selR1, selC1, selR2, selC2,
-  onCellMouseDown, onCellMouseEnter, onCellDoubleClick,
+  onCellMouseDown, onCellMouseEnter, onCellDoubleClick, onRowContextMenu,
 }: RowProps) {
   const isActive = (col: number) => activeCellRow === idx && activeCellCol === col;
   const inRange = (col: number) => idx >= selR1 && idx <= selR2 && col >= selC1 && col <= selC2;
@@ -90,7 +91,7 @@ const SpecRow = memo(function SpecRow({
   });
 
   return (
-    <tr>
+    <tr onContextMenu={e => { e.preventDefault(); onRowContextMenu(idx, e.clientX, e.clientY); }}>
       <td className="col-num" onMouseDown={onNonEditableMouseDown}>{idx + 1}</td>
 
       <td {...tdAttrs(0, 'col-name', { position: 'relative' })}>
@@ -234,6 +235,9 @@ export default function SpecPage() {
 
   const [renamingSheetId, setRenamingSheetId] = useState<number | null>(null);
   const [renameVal, setRenameVal] = useState('');
+
+  // ── Row context menu ──────────────────────────────────────────
+  const [rowCtxMenu, setRowCtxMenu] = useState<{ rowIdx: number; x: number; y: number } | null>(null);
 
   // ── Sheet tab context menu ────────────────────────────────────
   const [tabMenu, setTabMenu] = useState<{ id: number; x: number; y: number } | null>(null);
@@ -393,10 +397,12 @@ export default function SpecPage() {
     if (currentId === Number(_routeId)) loadBrands();
     const close = (e: Event) => {
       setAcDrops(null); setStoreDropdown(null); setGlobalResults([]);
-      // Don't close tab menu when clicking inside it or on its trigger button
       const t = e.target as HTMLElement;
       if (!t.closest('.sheet-tab-menu-btn') && !t.closest('.sheet-tab-ctx-menu')) {
         setTabMenu(null);
+      }
+      if (!t.closest('.row-ctx-menu')) {
+        setRowCtxMenu(null);
       }
     };
     document.addEventListener('click', close);
@@ -844,6 +850,39 @@ export default function SpecPage() {
     });
     setUnsaved(true);
   }
+
+  // ── Row delete (two-step: clear → remove+shift) ───────────────
+  const emptyRow = (idx: number) => ({ row_number: idx + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ЭТМ', coef: '1', total: '', deadline: '' });
+
+  const isRowEmpty = (row: any) => !row.name && !row.article && !row.brand && !row.price && !row.qty;
+
+  function deleteRow(rowIdx: number) {
+    const row = rowsRef.current[rowIdx];
+    pushHistorySnapshot(rowsRef.current);
+    if (!isRowEmpty(row)) {
+      // Step 1: clear all fields, leave an empty row
+      setRows(prev => {
+        const next = [...prev];
+        next[rowIdx] = emptyRow(rowIdx);
+        return next;
+      });
+      setUnsaved(true);
+      toast('Строка очищена — удалите ещё раз, чтобы убрать её', { icon: '🗑' });
+    } else {
+      // Step 2: remove row, shift up, pad bottom
+      setRows(prev => {
+        const next = prev.filter((_, i) => i !== rowIdx);
+        while (next.length < 25) next.push(emptyRow(next.length));
+        return next;
+      });
+      setUnsaved(true);
+      toast.success('Строка удалена');
+    }
+  }
+
+  const handleRowContextMenu = useCallback((rowIdx: number, x: number, y: number) => {
+    setRowCtxMenu({ rowIdx, x, y });
+  }, []);
 
   // Copy selected range as TSV — uses state (called from JSX handlers)
   function copyRange() {
@@ -1539,6 +1578,7 @@ export default function SpecPage() {
                   onCellMouseDown={handleCellMouseDown}
                   onCellMouseEnter={handleCellMouseEnter}
                   onCellDoubleClick={handleCellDoubleClick}
+                  onRowContextMenu={handleRowContextMenu}
                 />
               ))}
             </tbody>
@@ -1582,6 +1622,29 @@ export default function SpecPage() {
               <span className="store-offer-avail">{o.availability || ''}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* ── Row context menu ── */}
+      {rowCtxMenu && (
+        <div
+          className="row-ctx-menu"
+          style={{ top: rowCtxMenu.y, left: rowCtxMenu.x }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div
+            className="row-ctx-item"
+            onClick={() => {
+              const idx = rowCtxMenu.rowIdx;
+              setRowCtxMenu(null);
+              deleteRow(idx);
+            }}
+          >
+            {isRowEmpty(rowsRef.current[rowCtxMenu.rowIdx])
+              ? (<><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8, flexShrink: 0 }}><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>Удалить строку</>)
+              : (<><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8, flexShrink: 0 }}><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>Очистить строку</>)
+            }
+          </div>
         </div>
       )}
 
