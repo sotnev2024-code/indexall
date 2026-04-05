@@ -159,14 +159,15 @@ export class CatalogService implements OnModuleInit {
   }
 
   async uploadPriceList(file: Express.Multer.File, mapping: PriceListMapping, uploadedBy: number) {
-    const displayName = this.parseDisplayName(file.originalname);
+    const fixedName = this.fixFilenameEncoding(file.originalname);
+    const displayName = this.parseDisplayName(fixedName);
 
     let manuf = await this.manufRepo.findOne({ where: { name: displayName } });
     if (!manuf) manuf = await this.manufRepo.save({ name: displayName, is_active: true });
 
     const pl = await this.plRepo.save({
       manufacturer_id: manuf.id,
-      file_name: file.originalname,
+      file_name: fixedName,
       file_path: file.path,
       status: PriceListStatus.PROCESSING,
       mapping,
@@ -230,7 +231,7 @@ export class CatalogService implements OnModuleInit {
     const old = await this.plRepo.findOne({ where: { id } });
     const pl = await this.plRepo.save({
       manufacturer_id: old.manufacturer_id,
-      file_name: file.originalname,
+      file_name: this.fixFilenameEncoding(file.originalname),
       file_path: file.path,
       status: PriceListStatus.PROCESSING,
       mapping,
@@ -450,8 +451,22 @@ export class CatalogService implements OnModuleInit {
       .map(c => ({ ...c, children: this.buildTree(categories, c.id) }));
   }
 
+  /** Fix Cyrillic garbling: multer decodes multipart filenames as latin-1,
+   *  but browsers send UTF-8 bytes — re-decode to get correct characters. */
+  private fixFilenameEncoding(str: string): string {
+    try {
+      const fixed = Buffer.from(str, 'latin1').toString('utf8');
+      // Only use the re-decoded version if it actually contains non-ASCII (Cyrillic etc.)
+      // and doesn't have replacement characters (invalid sequence)
+      return fixed.includes('\uFFFD') ? str : fixed;
+    } catch {
+      return str;
+    }
+  }
+
   private parseDisplayName(filename: string): string {
-    let name = filename.replace(/\.[^.]+$/, '');
+    const name0 = this.fixFilenameEncoding(filename);
+    let name = name0.replace(/\.[^.]+$/, '');
     name = name.replace(/-\d{1,2}[.\-]\d{1,2}[.\-]\d{2,4}$/, '');
     name = name.replace(/-\d{4}-\d{2}-\d{2}$/, '');
     return name.replace(/_/g, ' ').trim();
