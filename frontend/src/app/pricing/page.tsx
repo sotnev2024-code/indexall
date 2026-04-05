@@ -90,7 +90,7 @@ function PricingContent() {
   async function handleActivateTrial() {
     if (!mounted) return;
     const token = localStorage.getItem('token');
-    if (!token) { router.push('/auth/login'); return; }
+    if (!token) { router.push('/auth/login?redirect=/pricing'); return; }
     setLoading('trial');
     try {
       await paymentsApi.activateTrial();
@@ -110,6 +110,8 @@ function PricingContent() {
   const isCurrentTrial = plan === 'trial';
   const isCurrentPro   = plan === 'base' || plan === 'pro' || plan === 'admin';
   const trialAvailable = canActivateTrial(plan, trialUsed);
+  // Show trial button when: not logged in, OR on free plan and trial not yet used
+  const showTrialBtn = !user || trialAvailable;
 
   return (
     <div style={{ minHeight: '100vh', background: '#f4f4f4' }}>
@@ -258,7 +260,15 @@ function PricingContent() {
                   </div>
                 )}
               </div>
-            ) : trialAvailable ? (
+            ) : isCurrentPro ? (
+              <div style={{ textAlign: 'center', padding: '10px 0' }}>
+                <span style={{ fontSize: 12, color: '#888' }}>У вас уже активен PRO тариф</span>
+              </div>
+            ) : trialUsed ? (
+              <div style={{ textAlign: 'center', padding: '10px 0' }}>
+                <span style={{ fontSize: 12, color: '#888' }}>Пробный период уже использован</span>
+              </div>
+            ) : showTrialBtn ? (
               <div>
                 <div style={{ fontSize: 22, fontWeight: 800, textAlign: 'center', marginBottom: 12 }}>0 ₽</div>
                 <button
@@ -267,18 +277,13 @@ function PricingContent() {
                   onClick={handleActivateTrial}
                   disabled={loading === 'trial'}
                 >
-                  {loading === 'trial' ? 'Активация…' : 'Активировать бесплатно'}
+                  {loading === 'trial' ? 'Активация…' : 'Оформить'}
                 </button>
+                <div style={{ fontSize: 11, color: '#888', textAlign: 'center', marginTop: 8 }}>
+                  Только один раз, бесплатно
+                </div>
               </div>
-            ) : trialUsed ? (
-              <div style={{ textAlign: 'center', padding: '10px 0' }}>
-                <span style={{ fontSize: 12, color: '#888' }}>Пробный период уже использован</span>
-              </div>
-            ) : (
-              <div style={{ textAlign: 'center', padding: '10px 0' }}>
-                <span style={{ fontSize: 12, color: '#888' }}>Только для бесплатного тарифа</span>
-              </div>
-            )}
+            ) : null}
           </div>
 
         </div>

@@ -612,7 +612,7 @@ export default function AdminPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {tariffConfigs.map(cfg => {
+                      {tariffConfigs.filter((cfg: any) => cfg.is_active).map(cfg => {
                         const ed = editingConfig[cfg.id] || {
                           name: cfg.name,
                           price: String(cfg.price),
