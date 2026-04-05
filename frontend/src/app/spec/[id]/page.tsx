@@ -284,6 +284,7 @@ export default function SpecPage() {
   const hasUnsavedRef = useRef(false);
   const focusSnapshotRef = useRef<any[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshProgress, setRefreshProgress] = useState<{ done: number; total: number } | null>(null);
   useEffect(() => { rowsRef.current = rows; }, [rows]);
 
   // Sync helpers: update both React state AND ref synchronously
@@ -1313,31 +1314,57 @@ export default function SpecPage() {
       .map((r, i) => ({ r, i }))
       .filter(({ r }) => r.article && r.auto_price !== false);
     if (targets.length === 0) { toast('Нет строк с артикулом для обновления цены'); return; }
+
+    // Check ETM is configured
+    try {
+      const { data: status } = await storesApi.getEtmStatus();
+      if (!status.configured) {
+        toast.error('ЭТМ не настроен. Укажите ETM_LOGIN и ETM_PASSWORD на сервере.');
+        return;
+      }
+    } catch { toast.error('Не удалось проверить статус ЭТМ'); return; }
+
     setRefreshing(true);
-    let updated = 0;
+    setRefreshProgress({ done: 0, total: targets.length });
     const snap = JSON.parse(JSON.stringify(rowsRef.current));
-    for (const { r, i } of targets) {
-      try {
-        const { data: offers } = await storesApi.getOffersByArticle(r.article);
-        const offer = (offers as any[]).find((o: any) => o.price);
-        if (offer?.price) {
-          setRows(prev => {
-            const next = [...prev];
-            const price = String(offer.price);
-            next[i] = { ...next[i], price, total: calcTotal(price, next[i].qty, next[i].coef), store: offer.store_name || next[i].store };
-            return next;
-          });
-          updated++;
+    const articles = targets.map(({ r }) => r.article as string);
+
+    try {
+      // Single request — backend handles 1 req/sec throttling internally
+      const { data: prices } = await storesApi.getEtmPrices(articles);
+
+      let updated = 0;
+      setRows(prev => {
+        const next = [...prev];
+        for (const { r, i } of targets) {
+          const price = prices[r.article];
+          if (price != null && price > 0) {
+            const priceStr = String(price);
+            next[i] = {
+              ...next[i],
+              price: priceStr,
+              store: 'ЭТМ',
+              total: calcTotal(priceStr, next[i].qty, next[i].coef),
+            };
+            updated++;
+          }
         }
-      } catch { /* skip */ }
-    }
-    setRefreshing(false);
-    if (updated > 0) {
-      pushHistorySnapshot(snap);
-      setUnsaved(true);
-      toast.success(`Обновлено цен: ${updated} из ${targets.length}`);
-    } else {
-      toast('Актуальные цены не найдены');
+        return next;
+      });
+
+      if (updated > 0) {
+        pushHistorySnapshot(snap);
+        setUnsaved(true);
+        toast.success(`ЭТМ: обновлено ${updated} из ${targets.length} цен`);
+      } else {
+        toast('ЭТМ: цены не найдены. Проверьте артикулы в строках.');
+      }
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || 'Ошибка запроса к ЭТМ';
+      toast.error(msg);
+    } finally {
+      setRefreshing(false);
+      setRefreshProgress(null);
     }
   }
 
@@ -1448,9 +1475,11 @@ export default function SpecPage() {
               style={{ marginLeft: 6, padding: '5px 10px', fontSize: 12 }}
               onClick={handleRefreshPrices}
               disabled={refreshing}
-              title="Обновить цены по артикулам из ЭТМ"
+              title="Обновить цены по артикулам из ЭТМ (1 арт/сек)"
             >
-              {refreshing ? '…' : '↻ Цены'}
+              {refreshing
+                ? (refreshProgress ? `↻ ~${refreshProgress.total} арт…` : '↻ …')
+                : '↻ Цены ЭТМ'}
             </button>
           </div>
         </div>

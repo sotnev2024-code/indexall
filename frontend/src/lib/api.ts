@@ -112,6 +112,9 @@ export const exportApi = {
 export const storesApi = {
   getAll: () => api.get('/stores'),
   getOffersByArticle: (article: string) => api.get('/stores/offers', { params: { article } }),
+  getEtmStatus: () => api.get<{ configured: boolean }>('/stores/etm/status'),
+  // Returns { [article]: price | null } — takes up to 1.1s per article (ETM rate limit)
+  getEtmPrices: (articles: string[]) => api.post<Record<string, number | null>>('/stores/etm/prices', { articles }),
 };
 
 // ── Trash ─────────────────────────────────────────────────────
