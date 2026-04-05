@@ -75,6 +75,10 @@ export default function AdminPage() {
     userId: '', operator: 'Admin', plan: 'Base', amount: '0', status: 'none-active', expiresAt: '', comment: '',
   });
 
+  // Tariff configs (plan editor)
+  const [tariffConfigs, setTariffConfigs] = useState<any[]>([]);
+  const [editingConfig, setEditingConfig] = useState<Record<number, any>>({});
+
   // Stats
   const [stats, setStats] = useState<any>(null);
 
@@ -124,13 +128,32 @@ export default function AdminPage() {
   }
   async function loadTariffOps() {
     try {
-      const [{ data: ops }, { data: us }] = await Promise.all([
+      const [{ data: ops }, { data: us }, { data: cfgs }] = await Promise.all([
         adminApi.getTariffOperations(),
         users.length === 0 ? adminApi.getUsers() : Promise.resolve({ data: users }),
+        adminApi.getTariffConfigs(),
       ]);
       setTariffOps(ops);
       if (users.length === 0) setUsers(us);
+      setTariffConfigs(cfgs);
+      const initial: Record<number, any> = {};
+      cfgs.forEach((c: any) => { initial[c.id] = { name: c.name, price: String(c.price), description: c.description || '' }; });
+      setEditingConfig(initial);
     } catch { toast.error('Ошибка загрузки тарифных операций'); }
+  }
+
+  async function saveTariffConfig(id: number) {
+    const data = editingConfig[id];
+    if (!data) return;
+    try {
+      const { data: updated } = await adminApi.updateTariffConfig(id, {
+        name: data.name,
+        price: Number(data.price),
+        description: data.description,
+      });
+      setTariffConfigs(prev => prev.map(c => c.id === id ? updated : c));
+      toast.success('Тариф обновлён');
+    } catch { toast.error('Ошибка сохранения тарифа'); }
   }
   async function loadStats() {
     try { const { data } = await adminApi.getStats(); setStats(data); }
@@ -564,6 +587,65 @@ export default function AdminPage() {
           {tab === 'tariffs' && (
             <>
               <div className="admin-section-title">Тарифы и их операции</div>
+
+              {/* ── Tariff plan editor ── */}
+              <div className="admin-form" style={{ marginBottom: 32 }}>
+                <div className="admin-form-title">Редактор тарифных планов</div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="admin-table" style={{ minWidth: 700 }}>
+                    <thead>
+                      <tr>
+                        <th>Ключ</th>
+                        <th>Название</th>
+                        <th>Цена (RUB/мес)</th>
+                        <th>Описание</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tariffConfigs.map(cfg => {
+                        const ed = editingConfig[cfg.id] || { name: cfg.name, price: String(cfg.price), description: cfg.description || '' };
+                        return (
+                          <tr key={cfg.id}>
+                            <td><code style={{ fontSize: 12, background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4 }}>{cfg.plan_key}</code></td>
+                            <td>
+                              <input
+                                value={ed.name}
+                                onChange={e => setEditingConfig(p => ({ ...p, [cfg.id]: { ...ed, name: e.target.value } }))}
+                                style={{ width: '100%', padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13 }}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                value={ed.price}
+                                onChange={e => setEditingConfig(p => ({ ...p, [cfg.id]: { ...ed, price: e.target.value } }))}
+                                style={{ width: 100, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13 }}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                value={ed.description}
+                                onChange={e => setEditingConfig(p => ({ ...p, [cfg.id]: { ...ed, description: e.target.value } }))}
+                                style={{ width: '100%', padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13 }}
+                                placeholder="Описание тарифа"
+                              />
+                            </td>
+                            <td>
+                              <button className="btn-primary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => saveTariffConfig(cfg.id)}>
+                                Сохранить
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {tariffConfigs.length === 0 && (
+                        <tr><td colSpan={5} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>Загрузка…</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
 
               {/* Add form */}
               <div className="admin-form" style={{ marginBottom: 24 }}>

@@ -1,6 +1,6 @@
 import {
-  Controller, Get, Post, Patch, Delete,
-  Param, Body, UseGuards, ParseIntPipe, ParseEnumPipe,
+  Controller, Get, Post, Patch, Delete, Put,
+  Param, Body, UseGuards, ParseIntPipe, ParseEnumPipe, OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -15,10 +15,18 @@ import {
   CatalogProduct, CatalogTile, CatalogCategory,
 } from '../catalog/entities/catalog.entities';
 import { TariffOperation } from './tariff-operation.entity';
+import { TariffConfig } from './tariff-config.entity';
+
+const DEFAULT_TARIFF_CONFIGS = [
+  { plan_key: 'free',  name: 'Бесплатный', price: 0,   description: 'Базовый бесплатный доступ', is_active: true },
+  { plan_key: 'trial', name: 'Пробный',    price: 0,   description: '14 дней бесплатного Pro', is_active: true },
+  { plan_key: 'base',  name: 'Базовый',    price: 990, description: 'Доступ к основным функциям', is_active: true },
+  { plan_key: 'pro',   name: 'Профессиональный', price: 2490, description: 'Полный доступ ко всем функциям', is_active: true },
+];
 
 @Controller('admin')
 @UseGuards(JwtAuthGuard, AdminGuard)
-export class AdminController {
+export class AdminController implements OnModuleInit {
   constructor(
     @InjectRepository(User) private usersRepo: Repository<User>,
     @InjectRepository(Project) private projectsRepo: Repository<Project>,
@@ -30,7 +38,15 @@ export class AdminController {
     @InjectRepository(CatalogTile) private tileRepo: Repository<CatalogTile>,
     @InjectRepository(CatalogCategory) private catRepo: Repository<CatalogCategory>,
     @InjectRepository(TariffOperation) private tariffRepo: Repository<TariffOperation>,
+    @InjectRepository(TariffConfig) private tariffConfigRepo: Repository<TariffConfig>,
   ) {}
+
+  async onModuleInit() {
+    for (const cfg of DEFAULT_TARIFF_CONFIGS) {
+      const exists = await this.tariffConfigRepo.findOne({ where: { plan_key: cfg.plan_key } });
+      if (!exists) await this.tariffConfigRepo.save(this.tariffConfigRepo.create(cfg));
+    }
+  }
 
   // ── Users ────────────────────────────────────────────────────
 
@@ -205,6 +221,27 @@ export class AdminController {
   async deleteTariffOperation(@Param('id', ParseIntPipe) id: number) {
     await this.tariffRepo.delete(id);
     return { ok: true };
+  }
+
+  // ── Tariff configs (plan editor) ─────────────────────────────
+
+  @Get('tariff-configs')
+  getTariffConfigs() {
+    return this.tariffConfigRepo.find({ order: { id: 'ASC' } });
+  }
+
+  @Put('tariff-configs/:id')
+  async updateTariffConfig(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { name?: string; price?: number; description?: string; is_active?: boolean },
+  ) {
+    await this.tariffConfigRepo.update(id, {
+      ...(body.name !== undefined && { name: body.name }),
+      ...(body.price !== undefined && { price: body.price }),
+      ...(body.description !== undefined && { description: body.description }),
+      ...(body.is_active !== undefined && { is_active: body.is_active }),
+    });
+    return this.tariffConfigRepo.findOne({ where: { id } });
   }
 
   // ── Templates (admin view) ───────────────────────────────────

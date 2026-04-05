@@ -17,6 +17,14 @@ export default function TemplatesPage() {
   const [filters, setFilters] = useState<any>({});
   const [loading, setLoading] = useState(true);
   const [applyModalOpen, setApplyModalOpen] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+
+  const toggleGroup = (key: string) =>
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
 
   useEffect(() => { loadTemplates(); }, []);
 
@@ -118,13 +126,19 @@ export default function TemplatesPage() {
           <div className="templates-left">
             {groups.map(g => {
               const items = filtered.filter(g.filter);
+              const isGroupCollapsed = collapsedGroups.has(g.key);
               return (
                 <div key={g.key} className="template-group">
-                  <div className="template-group-title">
-                    <span>▼ 📁</span>
+                  <div
+                    className="template-group-title"
+                    style={{ cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => toggleGroup(g.key)}
+                    title={isGroupCollapsed ? 'Раскрыть' : 'Свернуть'}
+                  >
+                    <span>{isGroupCollapsed ? '▶' : '▼'} 📁</span>
                     <span>{g.label} <span className="template-group-count">({items.length})</span></span>
                   </div>
-                  {items.map(t => (
+                  {!isGroupCollapsed && items.map(t => (
                     <div key={t.id} className={`template-item${selected?.id === t.id ? ' active' : ''}`} onClick={() => setSelected(t)}>
                       <span>≡</span><span>{t.name}</span>
                     </div>

@@ -96,6 +96,7 @@ export default function CatalogPage() {
         className={`tree-item${selectedCatId === node.id ? ' selected' : ''}`}
         style={{ paddingLeft: 12 + depth * 14 }}
         onClick={() => selectCat(node, manufId, manufName)}
+        onDoubleClick={e => { e.stopPropagation(); if (node.children?.length) toggleCat(node.id); }}
       >
         <button className="tree-toggle" onClick={e => { e.stopPropagation(); toggleCat(node.id); }}>
           {node.children?.length ? (catExpanded.has(node.id) ? '▼' : '▶') : ' '}

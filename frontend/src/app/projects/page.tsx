@@ -408,6 +408,7 @@ export default function ProjectsPage() {
                     onDragLeave={onDragLeave}
                     onDrop={onDrop}
                     onDragEnd={onDragEnd}
+                    onDoubleClick={() => toggleCollapse(proj.id)}
                   >
                     <div className="project-name">
                       <span className="drag-handle" title="Переместить">⠿</span>
@@ -422,7 +423,7 @@ export default function ProjectsPage() {
                       {renamingId === proj.id && renameType === 'project'
                         ? <input className="inline-input" value={renameValue} onChange={e => setRenameValue(e.target.value)}
                             onBlur={commitRename} onKeyDown={e => e.key === 'Enter' && commitRename()} autoFocus />
-                        : <span onDoubleClick={() => startRename('project', proj.id, proj.name)}>{proj.name}</span>
+                        : <span onDoubleClick={e => { e.stopPropagation(); startRename('project', proj.id, proj.name); }}>{proj.name}</span>
                       }
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--muted)' }}>{formatDate(proj.updated_at)}</div>

@@ -140,6 +140,9 @@ export const adminApi = {
   deleteAdminTemplate: (id: number) => api.delete(`/admin/templates/${id}`),
   getPricelists: () => api.get('/admin/pricelists'),
   getTilesStats: () => api.get('/admin/tiles-stats'),
+  getTariffConfigs: () => api.get('/admin/tariff-configs'),
+  updateTariffConfig: (id: number, data: { name?: string; price?: number; description?: string; is_active?: boolean }) =>
+    api.put(`/admin/tariff-configs/${id}`, data),
 };
 
 // ── Profile ───────────────────────────────────────────────────
