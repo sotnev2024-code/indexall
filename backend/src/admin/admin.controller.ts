@@ -23,31 +23,23 @@ const DEFAULT_TARIFF_CONFIGS = [
     name: 'Бесплатный',
     price: 0,
     price_annual: null,
-    description: 'Просмотр шаблонов и проектов, работа с листом спецификации, доступны каталоги производителей',
-    is_active: true,
-  },
-  {
-    plan_key: 'trial',
-    name: 'Базовый пробный',
-    price: 0,
-    price_annual: null,
-    description: '7 дней работы на базовом тарифе без ограничения функционала. Бесплатно, только один раз.',
-    is_active: true,
-  },
-  {
-    plan_key: 'base',
-    name: 'Базовый',
-    price: 7990,
-    price_annual: 79900,
-    description: 'Ускорение работы со спецификациями, ценами, аналогами, аксессуарами, шаблонами.',
+    description: 'Просмотр шаблонов и проектов, работа с листом спецификации, доступны каталоги производителей.',
     is_active: true,
   },
   {
     plan_key: 'pro',
-    name: 'Профессиональный',
+    name: 'PRO',
     price: 7990,
     price_annual: 79900,
-    description: 'Полный доступ ко всем функциям платформы.',
+    description: 'Полный доступ ко всем функциям: спецификации, каталог, интеграции, шаблоны, аналоги, аксессуары.',
+    is_active: true,
+  },
+  {
+    plan_key: 'trial',
+    name: 'Trial',
+    price: 0,
+    price_annual: null,
+    description: '7 дней полного доступа ко всем функциям PRO. Бесплатно, только один раз.',
     is_active: true,
   },
 ];
@@ -70,9 +62,23 @@ export class AdminController implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    // Deactivate removed plans (e.g. 'base')
+    const activeKeys = DEFAULT_TARIFF_CONFIGS.map(c => c.plan_key);
+    const all = await this.tariffConfigRepo.find();
+    for (const existing of all) {
+      if (!activeKeys.includes(existing.plan_key) && existing.is_active) {
+        await this.tariffConfigRepo.update(existing.id, { is_active: false });
+      }
+    }
+    // Upsert defaults (only update fields that haven't been customised to non-default values)
     for (const cfg of DEFAULT_TARIFF_CONFIGS) {
       const exists = await this.tariffConfigRepo.findOne({ where: { plan_key: cfg.plan_key } });
-      if (!exists) await this.tariffConfigRepo.save(this.tariffConfigRepo.create(cfg));
+      if (!exists) {
+        await this.tariffConfigRepo.save(this.tariffConfigRepo.create(cfg));
+      } else {
+        // Always keep is_active and price_annual in sync with defaults; name/price/description admin-editable
+        await this.tariffConfigRepo.update(exists.id, { is_active: cfg.is_active });
+      }
     }
   }
 

@@ -108,7 +108,7 @@ function PricingContent() {
   const expiresAt = (user as any)?.subscriptionExpiresAt;
   const isCurrentFree  = !plan || plan === 'free';
   const isCurrentTrial = plan === 'trial';
-  const isCurrentBase  = plan === 'base' || plan === 'pro' || plan === 'admin';
+  const isCurrentPro   = plan === 'base' || plan === 'pro' || plan === 'admin';
   const trialAvailable = canActivateTrial(plan, trialUsed);
 
   return (
@@ -127,14 +127,14 @@ function PricingContent() {
           <div style={{
             background: '#fff', borderRadius: 12, padding: 28,
             border: isCurrentFree ? '2px solid #1a1a1a' : '1px solid #d0d0d0',
-            display: 'flex', flexDirection: 'column', gap: 0,
+            display: 'flex', flexDirection: 'column',
             boxShadow: isCurrentFree ? '0 2px 16px rgba(0,0,0,0.08)' : 'none',
           }}>
             <div style={{ marginBottom: 8 }}>
               <h2 style={{ fontSize: 20, fontWeight: 800 }}>{plans.free?.name ?? 'Бесплатный'}</h2>
             </div>
             <p style={{ fontSize: 12, color: '#666', marginBottom: 20, lineHeight: 1.5 }}>
-              {plans.free?.description ?? 'Начните ускорять подбор оборудования и увеличивать количество обработанных заявок'}
+              {plans.free?.description ?? 'Просмотр шаблонов и проектов, работа с листом спецификации, доступны каталоги производителей.'}
             </p>
             <div style={{ flex: 1, marginBottom: 28 }}>
               {FREE_FEATURES.map(f => (
@@ -144,6 +144,7 @@ function PricingContent() {
                 </div>
               ))}
             </div>
+            <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 16, textAlign: 'center' }}>0 ₽</div>
             <button
               disabled
               style={{
@@ -152,22 +153,23 @@ function PricingContent() {
                 width: '100%', color: '#1a1a1a',
               }}
             >
-              {isCurrentFree ? 'Используется' : 'Базовый тариф'}
+              {isCurrentFree ? 'Используется' : 'Бесплатный тариф'}
             </button>
           </div>
 
-          {/* ── Card 2: Базовый ── */}
+          {/* ── Card 2: PRO ── */}
           <div style={{
             background: '#fff', borderRadius: 12, padding: 28,
-            border: isCurrentBase ? '2px solid #f5c800' : '1px solid #d0d0d0',
+            border: isCurrentPro ? '2px solid #f5c800' : '1px solid #d0d0d0',
             display: 'flex', flexDirection: 'column',
             boxShadow: '0 2px 16px rgba(0,0,0,0.06)',
           }}>
-            <div style={{ marginBottom: 8 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 800 }}>{plans.base?.name ?? 'Базовый'}</h2>
+            <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 800 }}>{plans.pro?.name ?? 'PRO'}</h2>
+              <span style={{ background: '#f5c800', borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>Все функции</span>
             </div>
             <p style={{ fontSize: 12, color: '#666', marginBottom: 20, lineHeight: 1.5 }}>
-              {plans.base?.description ?? 'Ускорение работы со спецификациями, ценами, аналогами, аксессуарами, шаблонами.'}
+              {plans.pro?.description ?? 'Полный доступ ко всем функциям: спецификации, каталог, интеграции, шаблоны, аналоги, аксессуары.'}
             </p>
             <div style={{ flex: 1, marginBottom: 20 }}>
               {PAID_FEATURES.map(f => (
@@ -178,17 +180,16 @@ function PricingContent() {
               ))}
             </div>
 
-            {/* Active subscription expiry */}
-            {isCurrentBase && expiresAt && (
+            {isCurrentPro && expiresAt && (
               <div style={{ marginBottom: 14, padding: '8px 12px', background: '#f0fdf4', borderRadius: 8, fontSize: 12, color: '#166534' }}>
                 Активен до {new Date(expiresAt).toLocaleDateString('ru-RU')}
               </div>
             )}
 
-            {/* Monthly price */}
+            {/* Monthly */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
               <div style={{ fontSize: 18, fontWeight: 700 }}>
-                {plans.base ? fmt(plans.base.price) : '7 990'} <span style={{ fontWeight: 400, fontSize: 13 }}>₽/месяц</span>
+                {plans.pro ? fmt(plans.pro.price) : '7 990'} <span style={{ fontWeight: 400, fontSize: 13 }}>₽/месяц</span>
               </div>
               <button
                 className="btn-primary"
@@ -196,20 +197,20 @@ function PricingContent() {
                 onClick={() => handleBuy('monthly')}
                 disabled={loading === 'monthly'}
               >
-                {loading === 'monthly' ? '...' : isCurrentBase ? 'Продлить' : 'Купить'}
+                {loading === 'monthly' ? '...' : isCurrentPro ? 'Продлить' : 'Купить'}
               </button>
             </div>
 
-            {/* Annual price */}
-            {(plans.base?.price_annual != null || !plans.base) && (
+            {/* Annual */}
+            {(plans.pro?.price_annual != null || !plans.pro) && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #eee', paddingTop: 10 }}>
                 <div>
                   <div style={{ fontSize: 18, fontWeight: 700 }}>
-                    {plans.base ? fmt(plans.base.price_annual!) : '79 900'} <span style={{ fontWeight: 400, fontSize: 13 }}>₽/год</span>
+                    {plans.pro ? fmt(plans.pro.price_annual!) : '79 900'} <span style={{ fontWeight: 400, fontSize: 13 }}>₽/год</span>
                   </div>
-                  {plans.base?.price_annual && plans.base?.price && (
+                  {plans.pro?.price_annual != null && plans.pro?.price && (
                     <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
-                      Экономия {fmt(plans.base.price * 12 - plans.base.price_annual)} ₽
+                      Экономия {fmt(plans.pro.price * 12 - plans.pro.price_annual)} ₽
                     </div>
                   )}
                 </div>
@@ -219,7 +220,7 @@ function PricingContent() {
                   onClick={() => handleBuy('annual')}
                   disabled={loading === 'annual'}
                 >
-                  {loading === 'annual' ? '...' : isCurrentBase ? 'Продлить' : 'Купить'}
+                  {loading === 'annual' ? '...' : isCurrentPro ? 'Продлить' : 'Купить'}
                 </button>
               </div>
             )}
@@ -233,11 +234,11 @@ function PricingContent() {
             boxShadow: isCurrentTrial ? '0 2px 16px rgba(245,200,0,0.2)' : 'none',
           }}>
             <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 800 }}>{plans.trial?.name ?? 'Базовый пробный'}</h2>
+              <h2 style={{ fontSize: 20, fontWeight: 800 }}>{plans.trial?.name ?? 'Trial'}</h2>
               <span style={{ background: '#f5c800', borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>7 дней</span>
             </div>
             <p style={{ fontSize: 12, color: '#666', marginBottom: 20, lineHeight: 1.5 }}>
-              {plans.trial?.description ?? '7 дней работы на базовом тарифе без ограничения функционала. Бесплатно, только один раз.'}
+              {plans.trial?.description ?? '7 дней полного доступа ко всем функциям PRO. Бесплатно, только один раз.'}
             </p>
             <div style={{ flex: 1, marginBottom: 28 }}>
               {PAID_FEATURES.map(f => (
@@ -250,7 +251,7 @@ function PricingContent() {
 
             {isCurrentTrial ? (
               <div style={{ textAlign: 'center', padding: '10px 0' }}>
-                <span style={{ fontWeight: 700, fontSize: 13, color: '#059669' }}>✓ Пробный тариф активен</span>
+                <span style={{ fontWeight: 700, fontSize: 13, color: '#059669' }}>✓ Trial активен</span>
                 {expiresAt && (
                   <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>
                     До {new Date(expiresAt).toLocaleDateString('ru-RU')}
@@ -259,9 +260,7 @@ function PricingContent() {
               </div>
             ) : trialAvailable ? (
               <div>
-                <div style={{ fontSize: 13, color: '#888', textAlign: 'center', marginBottom: 10 }}>
-                  <strong style={{ fontSize: 18, color: '#1a1a1a' }}>Бесплатно</strong>
-                </div>
+                <div style={{ fontSize: 22, fontWeight: 800, textAlign: 'center', marginBottom: 12 }}>0 ₽</div>
                 <button
                   className="btn-primary"
                   style={{ width: '100%', justifyContent: 'center' }}
