@@ -7,6 +7,15 @@ import { useAppStore } from '@/store/app.store';
 import { canActivateTrial } from '@/lib/permissions';
 import Header from '@/components/layout/Header';
 
+interface TariffConfig {
+  id: number;
+  plan_key: string;
+  name: string;
+  price: number;
+  price_annual: number | null;
+  description: string;
+}
+
 const FREE_FEATURES = [
   'Просмотр шаблонов и проектов',
   'Работа с листом спецификации',
@@ -22,6 +31,10 @@ const PAID_FEATURES = [
   'Подбор аналогов оборудования',
   'Подбор аксессуаров',
 ];
+
+function fmt(n: number) {
+  return Number(n).toLocaleString('ru-RU');
+}
 
 // Success toast is triggered here — needs Suspense because of useSearchParams
 function SuccessHandler() {
@@ -43,8 +56,17 @@ function PricingContent() {
   const { user } = useAppStore();
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
+  const [plans, setPlans] = useState<Record<string, TariffConfig>>({});
 
   useEffect(() => { setMounted(true); }, []);
+
+  useEffect(() => {
+    paymentsApi.getPlans().then(({ data }) => {
+      const map: Record<string, TariffConfig> = {};
+      data.forEach((p: TariffConfig) => { map[p.plan_key] = p; });
+      setPlans(map);
+    }).catch(() => {});
+  }, []);
 
   async function handleBuy(planType: 'monthly' | 'annual') {
     if (!mounted) return;
@@ -109,10 +131,10 @@ function PricingContent() {
             boxShadow: isCurrentFree ? '0 2px 16px rgba(0,0,0,0.08)' : 'none',
           }}>
             <div style={{ marginBottom: 8 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 800 }}>Бесплатный</h2>
+              <h2 style={{ fontSize: 20, fontWeight: 800 }}>{plans.free?.name ?? 'Бесплатный'}</h2>
             </div>
             <p style={{ fontSize: 12, color: '#666', marginBottom: 20, lineHeight: 1.5 }}>
-              Начните ускорять подбор оборудования и увеличивать количество обработанных заявок
+              {plans.free?.description ?? 'Начните ускорять подбор оборудования и увеличивать количество обработанных заявок'}
             </p>
             <div style={{ flex: 1, marginBottom: 28 }}>
               {FREE_FEATURES.map(f => (
@@ -142,10 +164,10 @@ function PricingContent() {
             boxShadow: '0 2px 16px rgba(0,0,0,0.06)',
           }}>
             <div style={{ marginBottom: 8 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 800 }}>Базовый</h2>
+              <h2 style={{ fontSize: 20, fontWeight: 800 }}>{plans.base?.name ?? 'Базовый'}</h2>
             </div>
             <p style={{ fontSize: 12, color: '#666', marginBottom: 20, lineHeight: 1.5 }}>
-              Ускорение работы со спецификациями, ценами, аналогами, аксессуарами, шаблонами.
+              {plans.base?.description ?? 'Ускорение работы со спецификациями, ценами, аналогами, аксессуарами, шаблонами.'}
             </p>
             <div style={{ flex: 1, marginBottom: 20 }}>
               {PAID_FEATURES.map(f => (
@@ -166,7 +188,7 @@ function PricingContent() {
             {/* Monthly price */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
               <div style={{ fontSize: 18, fontWeight: 700 }}>
-                7 990 <span style={{ fontWeight: 400, fontSize: 13 }}>₽/месяц</span>
+                {plans.base ? fmt(plans.base.price) : '7 990'} <span style={{ fontWeight: 400, fontSize: 13 }}>₽/месяц</span>
               </div>
               <button
                 className="btn-primary"
@@ -179,22 +201,28 @@ function PricingContent() {
             </div>
 
             {/* Annual price */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #eee', paddingTop: 10 }}>
-              <div>
-                <div style={{ fontSize: 18, fontWeight: 700 }}>
-                  79 900 <span style={{ fontWeight: 400, fontSize: 13 }}>₽/год</span>
+            {(plans.base?.price_annual != null || !plans.base) && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #eee', paddingTop: 10 }}>
+                <div>
+                  <div style={{ fontSize: 18, fontWeight: 700 }}>
+                    {plans.base ? fmt(plans.base.price_annual!) : '79 900'} <span style={{ fontWeight: 400, fontSize: 13 }}>₽/год</span>
+                  </div>
+                  {plans.base?.price_annual && plans.base?.price && (
+                    <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
+                      Экономия {fmt(plans.base.price * 12 - plans.base.price_annual)} ₽
+                    </div>
+                  )}
                 </div>
-                <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>Экономия 15 890 ₽</div>
+                <button
+                  className="btn-primary"
+                  style={{ minWidth: 90, justifyContent: 'center' }}
+                  onClick={() => handleBuy('annual')}
+                  disabled={loading === 'annual'}
+                >
+                  {loading === 'annual' ? '...' : isCurrentBase ? 'Продлить' : 'Купить'}
+                </button>
               </div>
-              <button
-                className="btn-primary"
-                style={{ minWidth: 90, justifyContent: 'center' }}
-                onClick={() => handleBuy('annual')}
-                disabled={loading === 'annual'}
-              >
-                {loading === 'annual' ? '...' : isCurrentBase ? 'Продлить' : 'Купить'}
-              </button>
-            </div>
+            )}
           </div>
 
           {/* ── Card 3: Trial ── */}
@@ -205,11 +233,11 @@ function PricingContent() {
             boxShadow: isCurrentTrial ? '0 2px 16px rgba(245,200,0,0.2)' : 'none',
           }}>
             <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 800 }}>Базовый пробный</h2>
+              <h2 style={{ fontSize: 20, fontWeight: 800 }}>{plans.trial?.name ?? 'Базовый пробный'}</h2>
               <span style={{ background: '#f5c800', borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>7 дней</span>
             </div>
             <p style={{ fontSize: 12, color: '#666', marginBottom: 20, lineHeight: 1.5 }}>
-              7 дней работы на базовом тарифе без ограничения функционала. Бесплатно, только один раз.
+              {plans.trial?.description ?? '7 дней работы на базовом тарифе без ограничения функционала. Бесплатно, только один раз.'}
             </p>
             <div style={{ flex: 1, marginBottom: 28 }}>
               {PAID_FEATURES.map(f => (

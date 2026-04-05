@@ -5,11 +5,12 @@ import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
 import { User } from '../users/user.entity';
 import { AuthModule } from '../auth/auth.module';
+import { TariffConfig } from '../admin/tariff-config.entity';
 
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, TariffConfig]),
     AuthModule,
   ],
   controllers: [PaymentsController],

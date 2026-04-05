@@ -18,10 +18,38 @@ import { TariffOperation } from './tariff-operation.entity';
 import { TariffConfig } from './tariff-config.entity';
 
 const DEFAULT_TARIFF_CONFIGS = [
-  { plan_key: 'free',  name: 'Бесплатный', price: 0,   description: 'Базовый бесплатный доступ', is_active: true },
-  { plan_key: 'trial', name: 'Пробный',    price: 0,   description: '14 дней бесплатного Pro', is_active: true },
-  { plan_key: 'base',  name: 'Базовый',    price: 990, description: 'Доступ к основным функциям', is_active: true },
-  { plan_key: 'pro',   name: 'Профессиональный', price: 2490, description: 'Полный доступ ко всем функциям', is_active: true },
+  {
+    plan_key: 'free',
+    name: 'Бесплатный',
+    price: 0,
+    price_annual: null,
+    description: 'Просмотр шаблонов и проектов, работа с листом спецификации, доступны каталоги производителей',
+    is_active: true,
+  },
+  {
+    plan_key: 'trial',
+    name: 'Базовый пробный',
+    price: 0,
+    price_annual: null,
+    description: '7 дней работы на базовом тарифе без ограничения функционала. Бесплатно, только один раз.',
+    is_active: true,
+  },
+  {
+    plan_key: 'base',
+    name: 'Базовый',
+    price: 7990,
+    price_annual: 79900,
+    description: 'Ускорение работы со спецификациями, ценами, аналогами, аксессуарами, шаблонами.',
+    is_active: true,
+  },
+  {
+    plan_key: 'pro',
+    name: 'Профессиональный',
+    price: 7990,
+    price_annual: 79900,
+    description: 'Полный доступ ко всем функциям платформы.',
+    is_active: true,
+  },
 ];
 
 @Controller('admin')
@@ -233,11 +261,12 @@ export class AdminController implements OnModuleInit {
   @Put('tariff-configs/:id')
   async updateTariffConfig(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { name?: string; price?: number; description?: string; is_active?: boolean },
+    @Body() body: { name?: string; price?: number; price_annual?: number | null; description?: string; is_active?: boolean },
   ) {
     await this.tariffConfigRepo.update(id, {
       ...(body.name !== undefined && { name: body.name }),
       ...(body.price !== undefined && { price: body.price }),
+      ...(body.price_annual !== undefined && { price_annual: body.price_annual }),
       ...(body.description !== undefined && { description: body.description }),
       ...(body.is_active !== undefined && { is_active: body.is_active }),
     });

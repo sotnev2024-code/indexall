@@ -2,12 +2,24 @@ import {
   Controller, Post, Get, Body, Param, Request,
   UseGuards, Headers, HttpCode, BadRequestException,
 } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { PaymentsService } from './payments.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { TariffConfig } from '../admin/tariff-config.entity';
 
 @Controller('payments')
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    @InjectRepository(TariffConfig) private tariffConfigRepo: Repository<TariffConfig>,
+  ) {}
+
+  /** Public endpoint — returns tariff plan configs for the pricing page */
+  @Get('plans')
+  getPlans() {
+    return this.tariffConfigRepo.find({ where: { is_active: true }, order: { id: 'ASC' } });
+  }
 
   /** Create a payment — called from the pricing page */
   @Post('create')

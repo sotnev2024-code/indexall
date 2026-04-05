@@ -12,8 +12,13 @@ export class TariffConfig {
   @Column()
   name: string;
 
+  /** Monthly price, RUB */
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   price: number;
+
+  /** Annual price, RUB (null = not offered) */
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  price_annual: number;
 
   @Column({ type: 'text', nullable: true })
   description: string;

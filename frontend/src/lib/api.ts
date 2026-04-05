@@ -153,6 +153,7 @@ export const profileApi = {
 
 // ── Payments / Subscriptions ──────────────────────────────────
 export const paymentsApi = {
+  getPlans: () => api.get('/payments/plans'),
   createPayment: (planType: 'monthly' | 'annual', returnUrl?: string) =>
     api.post('/payments/create', { planType, ...(returnUrl ? { returnUrl } : {}) }),
   getStatus: (paymentId: string) =>

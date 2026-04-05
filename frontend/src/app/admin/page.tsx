@@ -137,7 +137,14 @@ export default function AdminPage() {
       if (users.length === 0) setUsers(us);
       setTariffConfigs(cfgs);
       const initial: Record<number, any> = {};
-      cfgs.forEach((c: any) => { initial[c.id] = { name: c.name, price: String(c.price), description: c.description || '' }; });
+      cfgs.forEach((c: any) => {
+        initial[c.id] = {
+          name: c.name,
+          price: String(c.price),
+          price_annual: c.price_annual != null ? String(c.price_annual) : '',
+          description: c.description || '',
+        };
+      });
       setEditingConfig(initial);
     } catch { toast.error('Ошибка загрузки тарифных операций'); }
   }
@@ -149,6 +156,7 @@ export default function AdminPage() {
       const { data: updated } = await adminApi.updateTariffConfig(id, {
         name: data.name,
         price: Number(data.price),
+        price_annual: data.price_annual !== '' ? Number(data.price_annual) : null,
         description: data.description,
       });
       setTariffConfigs(prev => prev.map(c => c.id === id ? updated : c));
@@ -592,19 +600,25 @@ export default function AdminPage() {
               <div className="admin-form" style={{ marginBottom: 32 }}>
                 <div className="admin-form-title">Редактор тарифных планов</div>
                 <div style={{ overflowX: 'auto' }}>
-                  <table className="admin-table" style={{ minWidth: 700 }}>
+                  <table className="admin-table" style={{ minWidth: 860 }}>
                     <thead>
                       <tr>
                         <th>Ключ</th>
                         <th>Название</th>
-                        <th>Цена (RUB/мес)</th>
+                        <th>Цена ₽/мес</th>
+                        <th>Цена ₽/год</th>
                         <th>Описание</th>
                         <th></th>
                       </tr>
                     </thead>
                     <tbody>
                       {tariffConfigs.map(cfg => {
-                        const ed = editingConfig[cfg.id] || { name: cfg.name, price: String(cfg.price), description: cfg.description || '' };
+                        const ed = editingConfig[cfg.id] || {
+                          name: cfg.name,
+                          price: String(cfg.price),
+                          price_annual: cfg.price_annual != null ? String(cfg.price_annual) : '',
+                          description: cfg.description || '',
+                        };
                         return (
                           <tr key={cfg.id}>
                             <td><code style={{ fontSize: 12, background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4 }}>{cfg.plan_key}</code></td>
@@ -620,7 +634,16 @@ export default function AdminPage() {
                                 type="number"
                                 value={ed.price}
                                 onChange={e => setEditingConfig(p => ({ ...p, [cfg.id]: { ...ed, price: e.target.value } }))}
-                                style={{ width: 100, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13 }}
+                                style={{ width: 90, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13 }}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                value={ed.price_annual}
+                                onChange={e => setEditingConfig(p => ({ ...p, [cfg.id]: { ...ed, price_annual: e.target.value } }))}
+                                style={{ width: 90, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13 }}
+                                placeholder="—"
                               />
                             </td>
                             <td>
@@ -640,7 +663,7 @@ export default function AdminPage() {
                         );
                       })}
                       {tariffConfigs.length === 0 && (
-                        <tr><td colSpan={5} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>Загрузка…</td></tr>
+                        <tr><td colSpan={6} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>Загрузка…</td></tr>
                       )}
                     </tbody>
                   </table>
