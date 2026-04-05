@@ -354,10 +354,9 @@ export default function SpecPage() {
       else if (code === 'KeyC' && !isEditingRef.current && activeCellRef.current) {
         e.preventDefault();
         copyRangeWithRefs();
-      } else if (code === 'KeyV' && !isEditingRef.current && activeCellRef.current) {
-        e.preventDefault();
-        pasteAtActiveCell();
       }
+      // Ctrl+V: do NOT preventDefault — let the browser fire the native paste event
+      // which is caught by onPaste on the tableWrapRef (clipboard API needs no permissions there)
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -974,7 +973,22 @@ export default function SpecPage() {
     }
   }
 
-  // Paste TSV starting at active cell
+  // onPaste handler for the tableWrapRef div (works when cells are selected, not editing)
+  // Uses e.clipboardData — no browser permission needed, always available in paste events
+  function handleWrapPaste(e: React.ClipboardEvent<HTMLDivElement>) {
+    if (isEditingRef.current) return; // input handles its own paste
+    const text = e.clipboardData.getData('text/plain');
+    if (!text.trim()) return;
+    e.preventDefault();
+    if (activeCellRef.current) {
+      applyPasteAt(text, activeCellRef.current.row, activeCellRef.current.col);
+    } else {
+      setPasteText(text);
+      setShowPasteModal(true);
+    }
+  }
+
+  // Legacy: kept for pasteFromClipboard fallback modal path
   async function pasteAtActiveCell() {
     if (!activeCellRef.current) return;
     try {
@@ -1089,7 +1103,7 @@ export default function SpecPage() {
       // Use e.code (physical key) to support non-Latin layouts (Russian, etc.)
       const code = e.code;
       if (code === 'KeyC') { e.preventDefault(); copyRange(); }
-      else if (code === 'KeyV') { e.preventDefault(); pasteAtActiveCell(); }
+      // Ctrl+V: don't prevent default — let native paste event fire, caught by onPaste on tableWrapRef
       else if (code === 'KeyA') {
         e.preventDefault();
         const first = { row: 0, col: 0 };
@@ -1276,26 +1290,17 @@ export default function SpecPage() {
     setShowPasteModal(true);
   }
 
-  // tbody onPaste (Ctrl+V when focus is inside table body)
+  // tbody onPaste — fires when an input/cell inside tbody is focused
+  // This handles paste into a specific cell (e.g., while editing), including plain text
   async function handleTablePaste(e: React.ClipboardEvent) {
     const text = e.clipboardData.getData('text/plain');
-    if (!text.includes('\t')) return;
+    if (!text.trim()) return;
+    // Only intercept if we have an active cell; otherwise let the input handle it normally
+    if (!activeCellRef.current) return;
+    // Single-value paste into the focused input (no tabs, no newlines) — let input handle natively
+    if (!text.includes('\t') && !text.includes('\n')) return;
     e.preventDefault();
-    if (activeCellRef.current) {
-      applyPasteAt(text, activeCellRef.current.row, activeCellRef.current.col);
-    } else {
-      const parsed = parseTSV(text);
-      if (parsed.length === 0) return;
-      pushHistorySnapshot(rowsRef.current);
-      setRows(prev => {
-        const existing = prev.filter(r => r.name || r.article);
-        const merged = [...existing, ...parsed];
-        while (merged.length < 25) merged.push({ name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ЭТМ', coef: '1', total: '' });
-        return merged;
-      });
-      setUnsaved(true);
-      toast.success(`Вставлено ${parsed.length} строк`);
-    }
+    applyPasteAt(text, activeCellRef.current.row, activeCellRef.current.col);
   }
 
   async function handleExport() {
@@ -1600,6 +1605,7 @@ export default function SpecPage() {
           className="spec-table-wrap"
           tabIndex={0}
           onKeyDown={handleTableWrapKeyDown}
+          onPaste={handleWrapPaste}
           style={{ outline: 'none' }}
         >
           <table className="spec-table" style={{ userSelect: 'none' }}>
