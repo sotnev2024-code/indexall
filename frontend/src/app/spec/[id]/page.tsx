@@ -887,26 +887,45 @@ export default function SpecPage() {
 
   const isRowEmpty = (row: any) => !row.name && !row.article && !row.brand && !row.price && !row.qty;
 
-  // Delete all rows in the current selection, shift remaining rows up
+  // Two-step delete for selected rows:
+  // Step 1 — if any selected row has content → clear all selected rows (stay in place)
+  // Step 2 — if all selected rows are already empty → remove them with shift-up
   function deleteSelectedRows() {
     const { r1, r2 } = getSelBoundsFromRefs();
     if (r1 < 0) return;
-    pushHistorySnapshot(rowsRef.current);
-    setRows(prev => {
-      const next = prev.filter((_, i) => i < r1 || i > r2);
-      while (next.length < 25) next.push(emptyRow(next.length));
-      return next;
-    });
-    setActiveCell(null);
-    activeCellRef.current = null;
-    updSelAnchor(null);
-    updSelFocus(null);
-    setUnsaved(true);
+    const current = rowsRef.current;
+    const selectedRows = current.slice(r1, r2 + 1);
+    const allEmpty = selectedRows.every(isRowEmpty);
     const count = r2 - r1 + 1;
-    toast.success(count === 1 ? 'Строка удалена' : `Удалено строк: ${count}`);
+    pushHistorySnapshot(current);
+
+    if (!allEmpty) {
+      // Step 1: clear content, rows stay in place
+      setRows(prev => {
+        const next = [...prev];
+        for (let i = r1; i <= r2; i++) next[i] = emptyRow(i);
+        return next;
+      });
+      setUnsaved(true);
+      const hint = count === 1 ? 'Строка очищена' : `Очищено строк: ${count}`;
+      toast(hint + ' — удалите ещё раз, чтобы убрать', { icon: '🗑' });
+    } else {
+      // Step 2: remove empty rows, shift up
+      setRows(prev => {
+        const next = prev.filter((_, i) => i < r1 || i > r2);
+        while (next.length < 25) next.push(emptyRow(next.length));
+        return next;
+      });
+      setActiveCell(null);
+      activeCellRef.current = null;
+      updSelAnchor(null);
+      updSelFocus(null);
+      setUnsaved(true);
+      toast.success(count === 1 ? 'Строка удалена' : `Удалено строк: ${count}`);
+    }
   }
 
-  // Legacy single-row delete (still used by keyboard Delete key on empty rows)
+  // Single-row delete used by keyboard flow
   function deleteRow(rowIdx: number) {
     pushHistorySnapshot(rowsRef.current);
     setRows(prev => {
