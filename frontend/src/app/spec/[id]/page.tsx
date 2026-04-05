@@ -883,33 +883,39 @@ export default function SpecPage() {
     setUnsaved(true);
   }
 
-  // ── Row delete (two-step: clear → remove+shift) ───────────────
   const emptyRow = (idx: number) => ({ row_number: idx + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ЭТМ', coef: '1', total: '', deadline: '' });
 
   const isRowEmpty = (row: any) => !row.name && !row.article && !row.brand && !row.price && !row.qty;
 
-  function deleteRow(rowIdx: number) {
-    const row = rowsRef.current[rowIdx];
+  // Delete all rows in the current selection, shift remaining rows up
+  function deleteSelectedRows() {
+    const { r1, r2 } = getSelBoundsFromRefs();
+    if (r1 < 0) return;
     pushHistorySnapshot(rowsRef.current);
-    if (!isRowEmpty(row)) {
-      // Step 1: clear all fields, leave an empty row
-      setRows(prev => {
-        const next = [...prev];
-        next[rowIdx] = emptyRow(rowIdx);
-        return next;
-      });
-      setUnsaved(true);
-      toast('Строка очищена — удалите ещё раз, чтобы убрать её', { icon: '🗑' });
-    } else {
-      // Step 2: remove row, shift up, pad bottom
-      setRows(prev => {
-        const next = prev.filter((_, i) => i !== rowIdx);
-        while (next.length < 25) next.push(emptyRow(next.length));
-        return next;
-      });
-      setUnsaved(true);
-      toast.success('Строка удалена');
-    }
+    setRows(prev => {
+      const next = prev.filter((_, i) => i < r1 || i > r2);
+      while (next.length < 25) next.push(emptyRow(next.length));
+      return next;
+    });
+    setActiveCell(null);
+    activeCellRef.current = null;
+    updSelAnchor(null);
+    updSelFocus(null);
+    setUnsaved(true);
+    const count = r2 - r1 + 1;
+    toast.success(count === 1 ? 'Строка удалена' : `Удалено строк: ${count}`);
+  }
+
+  // Legacy single-row delete (still used by keyboard Delete key on empty rows)
+  function deleteRow(rowIdx: number) {
+    pushHistorySnapshot(rowsRef.current);
+    setRows(prev => {
+      const next = prev.filter((_, i) => i !== rowIdx);
+      while (next.length < 25) next.push(emptyRow(next.length));
+      return next;
+    });
+    setUnsaved(true);
+    toast.success('Строка удалена');
   }
 
   const handleRowContextMenu = useCallback((rowIdx: number, x: number, y: number) => {
@@ -1704,17 +1710,22 @@ export default function SpecPage() {
           onClick={e => e.stopPropagation()}
         >
           <div
-            className="row-ctx-item"
+            className="row-ctx-item row-ctx-item--danger"
             onClick={() => {
-              const idx = rowCtxMenu.rowIdx;
               setRowCtxMenu(null);
-              deleteRow(idx);
+              deleteSelectedRows();
             }}
           >
-            {isRowEmpty(rowsRef.current[rowCtxMenu.rowIdx])
-              ? (<><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8, flexShrink: 0 }}><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>Удалить строку</>)
-              : (<><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8, flexShrink: 0 }}><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>Очистить строку</>)
-            }
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8, flexShrink: 0 }}>
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+              <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+            </svg>
+            {(() => {
+              const { r1, r2 } = getSelBoundsFromRefs();
+              const count = r1 >= 0 ? r2 - r1 + 1 : 1;
+              return count > 1 ? `Удалить строки (${count})` : 'Удалить строку';
+            })()}
           </div>
         </div>
       )}

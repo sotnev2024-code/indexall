@@ -758,10 +758,12 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .row-ctx-item {
   display: flex; align-items: center;
   padding: 9px 14px;
-  font-size: 13px; cursor: pointer; color: #e53935;
+  font-size: 13px; cursor: pointer; color: var(--text);
   transition: background .1s;
 }
 .row-ctx-item:hover { background: var(--bg); }
+.row-ctx-item--danger { color: #e53935; }
+.row-ctx-item--danger:hover { background: #fff0f0; }
 
 .sheet-tab-ctx-menu {
   position: fixed;
