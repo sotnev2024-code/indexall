@@ -128,7 +128,16 @@ export class CatalogService implements OnModuleInit {
 
   // ── Manufacturers ─────────────────────────────────────────
   async getManufacturers() {
-    return this.manufRepo.find({ order: { name: 'ASC' } });
+    // Only return manufacturers that actually have categories (price list data loaded)
+    return this.manufRepo
+      .createQueryBuilder('m')
+      .innerJoin('price_lists', 'pl', 'pl.manufacturer_id = m.id')
+      .innerJoin('catalog_categories', 'cc', 'cc.price_list_id = pl.id')
+      .select(['m.id', 'm.name', 'm.is_active'])
+      .where('m.is_active = true')
+      .distinct(true)
+      .orderBy('m.name', 'ASC')
+      .getMany();
   }
 
   async createManufacturer(name: string) {
@@ -184,7 +193,17 @@ export class CatalogService implements OnModuleInit {
       try { fs.unlinkSync(pl.file_path); } catch { /* file may not exist */ }
     }
 
+    const manufId = pl.manufacturer_id;
     await this.plRepo.delete(id);
+
+    // If the manufacturer has no remaining price lists, delete it too
+    if (manufId) {
+      const remaining = await this.plRepo.count({ where: { manufacturer_id: manufId } });
+      if (remaining === 0) {
+        await this.manufRepo.delete(manufId);
+      }
+    }
+
     return { success: true };
   }
 
