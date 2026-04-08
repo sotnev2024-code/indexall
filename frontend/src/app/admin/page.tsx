@@ -33,9 +33,8 @@ function fmtDate(d: string | Date | null | undefined) {
 }
 
 function planLabel(plan: string) {
-  if (plan === 'admin') return 'Base';
-  if (plan === 'base') return 'Base';
-  if (plan === 'pro') return 'Base';
+  if (plan === 'admin') return 'Admin';
+  if (plan === 'base' || plan === 'pro') return 'Pro';
   if (plan === 'trial') return 'Trial';
   return 'Free';
 }

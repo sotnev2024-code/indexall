@@ -1,5 +1,5 @@
 'use client';
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
@@ -18,7 +18,7 @@ function planLabel(plan: string): string {
   switch (plan) {
     case 'free':   return 'Бесплатный';
     case 'trial':  return 'Пробный (7 дней)';
-    case 'base':   return 'Базовый';
+    case 'base':
     case 'pro':    return 'Pro';
     case 'admin':  return 'Администратор';
     default:       return plan;
@@ -35,18 +35,49 @@ function planColor(plan: string): string {
   }
 }
 
-// ── success banner — refreshes user data after payment ───────
+// ── success banner — polls payment status and refreshes user ──
 
 function SuccessBanner({ onRefresh }: { onRefresh: () => void }) {
   const sp = useSearchParams();
   const [shown, setShown] = useState(false);
+  const [activating, setActivating] = useState(false);
+  const polledRef = useRef(false);
 
   useEffect(() => {
-    if (sp.get('success') !== '1' || shown) return;
+    if (sp.get('success') !== '1' || polledRef.current) return;
+    polledRef.current = true;
     setShown(true);
-    // Give YooKassa webhook ~1.5s to update the plan, then refresh user
-    setTimeout(() => { onRefresh(); }, 1500);
-  }, [sp, shown, onRefresh]);
+
+    const paymentId = sp.get('paymentId') || localStorage.getItem('lastPaymentId');
+    if (!paymentId) {
+      setTimeout(() => onRefresh(), 2000);
+      return;
+    }
+
+    setActivating(true);
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    const poll = async () => {
+      attempts++;
+      try {
+        const { data } = await paymentsApi.confirmPayment(paymentId);
+        if (data.activated) {
+          await onRefresh();
+          setActivating(false);
+          localStorage.removeItem('lastPaymentId');
+          return;
+        }
+      } catch {}
+      if (attempts < maxAttempts) {
+        setTimeout(poll, 2000);
+      } else {
+        await onRefresh();
+        setActivating(false);
+      }
+    };
+    setTimeout(poll, 1500);
+  }, [sp, onRefresh]);
 
   if (!shown) return null;
   return (
@@ -55,7 +86,9 @@ function SuccessBanner({ onRefresh }: { onRefresh: () => void }) {
       padding: '12px 16px', marginBottom: 20, fontSize: 13, color: '#166534',
       fontWeight: 600,
     }}>
-      Оплата прошла успешно! Тариф активирован.
+      {activating
+        ? 'Активация тарифа...'
+        : 'Оплата прошла успешно! Тариф активирован.'}
     </div>
   );
 }
@@ -76,6 +109,7 @@ export default function ProfilePage() {
   const [savingPassword, setSavingPassword] = useState(false);
 
   const [payLoading, setPayLoading] = useState<string | null>(null);
+  const [prices, setPrices] = useState<{ monthly: number; annual: number }>({ monthly: 0, annual: 0 });
 
   const refreshUser = useCallback(async () => {
     try {
@@ -89,9 +123,16 @@ export default function ProfilePage() {
   // Hydrate form from store/API
   useEffect(() => {
     if (!user) return;
-    setName((user as any).name || '');
+    setName(user.name || '');
     setEmail(user.email || '');
   }, [user]);
+
+  useEffect(() => {
+    paymentsApi.getPlans().then(({ data }) => {
+      const pro = data.find((p: any) => p.plan_key === 'pro');
+      if (pro) setPrices({ monthly: Number(pro.price), annual: Number(pro.price_annual) || 0 });
+    }).catch(() => {});
+  }, []);
 
   // If no token — redirect
   useEffect(() => {
@@ -140,6 +181,7 @@ export default function ProfilePage() {
       const returnUrl = `${window.location.origin}/profile?success=1`;
       const { data } = await paymentsApi.createPayment(planType, returnUrl);
       if (data.confirmationUrl) {
+        if (data.paymentId) localStorage.setItem('lastPaymentId', data.paymentId);
         window.location.href = data.confirmationUrl;
       } else {
         toast.error('Не удалось создать платёж');
@@ -151,8 +193,8 @@ export default function ProfilePage() {
     }
   }
 
-  const plan = (user as any)?.plan || 'free';
-  const expiresAt = (user as any)?.subscriptionExpiresAt;
+  const plan = user?.plan || 'free';
+  const expiresAt = user?.subscriptionExpiresAt;
   const days = daysRemaining(expiresAt);
   const isBase  = plan === 'base' || plan === 'pro';
   const isTrial = plan === 'trial';
@@ -187,15 +229,17 @@ export default function ProfilePage() {
             disabled={payLoading === 'monthly'}
             style={{ padding: '8px 18px', background: '#1a1a1a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: payLoading === 'monthly' ? 0.6 : 1 }}
           >
-            {payLoading === 'monthly' ? '...' : 'Продлить на месяц — 7 990 ₽'}
+            {payLoading === 'monthly' ? '...' : `Продлить на месяц — ${prices.monthly ? prices.monthly.toLocaleString('ru-RU') + ' ₽' : '...'}`}
           </button>
-          <button
-            onClick={() => handleRenew('annual')}
-            disabled={payLoading === 'annual'}
-            style={{ padding: '8px 18px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer', opacity: payLoading === 'annual' ? 0.6 : 1 }}
-          >
-            {payLoading === 'annual' ? '...' : 'Продлить на год — 79 900 ₽'}
-          </button>
+          {prices.annual > 0 && (
+            <button
+              onClick={() => handleRenew('annual')}
+              disabled={payLoading === 'annual'}
+              style={{ padding: '8px 18px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer', opacity: payLoading === 'annual' ? 0.6 : 1 }}
+            >
+              {payLoading === 'annual' ? '...' : `Продлить на год — ${prices.annual.toLocaleString('ru-RU')} ₽`}
+            </button>
+          )}
         </div>
       )}
 

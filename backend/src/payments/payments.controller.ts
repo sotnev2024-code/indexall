@@ -47,6 +47,13 @@ export class PaymentsController {
     return this.paymentsService.getPayment(id);
   }
 
+  /** Poll payment + activate if succeeded (fallback for delayed webhooks) */
+  @Post('confirm/:id')
+  @UseGuards(JwtAuthGuard)
+  async confirmPayment(@Param('id') id: string, @Request() req) {
+    return this.paymentsService.confirmPayment(id, req.user.userId);
+  }
+
   /** YuKassa webhook — receives payment events */
   @Post('webhook')
   @HttpCode(200)

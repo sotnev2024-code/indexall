@@ -1,14 +1,15 @@
 /**
  * Plan-based permission system.
  *
- * Plans: free | trial | base | pro | admin
+ * Plans: free | trial | pro | admin
  *
  * free  — view-only. Can browse specs and manufacturer catalogs.
  *          No editing, inserting, deleting. No store integration.
  * trial — full access for 7 days (free, one-time, from free plan only)
- * base  — full access (monthly or annual subscription)
- * pro   — full access (legacy, same as base)
+ * pro   — full access (monthly or annual subscription)
  * admin — full access + admin panel
+ *
+ * 'base' kept for backward compat — treated same as 'pro'
  */
 
 type Plan = string | null | undefined;
@@ -45,8 +46,8 @@ export function planDisplayName(plan: Plan): string {
   switch (plan) {
     case 'free':   return 'Бесплатный';
     case 'trial':  return 'Пробный (Trial)';
-    case 'base':   return 'Базовый';
-    case 'pro':    return 'Базовый';
+    case 'base':
+    case 'pro':    return 'Pro';
     case 'admin':  return 'Администратор';
     default:       return 'Бесплатный';
   }

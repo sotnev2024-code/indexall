@@ -74,8 +74,10 @@ function PricingContent() {
     if (!token) { router.push('/auth/login'); return; }
     setLoading(planType);
     try {
-      const { data } = await paymentsApi.createPayment(planType);
+      const returnUrl = `${window.location.origin}/profile?success=1`;
+      const { data } = await paymentsApi.createPayment(planType, returnUrl);
       if (data.confirmationUrl) {
+        if (data.paymentId) localStorage.setItem('lastPaymentId', data.paymentId);
         window.location.href = data.confirmationUrl;
       } else {
         toast.error('YooKassa не вернул ссылку для оплаты');

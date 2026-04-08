@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import * as https from 'https';
 import * as crypto from 'crypto';
 import { User, UserPlan } from '../users/user.entity';
+import { TariffConfig } from '../admin/tariff-config.entity';
 
 export interface CreatePaymentDto {
   userId: number;
@@ -27,6 +28,7 @@ export class PaymentsService {
   constructor(
     private configService: ConfigService,
     @InjectRepository(User) private usersRepo: Repository<User>,
+    @InjectRepository(TariffConfig) private tariffConfigRepo: Repository<TariffConfig>,
   ) {}
 
   private get shopId(): string {
@@ -71,10 +73,15 @@ export class PaymentsService {
 
   async createPayment(dto: CreatePaymentDto): Promise<{ paymentId: string; confirmationUrl: string }> {
     const isAnnual = dto.planType === 'annual';
-    const amount = isAnnual ? 79900 : 7990;
+
+    const proConfig = await this.tariffConfigRepo.findOne({ where: { plan_key: 'pro', is_active: true } });
+    const monthlyPrice = proConfig ? Number(proConfig.price) : 7990;
+    const annualPrice  = proConfig?.price_annual ? Number(proConfig.price_annual) : 79900;
+
+    const amount = isAnnual ? annualPrice : monthlyPrice;
     const description = isAnnual
-      ? 'INDEXALL — Базовый тариф (12 месяцев)'
-      : 'INDEXALL — Базовый тариф (1 месяц)';
+      ? `INDEXALL — Pro тариф (12 месяцев)`
+      : `INDEXALL — Pro тариф (1 месяц)`;
 
     const response = await this.yukassaRequest('POST', '/payments', {
       amount: { value: amount.toFixed(2), currency: 'RUB' },
@@ -128,11 +135,40 @@ export class PaymentsService {
     }
 
     await this.usersRepo.update(userId, {
-      plan: UserPlan.BASE,
+      plan: UserPlan.PRO,
       subscriptionExpiresAt: expiresAt,
     });
 
     this.logger.log(`Subscription activated for user ${userId}, plan: ${planType}, expires: ${expiresAt}`);
+  }
+
+  /** Poll YooKassa and activate if succeeded (fallback when webhook is delayed) */
+  async confirmPayment(paymentId: string, userId: number): Promise<{ activated: boolean; plan: string }> {
+    const payment = await this.getPayment(paymentId);
+    if (payment.status !== 'succeeded') {
+      return { activated: false, plan: 'pending' };
+    }
+    const user = await this.usersRepo.findOne({ where: { id: userId } });
+    if (!user) return { activated: false, plan: 'unknown' };
+
+    if (user.plan === UserPlan.PRO && user.subscriptionExpiresAt) {
+      return { activated: true, plan: user.plan };
+    }
+
+    const planType = (payment.metadata?.planType as 'monthly' | 'annual') || 'monthly';
+    const expiresAt = new Date();
+    if (planType === 'annual') {
+      expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+    } else {
+      expiresAt.setMonth(expiresAt.getMonth() + 1);
+    }
+
+    await this.usersRepo.update(userId, {
+      plan: UserPlan.PRO,
+      subscriptionExpiresAt: expiresAt,
+    });
+    this.logger.log(`Subscription confirmed via polling for user ${userId}, plan: ${planType}`);
+    return { activated: true, plan: 'pro' };
   }
 
   /** Endpoint for Telegram bot to create a payment link for a user by email */

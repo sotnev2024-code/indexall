@@ -160,6 +160,8 @@ export const paymentsApi = {
     api.post('/payments/create', { planType, ...(returnUrl ? { returnUrl } : {}) }),
   getStatus: (paymentId: string) =>
     api.get(`/payments/status/${paymentId}`),
+  confirmPayment: (paymentId: string) =>
+    api.post(`/payments/confirm/${paymentId}`),
   activateTrial: () =>
     api.post('/auth/trial'),
 };

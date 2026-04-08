@@ -1,6 +1,13 @@
 import { create } from 'zustand';
 
-interface User { id: number; email: string; plan: string; name: string; }
+export interface User {
+  id: number;
+  email: string;
+  plan: string;
+  name: string;
+  trialUsed?: boolean;
+  subscriptionExpiresAt?: string | null;
+}
 
 interface AppStore {
   user: User | null;
