@@ -313,15 +313,13 @@ export class AdminController implements OnModuleInit {
     const copy = this.templatesRepo.create({
       name: original.name,
       meta: original.meta,
-      meta_json: original.meta_json,
-      scope: 'common',
-      userId: null,
+      userId: null as any,
       files: 0,
       is_favorite: false,
       views_count: 0,
       used_count: 0,
-    });
-    const saved = await this.templatesRepo.save(copy);
+    } as Partial<Template>);
+    const saved = await this.templatesRepo.save(copy) as unknown as Template;
     return { ok: true, id: saved.id };
   }
 
