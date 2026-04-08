@@ -8,6 +8,7 @@ import {
   Delete,
   UseGuards,
   Query,
+  Request,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { TemplatesService } from './templates.service';
@@ -23,8 +24,8 @@ export class TemplatesController {
 
   @Post()
   @ApiOperation({ summary: 'Создать новый шаблон' })
-  create(@Body() createDto: Partial<Template>) {
-    return this.templatesService.create(createDto);
+  create(@Request() req, @Body() createDto: Partial<Template>) {
+    return this.templatesService.create({ ...createDto, userId: req.user.userId });
   }
 
   @Get()

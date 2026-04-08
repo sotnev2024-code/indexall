@@ -32,6 +32,9 @@ export class Template {
   @Column({ default: false })
   is_favorite: boolean;
 
+  @Column({ default: true })
+  is_active: boolean;
+
   @Column({ nullable: true })
   userId: number;
 

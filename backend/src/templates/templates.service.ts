@@ -30,7 +30,7 @@ export class TemplatesService {
     let templates: Template[];
     if (scope === 'common') {
       templates = await this.templatesRepository.find({
-        where: { userId: IsNull() },
+        where: { userId: IsNull(), is_active: true },
         order: { createdAt: 'DESC' },
       });
     } else {

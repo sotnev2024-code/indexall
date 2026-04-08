@@ -301,6 +301,7 @@ export class AdminController implements OnModuleInit {
         views_count: t.views_count,
         used_count: t.used_count,
         scope: t.userId == null ? 'common' : 'user',
+        is_active: t.is_active ?? true,
         rows,
       };
     });
@@ -321,6 +322,15 @@ export class AdminController implements OnModuleInit {
     } as Partial<Template>);
     const saved = await this.templatesRepo.save(copy) as unknown as Template;
     return { ok: true, id: saved.id };
+  }
+
+  @Patch('templates/:id/toggle-active')
+  async toggleTemplateActive(@Param('id', ParseIntPipe) id: number) {
+    const tpl = await this.templatesRepo.findOne({ where: { id } });
+    if (!tpl) return { ok: false };
+    tpl.is_active = !tpl.is_active;
+    await this.templatesRepo.save(tpl);
+    return { ok: true, is_active: tpl.is_active };
   }
 
   @Delete('templates/:id')

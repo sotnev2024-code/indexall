@@ -262,6 +262,29 @@ export default function AdminPage() {
     } catch { toast.error('Ошибка публикации шаблона'); }
   }
 
+  async function handleToggleTemplateActive(t: any) {
+    try {
+      const { data } = await adminApi.toggleTemplateActive(t.id);
+      toast.success(data.is_active ? 'Шаблон показан' : 'Шаблон скрыт из общих');
+      setAdminTemplates(prev => prev.map(x => x.id === t.id ? { ...x, is_active: data.is_active } : x));
+      if (tmplPreview?.id === t.id) setTmplPreview((p: any) => ({ ...p, is_active: data.is_active }));
+    } catch { toast.error('Ошибка'); }
+  }
+
+  function handleCopyTemplateRows(t: any) {
+    const rows = (t.rows || []).filter((r: any) => r.name || r.article);
+    if (rows.length === 0) { toast.error('Шаблон пустой'); return; }
+    const header = ['Название', 'Бренд', 'Артикул', 'Кол-во', 'Ед.', 'Цена', 'Магазин', 'Коэф.', 'Срок'];
+    const lines = [header.join('\t')];
+    rows.forEach((r: any) => {
+      lines.push([r.name, r.brand, r.article, r.qty, r.unit, r.price, r.store, r.coef, r.deadline].map((v: any) => v ?? '').join('\t'));
+    });
+    navigator.clipboard.writeText(lines.join('\n')).then(
+      () => toast.success(`Скопировано ${rows.length} строк`),
+      () => toast.error('Не удалось скопировать'),
+    );
+  }
+
   // ── Tiles (Каталог: База) ────────────────────────────────────
   async function handleCreateTile() {
     if (!newTile.slug || !newTile.name) { toast.error('Заполните slug и название'); return; }
@@ -847,10 +870,16 @@ export default function AdminPage() {
                             <td>
                               <span style={{
                                 padding: '2px 8px', borderRadius: 4, fontSize: 11, whiteSpace: 'nowrap',
-                                background: t.scope === 'common' ? '#d1fae5' : '#fef9c3',
-                                color: t.scope === 'common' ? '#065f46' : '#78350f',
+                                background: t.scope === 'common'
+                                  ? (t.is_active ? '#d1fae5' : '#fee2e2')
+                                  : '#fef9c3',
+                                color: t.scope === 'common'
+                                  ? (t.is_active ? '#065f46' : '#991b1b')
+                                  : '#78350f',
                               }}>
-                                {t.scope === 'common' ? '🌐 Общий' : '🔒 Личный'}
+                                {t.scope === 'common'
+                                  ? (t.is_active ? '🌐 Общий' : '🚫 Скрыт')
+                                  : '🔒 Личный'}
                               </span>
                             </td>
                             <td style={{ textAlign: 'center', fontSize: 12 }}>{(t.rows || []).filter((r: any) => r.name || r.article).length}</td>
@@ -858,13 +887,31 @@ export default function AdminPage() {
                               {t.scope !== 'common' && (
                                 <button
                                   className="btn-primary"
-                                  style={{ fontSize: 11, padding: '3px 10px', marginRight: 6 }}
+                                  style={{ fontSize: 10, padding: '3px 8px', marginRight: 4 }}
                                   onClick={() => handlePublishTemplate(t)}
                                   title="Создать независимую копию в Общих шаблонах"
                                 >
                                   → В общие
                                 </button>
                               )}
+                              {t.scope === 'common' && (
+                                <button
+                                  className="btn-outline"
+                                  style={{ fontSize: 10, padding: '3px 8px', marginRight: 4 }}
+                                  onClick={() => handleToggleTemplateActive(t)}
+                                  title={t.is_active ? 'Скрыть из общих (деактивировать)' : 'Показать в общих (активировать)'}
+                                >
+                                  {t.is_active ? '👁 Скрыть' : '👁 Показать'}
+                                </button>
+                              )}
+                              <button
+                                className="btn-outline"
+                                style={{ fontSize: 10, padding: '3px 8px' }}
+                                onClick={() => handleCopyTemplateRows(t)}
+                                title="Скопировать содержимое в буфер"
+                              >
+                                📋
+                              </button>
                             </td>
                           </tr>
                         ))}
@@ -917,13 +964,21 @@ export default function AdminPage() {
                         </div>
                       )}
 
-                      {tmplPreview.scope !== 'common' && (
-                        <div style={{ marginTop: 14, textAlign: 'right' }}>
+                      <div style={{ marginTop: 14, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                        <button className="btn-outline" style={{ fontSize: 12 }} onClick={() => handleCopyTemplateRows(tmplPreview)}>
+                          📋 Скопировать
+                        </button>
+                        {tmplPreview.scope !== 'common' && (
                           <button className="btn-primary" style={{ fontSize: 12 }} onClick={() => handlePublishTemplate(tmplPreview)}>
-                            → Добавить в Общие шаблоны
+                            → В Общие шаблоны
                           </button>
-                        </div>
-                      )}
+                        )}
+                        {tmplPreview.scope === 'common' && (
+                          <button className="btn-outline" style={{ fontSize: 12 }} onClick={() => handleToggleTemplateActive(tmplPreview)}>
+                            {tmplPreview.is_active ? '🚫 Скрыть из общих' : '👁 Показать в общих'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
