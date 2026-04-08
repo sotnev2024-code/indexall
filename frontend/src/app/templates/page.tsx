@@ -12,13 +12,12 @@ export default function TemplatesPage() {
   const router = useRouter();
   const { activeSheetId, activeProjectId } = useAppStore();
   const [templates, setTemplates] = useState<any[]>([]);
-  const [selected, setSelected] = useState<any>(null);
+  const [selected, setSelected] = useState<{ group: string; tmpl: any } | null>(null);
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<any>({});
   const [loading, setLoading] = useState(true);
   const [applyModalOpen, setApplyModalOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const [onlyFavorites, setOnlyFavorites] = useState(false);
 
   const toggleGroup = (key: string) =>
     setCollapsedGroups(prev => {
@@ -29,21 +28,26 @@ export default function TemplatesPage() {
 
   useEffect(() => { loadTemplates(); }, []);
 
+  const sel = selected?.tmpl || null;
+
   async function loadTemplates() {
     try {
       const { data } = await templatesApi.getAll({ search, ...filters });
       setTemplates(data);
-      if (data.length > 0 && !selected) setSelected(data[0]);
+      if (data.length > 0 && !selected) {
+        const first = data[0];
+        setSelected({ group: first.scope === 'common' ? 'common' : 'my', tmpl: first });
+      }
     } finally { setLoading(false); }
   }
 
   async function applyTemplate(mode: 'new' | 'replace' | 'append') {
-    if (!selected) { toast.error('Выберите шаблон'); return; }
-    const rows = (selected.rows || []).map((r: any, i: number) => ({ ...r, row_number: i + 1 }));
+    if (!sel) { toast.error('Выберите шаблон'); return; }
+    const rows = (sel.rows || []).map((r: any, i: number) => ({ ...r, row_number: i + 1 }));
     try {
       if (mode === 'new') {
         if (!activeProjectId) { toast.error('Сначала откройте проект'); return; }
-        const { data: newSheet } = await sheetsApi.create(activeProjectId, selected.name);
+        const { data: newSheet } = await sheetsApi.create(activeProjectId, sel.name);
         if (rows.length > 0) await sheetsApi.saveRows(newSheet.id, rows);
         toast.success('Шаблон вставлен на новый лист');
         setApplyModalOpen(false);
@@ -66,25 +70,25 @@ export default function TemplatesPage() {
   }
 
   async function deleteTemplate() {
-    if (!selected) return;
-    if (selected.scope === 'common') { toast.error('Общие шаблоны нельзя удалить'); return; }
-    if (!confirm(`Удалить шаблон «${selected.name}»?`)) return;
+    if (!sel) return;
+    if (sel.scope === 'common') { toast.error('Общие шаблоны нельзя удалить'); return; }
+    if (!confirm(`Удалить шаблон «${sel.name}»?`)) return;
     try {
-      await templatesApi.remove(selected.id);
-      const next = templates.filter(t => t.id !== selected.id);
+      await templatesApi.remove(sel.id);
+      const next = templates.filter(t => t.id !== sel.id);
       setTemplates(next);
-      setSelected(next[0] || null);
+      setSelected(next.length > 0 ? { group: 'my', tmpl: next[0] } : null);
       toast.success('Шаблон удалён');
     } catch { toast.error('Ошибка удаления'); }
   }
 
   async function toggleFavorite(tmpl?: any) {
-    const target = tmpl || selected;
+    const target = tmpl || sel;
     if (!target) return;
     try {
       await templatesApi.toggleFavorite(target.id);
       const updated = { ...target, is_favorite: !target.is_favorite };
-      if (selected?.id === target.id) setSelected(updated);
+      if (sel?.id === target.id) setSelected(prev => prev ? { ...prev, tmpl: updated } : null);
       setTemplates(prev => prev.map(t => t.id === target.id ? updated : t));
       toast.success(updated.is_favorite ? 'Добавлено в избранное' : 'Убрано из избранного');
     } catch { toast.error('Ошибка'); }
@@ -92,12 +96,12 @@ export default function TemplatesPage() {
 
   const groups = [
     { key: 'my',     label: 'Мои шаблоны',    filter: (t: any) => t.scope === 'my' },
+    { key: 'fav',    label: 'Избранное',       filter: (t: any) => !!t.is_favorite },
     { key: 'common', label: 'Общие шаблоны',   filter: (t: any) => t.scope === 'common' },
   ];
 
   const filtered = templates
-    .filter(t => !search || t.name.toLowerCase().includes(search.toLowerCase()))
-    .filter(t => !onlyFavorites || t.is_favorite);
+    .filter(t => !search || t.name.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <>
@@ -113,13 +117,6 @@ export default function TemplatesPage() {
             </span>
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск по названию шаблонов" />
           </div>
-          <button
-            className={`tmpl-fav-toggle${onlyFavorites ? ' active' : ''}`}
-            onClick={() => setOnlyFavorites(v => !v)}
-            title={onlyFavorites ? 'Показать все' : 'Только избранные'}
-          >
-            {onlyFavorites ? '★' : '☆'} Избранные
-          </button>
           <button className="btn-back" onClick={() => router.back()}>← Вернуться на лист</button>
         </div>
 
@@ -152,9 +149,9 @@ export default function TemplatesPage() {
                   </div>
                   {!isGroupCollapsed && items.map(t => (
                     <div
-                      key={t.id}
-                      className={`template-item${selected?.id === t.id ? ' active' : ''}`}
-                      onClick={() => setSelected(t)}
+                      key={`${g.key}-${t.id}`}
+                      className={`template-item${selected?.group === g.key && selected?.tmpl?.id === t.id ? ' active' : ''}`}
+                      onClick={() => setSelected({ group: g.key, tmpl: t })}
                     >
                       <button
                         className={`tmpl-star-btn${t.is_favorite ? ' is-fav' : ''}`}
@@ -173,21 +170,21 @@ export default function TemplatesPage() {
 
           {/* Right — preview */}
           <div className="templates-right">
-            {selected ? (
+            {sel ? (
               <>
-                <div className="template-preview-name">{selected.name}</div>
+                <div className="template-preview-name">{sel.name}</div>
                 <div className="template-preview-meta">
-                  {selected.scope === 'common' ? 'Общий шаблон' : 'Мой шаблон'}
-                  {selected.is_favorite ? ' · ★ Избранное' : ''}
+                  {sel.scope === 'common' ? 'Общий шаблон' : 'Мой шаблон'}
+                  {sel.is_favorite ? ' · ★ Избранное' : ''}
                 </div>
                 <div className="template-actions">
                   <button className="btn-primary" style={{ fontSize: 12 }} onClick={() => setApplyModalOpen(true)}>
                     + Добавить в лист
                   </button>
                   <button className="btn-outline" style={{ fontSize: 12 }} onClick={() => toggleFavorite()}>
-                    {selected.is_favorite ? '★' : '☆'} В избранное
+                    {sel.is_favorite ? '★' : '☆'} В избранное
                   </button>
-                  {selected.scope !== 'common' && (
+                  {sel.scope !== 'common' && (
                     <button className="btn-danger" style={{ fontSize: 12 }} onClick={deleteTemplate}>
                       🗑 Удалить
                     </button>
@@ -198,7 +195,7 @@ export default function TemplatesPage() {
                     <tr>{['№', 'Название', 'Бренд', 'Артикул', 'Кол-во'].map(h => <th key={h}>{h}</th>)}</tr>
                   </thead>
                   <tbody>
-                    {(selected.rows || []).map((r: any, i: number) => (
+                    {(sel.rows || []).map((r: any, i: number) => (
                       <tr key={i}>
                         <td>{r.row_number}</td>
                         <td>{r.name}</td>
