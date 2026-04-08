@@ -19,6 +19,9 @@ export class Sheet {
   @Column()
   name: string;
 
+  @Column({ default: 0 })
+  sort_order: number;
+
   @Column()
   projectId: number;
 

@@ -23,21 +23,23 @@ export class ProjectsService {
     const projects = await this.projectsRepo.find({
       where: { userId },
       relations: ['sheets', 'sheets.rows'],
-      order: { updatedAt: 'DESC' },
+      order: { sort_order: 'ASC', createdAt: 'ASC' },
     });
 
     return projects.map((p) => {
-      const sheets = (p.sheets || []).map((s) => {
-        const total = (s.rows || []).reduce(
-          (sum, r) =>
-            sum +
-            parseFloat(r.price || '0') *
-              parseFloat(r.qty || '0') *
-              parseFloat(r.coef || '1'),
-          0,
-        );
-        return { ...s, total };
-      });
+      const sheets = (p.sheets || [])
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .map((s) => {
+          const total = (s.rows || []).reduce(
+            (sum, r) =>
+              sum +
+              parseFloat(r.price || '0') *
+                parseFloat(r.qty || '0') *
+                parseFloat(r.coef || '1'),
+            0,
+          );
+          return { ...s, total };
+        });
       const projectTotal = sheets.reduce((sum, s) => sum + s.total, 0);
       return { ...p, sheets, total: projectTotal };
     });
@@ -140,6 +142,23 @@ export class ProjectsService {
     });
     await this.projectsRepo.delete(id);
     return { success: true };
+  }
+
+  async reorderProjects(userId: number, ids: number[]) {
+    const updates = ids.map((id, i) =>
+      this.projectsRepo.update({ id, userId }, { sort_order: i }),
+    );
+    await Promise.all(updates);
+    return { ok: true };
+  }
+
+  async reorderSheets(projectId: number, userId: number, ids: number[]) {
+    await this.checkOwner(projectId, userId);
+    const updates = ids.map((id, i) =>
+      this.sheetsRepo.update({ id, projectId }, { sort_order: i }),
+    );
+    await Promise.all(updates);
+    return { ok: true };
   }
 
   private async checkOwner(id: number, userId: number) {

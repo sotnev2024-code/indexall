@@ -19,6 +19,9 @@ export class Project {
   @Column()
   name: string;
 
+  @Column({ default: 0 })
+  sort_order: number;
+
   @Column()
   userId: number;
 

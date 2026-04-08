@@ -43,6 +43,8 @@ export const projectsApi = {
   update: (id: number, data: any) => api.put(`/projects/${id}`, data),
   duplicate: (id: number) => api.post(`/projects/${id}/duplicate`),
   remove: (id: number) => api.delete(`/projects/${id}`),
+  reorder: (ids: number[]) => api.put('/projects/reorder', { ids }),
+  reorderSheets: (projectId: number, ids: number[]) => api.put(`/projects/${projectId}/reorder-sheets`, { ids }),
 };
 
 // ── Sheets ────────────────────────────────────────────────────

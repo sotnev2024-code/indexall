@@ -737,6 +737,7 @@ export default function SpecPage() {
       let toIdx = sheets.findIndex((s: any) => s.id === tabDropSide.id);
       if (tabDropSide.side === 'right') toIdx++;
       sheets.splice(toIdx, 0, item);
+      projectsApi.reorderSheets(prev.id, sheets.map((s: any) => s.id)).catch(() => {});
       return { ...prev, sheets };
     });
     onTabDragEnd();

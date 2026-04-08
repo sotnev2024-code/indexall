@@ -213,7 +213,6 @@ export default function ProjectsPage() {
     saveSnapshot(projects);
 
     if (dragItem.type === 'project' && dropZone.type === 'project') {
-      // Reorder projects
       setProjects(prev => {
         const next = [...prev];
         const fromIdx = next.findIndex(p => p.id === dragItem.id);
@@ -221,6 +220,7 @@ export default function ProjectsPage() {
         let toIdx = next.findIndex(p => p.id === dropZone.id);
         if (dropZone.half === 'bottom') toIdx++;
         next.splice(toIdx, 0, item);
+        projectsApi.reorder(next.map(p => p.id)).catch(() => {});
         return next;
       });
 
@@ -231,7 +231,6 @@ export default function ProjectsPage() {
         const dstProjId = dropZone.projId!;
 
         if (srcProjId === dstProjId) {
-          // Reorder sheets within same project
           setProjects(prev => prev.map(p => {
             if (p.id !== srcProjId) return p;
             const sheets = [...(p.sheets || [])];
@@ -240,10 +239,10 @@ export default function ProjectsPage() {
             let toIdx = sheets.findIndex((s: any) => s.id === dropZone.id);
             if (dropZone.half === 'bottom') toIdx++;
             sheets.splice(toIdx, 0, item);
+            projectsApi.reorderSheets(srcProjId, sheets.map((s: any) => s.id)).catch(() => {});
             return { ...p, sheets };
           }));
         } else {
-          // Move sheet to different project
           let movedSheet: any = null;
           setProjects(prev => {
             const p1 = prev.map(p => {
@@ -252,6 +251,7 @@ export default function ProjectsPage() {
                 if (s.id === dragItem.id) { movedSheet = s; return false; }
                 return true;
               });
+              projectsApi.reorderSheets(srcProjId, sheets.map((s: any) => s.id)).catch(() => {});
               return { ...p, sheets };
             });
             if (!movedSheet) return p1;
@@ -261,6 +261,7 @@ export default function ProjectsPage() {
               let toIdx = sheets.findIndex((s: any) => s.id === dropZone.id);
               if (dropZone.half === 'bottom') toIdx++;
               sheets.splice(toIdx, 0, { ...movedSheet, projectId: dstProjId });
+              projectsApi.reorderSheets(dstProjId, sheets.map((s: any) => s.id)).catch(() => {});
               return { ...p, sheets };
             });
           });
@@ -268,7 +269,6 @@ export default function ProjectsPage() {
         }
 
       } else if (dropZone.type === 'project' && dropZone.id !== srcProjId) {
-        // Drop sheet onto project header → append to that project
         let movedSheet: any = null;
         setProjects(prev => {
           const p1 = prev.map(p => {
@@ -277,12 +277,15 @@ export default function ProjectsPage() {
               if (s.id === dragItem.id) { movedSheet = s; return false; }
               return true;
             });
+            projectsApi.reorderSheets(srcProjId, sheets.map((s: any) => s.id)).catch(() => {});
             return { ...p, sheets };
           });
           if (!movedSheet) return p1;
           return p1.map(p => {
             if (p.id !== dropZone.id) return p;
-            return { ...p, sheets: [...(p.sheets || []), { ...movedSheet, projectId: dropZone.id }] };
+            const sheets = [...(p.sheets || []), { ...movedSheet, projectId: dropZone.id }];
+            projectsApi.reorderSheets(dropZone.id, sheets.map((s: any) => s.id)).catch(() => {});
+            return { ...p, sheets };
           });
         });
         sheetsApi.update(dragItem.id, { projectId: dropZone.id }).catch(() => {});

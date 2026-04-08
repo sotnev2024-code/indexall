@@ -49,6 +49,22 @@ export class ProjectsController {
     return this.service.update(id, req.user.userId, body);
   }
 
+  @Put('reorder')
+  @ApiOperation({ summary: 'Сохранить порядок проектов' })
+  reorderProjects(@Body('ids') ids: number[], @Request() req) {
+    return this.service.reorderProjects(req.user.userId, ids);
+  }
+
+  @Put(':id/reorder-sheets')
+  @ApiOperation({ summary: 'Сохранить порядок листов в проекте' })
+  reorderSheets(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('ids') ids: number[],
+    @Request() req,
+  ) {
+    return this.service.reorderSheets(id, req.user.userId, ids);
+  }
+
   @Post(':id/duplicate')
   @ApiOperation({ summary: 'Дублировать проект' })
   duplicate(@Param('id', ParseIntPipe) id: number, @Request() req) {
