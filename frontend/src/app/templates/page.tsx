@@ -18,6 +18,7 @@ export default function TemplatesPage() {
   const [loading, setLoading] = useState(true);
   const [applyModalOpen, setApplyModalOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [onlyFavorites, setOnlyFavorites] = useState(false);
 
   const toggleGroup = (key: string) =>
     setCollapsedGroups(prev => {
@@ -65,7 +66,9 @@ export default function TemplatesPage() {
   }
 
   async function deleteTemplate() {
-    if (!selected || !confirm(`Удалить шаблон «${selected.name}»?`)) return;
+    if (!selected) return;
+    if (selected.scope === 'common') { toast.error('Общие шаблоны нельзя удалить'); return; }
+    if (!confirm(`Удалить шаблон «${selected.name}»?`)) return;
     try {
       await templatesApi.remove(selected.id);
       const next = templates.filter(t => t.id !== selected.id);
@@ -75,24 +78,26 @@ export default function TemplatesPage() {
     } catch { toast.error('Ошибка удаления'); }
   }
 
-  async function toggleFavorite() {
-    if (!selected) return;
+  async function toggleFavorite(tmpl?: any) {
+    const target = tmpl || selected;
+    if (!target) return;
     try {
-      await templatesApi.toggleFavorite(selected.id);
-      const updated = { ...selected, is_favorite: !selected.is_favorite };
-      setSelected(updated);
-      setTemplates(prev => prev.map(t => t.id === selected.id ? updated : t));
+      await templatesApi.toggleFavorite(target.id);
+      const updated = { ...target, is_favorite: !target.is_favorite };
+      if (selected?.id === target.id) setSelected(updated);
+      setTemplates(prev => prev.map(t => t.id === target.id ? updated : t));
       toast.success(updated.is_favorite ? 'Добавлено в избранное' : 'Убрано из избранного');
     } catch { toast.error('Ошибка'); }
   }
 
   const groups = [
-    { key: 'my',     label: 'Мои шаблоны',    filter: (t: any) => !t.scope || t.scope === 'my' },
-    { key: 'fav',    label: 'Избранное',       filter: (t: any) => !!t.is_favorite },
+    { key: 'my',     label: 'Мои шаблоны',    filter: (t: any) => t.scope === 'my' },
     { key: 'common', label: 'Общие шаблоны',   filter: (t: any) => t.scope === 'common' },
   ];
 
-  const filtered = templates.filter(t => !search || t.name.toLowerCase().includes(search.toLowerCase()));
+  const filtered = templates
+    .filter(t => !search || t.name.toLowerCase().includes(search.toLowerCase()))
+    .filter(t => !onlyFavorites || t.is_favorite);
 
   return (
     <>
@@ -108,6 +113,13 @@ export default function TemplatesPage() {
             </span>
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск по названию шаблонов" />
           </div>
+          <button
+            className={`tmpl-fav-toggle${onlyFavorites ? ' active' : ''}`}
+            onClick={() => setOnlyFavorites(v => !v)}
+            title={onlyFavorites ? 'Показать все' : 'Только избранные'}
+          >
+            {onlyFavorites ? '★' : '☆'} Избранные
+          </button>
           <button className="btn-back" onClick={() => router.back()}>← Вернуться на лист</button>
         </div>
 
@@ -122,7 +134,7 @@ export default function TemplatesPage() {
         </div>
 
         <div className="templates-body">
-          {/* Left */}
+          {/* Left — template list */}
           <div className="templates-left">
             {groups.map(g => {
               const items = filtered.filter(g.filter);
@@ -139,8 +151,19 @@ export default function TemplatesPage() {
                     <span>{g.label} <span className="template-group-count">({items.length})</span></span>
                   </div>
                   {!isGroupCollapsed && items.map(t => (
-                    <div key={t.id} className={`template-item${selected?.id === t.id ? ' active' : ''}`} onClick={() => setSelected(t)}>
-                      <span>≡</span><span>{t.name}</span>
+                    <div
+                      key={t.id}
+                      className={`template-item${selected?.id === t.id ? ' active' : ''}`}
+                      onClick={() => setSelected(t)}
+                    >
+                      <button
+                        className={`tmpl-star-btn${t.is_favorite ? ' is-fav' : ''}`}
+                        onClick={e => { e.stopPropagation(); toggleFavorite(t); }}
+                        title={t.is_favorite ? 'Убрать из избранного' : 'Добавить в избранное'}
+                      >
+                        {t.is_favorite ? '★' : '☆'}
+                      </button>
+                      <span className="tmpl-item-name">{t.name}</span>
                     </div>
                   ))}
                 </div>
@@ -148,24 +171,27 @@ export default function TemplatesPage() {
             })}
           </div>
 
-          {/* Right */}
+          {/* Right — preview */}
           <div className="templates-right">
             {selected ? (
               <>
                 <div className="template-preview-name">{selected.name}</div>
                 <div className="template-preview-meta">
-                  {selected.meta_json ? Object.values(selected.meta_json).filter(Boolean).join(' – ') : selected.sheet_type || ''}
+                  {selected.scope === 'common' ? 'Общий шаблон' : 'Мой шаблон'}
+                  {selected.is_favorite ? ' · ★ Избранное' : ''}
                 </div>
                 <div className="template-actions">
                   <button className="btn-primary" style={{ fontSize: 12 }} onClick={() => setApplyModalOpen(true)}>
                     + Добавить в лист
                   </button>
-                  <button className="btn-outline" style={{ fontSize: 12 }} onClick={toggleFavorite}>
+                  <button className="btn-outline" style={{ fontSize: 12 }} onClick={() => toggleFavorite()}>
                     {selected.is_favorite ? '★' : '☆'} В избранное
                   </button>
-                  <button className="btn-danger" style={{ fontSize: 12 }} onClick={deleteTemplate}>
-                    🗑 Удалить
-                  </button>
+                  {selected.scope !== 'common' && (
+                    <button className="btn-danger" style={{ fontSize: 12 }} onClick={deleteTemplate}>
+                      🗑 Удалить
+                    </button>
+                  )}
                 </div>
                 <table className="template-table">
                   <thead>

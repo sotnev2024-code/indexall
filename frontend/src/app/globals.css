@@ -1196,6 +1196,47 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .template-table td { border: 1px solid var(--border); padding: 5px 10px; }
 .template-table tr:nth-child(even) td { background: var(--row-even); }
 
+/* Favorites filter toggle */
+.tmpl-fav-toggle {
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--white);
+  transition: all .15s;
+  white-space: nowrap;
+}
+.tmpl-fav-toggle:hover { border-color: var(--black); }
+.tmpl-fav-toggle.active {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  color: #92400e;
+  font-weight: 600;
+}
+
+/* Inline star button in template list items */
+.tmpl-star-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  color: #d1d5db;
+  transition: color .15s;
+  flex-shrink: 0;
+}
+.tmpl-star-btn:hover { color: #f59e0b; }
+.template-item .tmpl-star-btn { color: #d1d5db; }
+.template-item .tmpl-star-btn:hover { color: #f59e0b; }
+.template-item .tmpl-star-btn.is-fav { color: #f59e0b; }
+.tmpl-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ===== ADMIN PANEL ===== */
 .admin-header {
   position: fixed; top: 0; left: 0; right: 0;
