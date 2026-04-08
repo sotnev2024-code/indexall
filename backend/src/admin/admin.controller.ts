@@ -287,18 +287,42 @@ export class AdminController implements OnModuleInit {
       relations: ['user'],
       order: { createdAt: 'DESC' },
     });
-    return templates.map(t => ({
-      id: t.id,
-      name: t.name,
-      createdAt: t.createdAt,
-      userId: t.userId,
-      userName: t.user?.name || null,
-      userEmail: t.user?.email || null,
-      files: t.files,
-      views_count: t.views_count,
-      used_count: t.used_count,
-      scope: t.userId == null ? 'common' : 'user',
-    }));
+    return templates.map(t => {
+      let rows: any[] = [];
+      try { const p = JSON.parse(t.meta); if (Array.isArray(p)) rows = p; } catch {}
+      return {
+        id: t.id,
+        name: t.name,
+        createdAt: t.createdAt,
+        userId: t.userId,
+        userName: t.user?.name || null,
+        userEmail: t.user?.email || null,
+        files: t.files,
+        views_count: t.views_count,
+        used_count: t.used_count,
+        scope: t.userId == null ? 'common' : 'user',
+        rows,
+      };
+    });
+  }
+
+  @Post('templates/:id/publish')
+  async publishTemplate(@Param('id', ParseIntPipe) id: number) {
+    const original = await this.templatesRepo.findOne({ where: { id } });
+    if (!original) throw new Error('Template not found');
+    const copy = this.templatesRepo.create({
+      name: original.name,
+      meta: original.meta,
+      meta_json: original.meta_json,
+      scope: 'common',
+      userId: null,
+      files: 0,
+      is_favorite: false,
+      views_count: 0,
+      used_count: 0,
+    });
+    const saved = await this.templatesRepo.save(copy);
+    return { ok: true, id: saved.id };
   }
 
   @Delete('templates/:id')

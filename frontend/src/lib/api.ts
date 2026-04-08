@@ -137,6 +137,7 @@ export const adminApi = {
   createTariffOperation: (data: any) => api.post('/admin/tariff-operations', data),
   deleteTariffOperation: (id: number) => api.delete(`/admin/tariff-operations/${id}`),
   getAdminTemplates: () => api.get('/admin/templates'),
+  publishTemplate: (id: number) => api.post(`/admin/templates/${id}/publish`, {}),
   deleteAdminTemplate: (id: number) => api.delete(`/admin/templates/${id}`),
   getPricelists: () => api.get('/admin/pricelists'),
   getTilesStats: () => api.get('/admin/tiles-stats'),

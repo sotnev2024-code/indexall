@@ -84,6 +84,9 @@ export default function AdminPage() {
 
   // Templates
   const [adminTemplates, setAdminTemplates] = useState<any[]>([]);
+  const [tmplSearch, setTmplSearch] = useState('');
+  const [tmplUserFilter, setTmplUserFilter] = useState('');
+  const [tmplPreview, setTmplPreview] = useState<any | null>(null);
 
   // Tiles (Каталог: База)
   const [tiles, setTiles] = useState<any[]>([]);
@@ -244,8 +247,19 @@ export default function AdminPage() {
     try {
       await adminApi.deleteAdminTemplate(id);
       toast.success('Шаблон удалён');
+      if (tmplPreview?.id === id) setTmplPreview(null);
       loadAdminTemplates();
     } catch { toast.error('Ошибка удаления шаблона'); }
+  }
+
+  async function handlePublishTemplate(t: any) {
+    if (t.scope === 'common') { toast('Шаблон уже в общих'); return; }
+    if (!confirm(`Добавить «${t.name}» в Общие шаблоны?\nСоздастся независимая копия — оригинал останется у пользователя.`)) return;
+    try {
+      await adminApi.publishTemplate(t.id);
+      toast.success('Шаблон добавлен в Общие');
+      loadAdminTemplates();
+    } catch { toast.error('Ошибка публикации шаблона'); }
   }
 
   // ── Tiles (Каталог: База) ────────────────────────────────────
@@ -763,58 +777,159 @@ export default function AdminPage() {
           )}
 
           {/* ── Шаблоны ── */}
-          {tab === 'templates' && (
-            <>
-              <div className="admin-section-title">Шаблоны</div>
-              <div style={{ overflowX: 'auto' }}>
-                <table className="admin-table" style={{ minWidth: 860 }}>
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Никнейм</th>
-                      <th>Дата созд.</th>
-                      <th>Название</th>
-                      <th>Просмотры</th>
-                      <th>Использовано</th>
-                      <th>Место</th>
-                      <th>Статус</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {adminTemplates.map(t => (
-                      <tr key={t.id}>
-                        <td style={{ fontWeight: 600 }}>{t.userId ? fmtId(t.userId) : '—'}</td>
-                        <td>{t.userName || '—'}</td>
-                        <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{fmtDate(t.createdAt)}</td>
-                        <td><strong>{t.name}</strong></td>
-                        <td style={{ textAlign: 'center' }}>{t.views_count ?? 0}</td>
-                        <td style={{ textAlign: 'center' }}>{t.used_count ?? t.files ?? 0}</td>
-                        <td style={{ fontSize: 12, color: 'var(--muted)' }}>
-                          {t.userId ? `/AA${String(t.userId).padStart(3, '0')}` : '/Общие'}
-                        </td>
-                        <td>
-                          <span style={{
-                            padding: '2px 8px', borderRadius: 4, fontSize: 11,
-                            background: t.userId == null ? '#d1fae5' : '#fef9c3',
-                            color: t.userId == null ? '#065f46' : '#78350f',
-                          }}>
-                            {t.userId == null ? 'Виден всем' : `доступен 1`}
-                          </span>
-                        </td>
-                        <td>
-                          <button className="btn-danger" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => handleDeleteAdminTemplate(t.id)}>Удалить</button>
-                        </td>
-                      </tr>
+          {tab === 'templates' && (() => {
+            const uniqueUsers = Array.from(
+              new Map(adminTemplates.filter(t => t.userId).map(t => [t.userId, t.userName || t.userEmail || fmtId(t.userId)])).entries()
+            );
+            const filtered = adminTemplates.filter(t => {
+              const matchName = !tmplSearch || t.name.toLowerCase().includes(tmplSearch.toLowerCase());
+              const matchUser = !tmplUserFilter || String(t.userId) === tmplUserFilter;
+              return matchName && matchUser;
+            });
+            const COLS = ['name', 'brand', 'article', 'qty', 'unit', 'price', 'store', 'coef', 'total', 'deadline'];
+            const COL_LABELS: Record<string, string> = { name: 'Название', brand: 'Бренд', article: 'Артикул', qty: 'Кол-во', unit: 'Ед.', price: 'Цена', store: 'Магазин', coef: 'Коэф.', total: 'Итого', deadline: 'Срок' };
+            return (
+              <>
+                <div className="admin-section-title">Шаблоны пользователей</div>
+
+                {/* Toolbar */}
+                <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input
+                    value={tmplSearch}
+                    onChange={e => setTmplSearch(e.target.value)}
+                    placeholder="Поиск по названию…"
+                    style={{ padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, width: 220 }}
+                  />
+                  <select
+                    value={tmplUserFilter}
+                    onChange={e => setTmplUserFilter(e.target.value)}
+                    style={{ padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13 }}
+                  >
+                    <option value="">Все пользователи</option>
+                    <option value="null">Общие (нет автора)</option>
+                    {uniqueUsers.map(([uid, uname]) => (
+                      <option key={uid} value={String(uid)}>{fmtId(Number(uid))} {uname}</option>
                     ))}
-                    {adminTemplates.length === 0 && (
-                      <tr><td colSpan={9} style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Нет шаблонов</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
+                  </select>
+                  <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>
+                    Найдено: {filtered.length}
+                  </span>
+                </div>
+
+                {/* Two-panel layout */}
+                <div style={{ display: 'grid', gridTemplateColumns: tmplPreview ? '1fr 1fr' : '1fr', gap: 16, alignItems: 'start' }}>
+
+                  {/* Left: template list */}
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="admin-table" style={{ minWidth: 580 }}>
+                      <thead>
+                        <tr>
+                          <th>Автор</th>
+                          <th>Дата</th>
+                          <th>Название шаблона</th>
+                          <th>Статус</th>
+                          <th>Строк</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtered.map(t => (
+                          <tr
+                            key={t.id}
+                            style={{ cursor: 'pointer', background: tmplPreview?.id === t.id ? 'var(--bg)' : undefined }}
+                            onClick={() => setTmplPreview(tmplPreview?.id === t.id ? null : t)}
+                          >
+                            <td style={{ fontSize: 12 }}>
+                              {t.userId ? <><strong>{fmtId(t.userId)}</strong> {t.userName || ''}</> : <span style={{ color: 'var(--muted)' }}>—</span>}
+                            </td>
+                            <td style={{ fontSize: 11, whiteSpace: 'nowrap', color: 'var(--muted)' }}>{fmtDate(t.createdAt)}</td>
+                            <td><strong>{t.name}</strong></td>
+                            <td>
+                              <span style={{
+                                padding: '2px 8px', borderRadius: 4, fontSize: 11, whiteSpace: 'nowrap',
+                                background: t.scope === 'common' ? '#d1fae5' : '#fef9c3',
+                                color: t.scope === 'common' ? '#065f46' : '#78350f',
+                              }}>
+                                {t.scope === 'common' ? '🌐 Общий' : '🔒 Личный'}
+                              </span>
+                            </td>
+                            <td style={{ textAlign: 'center', fontSize: 12 }}>{(t.rows || []).filter((r: any) => r.name || r.article).length}</td>
+                            <td onClick={e => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
+                              {t.scope !== 'common' && (
+                                <button
+                                  className="btn-primary"
+                                  style={{ fontSize: 11, padding: '3px 10px', marginRight: 6 }}
+                                  onClick={() => handlePublishTemplate(t)}
+                                  title="Создать независимую копию в Общих шаблонах"
+                                >
+                                  → В общие
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                        {filtered.length === 0 && (
+                          <tr><td colSpan={6} style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Нет шаблонов</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Right: preview panel */}
+                  {tmplPreview && (
+                    <div style={{ border: '1px solid var(--border)', borderRadius: 8, background: '#fff', padding: 16, minHeight: 200 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{tmplPreview.name}</div>
+                          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                            {tmplPreview.userId ? `${fmtId(tmplPreview.userId)} ${tmplPreview.userName || ''}` : 'Общий шаблон'} · {fmtDate(tmplPreview.createdAt)}
+                          </div>
+                        </div>
+                        <button onClick={() => setTmplPreview(null)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--muted)', lineHeight: 1 }}>×</button>
+                      </div>
+
+                      {(tmplPreview.rows || []).filter((r: any) => r.name || r.article).length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: 32, color: 'var(--muted)', fontSize: 13 }}>Шаблон пустой</div>
+                      ) : (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                            <thead>
+                              <tr style={{ background: 'var(--bg)' }}>
+                                <th style={{ padding: '5px 8px', border: '1px solid var(--border)', textAlign: 'left', fontWeight: 600 }}>№</th>
+                                {COLS.map(c => (
+                                  <th key={c} style={{ padding: '5px 8px', border: '1px solid var(--border)', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>{COL_LABELS[c]}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(tmplPreview.rows || []).filter((r: any) => r.name || r.article).map((r: any, i: number) => (
+                                <tr key={i} style={{ background: i % 2 === 0 ? '#fff' : 'var(--bg)' }}>
+                                  <td style={{ padding: '4px 8px', border: '1px solid var(--border)', color: 'var(--muted)' }}>{i + 1}</td>
+                                  {COLS.map(c => (
+                                    <td key={c} style={{ padding: '4px 8px', border: '1px solid var(--border)', maxWidth: c === 'name' ? 200 : 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {r[c] ?? ''}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {tmplPreview.scope !== 'common' && (
+                        <div style={{ marginTop: 14, textAlign: 'right' }}>
+                          <button className="btn-primary" style={{ fontSize: 12 }} onClick={() => handlePublishTemplate(tmplPreview)}>
+                            → Добавить в Общие шаблоны
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </>
+            );
+          })()}
 
           {/* ── Каталог: Прайс-листы ── */}
           {tab === 'pricelists' && (
