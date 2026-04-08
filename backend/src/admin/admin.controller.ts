@@ -317,6 +317,7 @@ export class AdminController implements OnModuleInit {
       userId: null as any,
       files: 0,
       is_favorite: false,
+      is_active: true,
       views_count: 0,
       used_count: 0,
     } as Partial<Template>);

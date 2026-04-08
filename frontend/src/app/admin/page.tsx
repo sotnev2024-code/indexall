@@ -279,10 +279,31 @@ export default function AdminPage() {
     rows.forEach((r: any) => {
       lines.push([r.name, r.brand, r.article, r.qty, r.unit, r.price, r.store, r.coef, r.deadline].map((v: any) => v ?? '').join('\t'));
     });
-    navigator.clipboard.writeText(lines.join('\n')).then(
-      () => toast.success(`Скопировано ${rows.length} строк`),
-      () => toast.error('Не удалось скопировать'),
-    );
+    const text = lines.join('\n');
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(
+        () => toast.success(`Скопировано ${rows.length} строк`),
+        () => fallbackCopy(text, rows.length),
+      );
+    } else {
+      fallbackCopy(text, rows.length);
+    }
+  }
+
+  function fallbackCopy(text: string, rowCount: number) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+      toast.success(`Скопировано ${rowCount} строк`);
+    } catch {
+      toast.error('Не удалось скопировать');
+    }
+    document.body.removeChild(ta);
   }
 
   // ── Tiles (Каталог: База) ────────────────────────────────────

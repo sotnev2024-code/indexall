@@ -13,7 +13,7 @@ export class TemplatesService {
   private withRows(t: Template): any {
     let rows: any[] = [];
     try { const parsed = JSON.parse(t.meta); if (Array.isArray(parsed)) rows = parsed; } catch {}
-    return { ...t, rows };
+    return { ...t, rows, scope: t.userId == null ? 'common' : 'my' };
   }
 
   async create(data: any): Promise<any> {
@@ -26,13 +26,19 @@ export class TemplatesService {
     return this.withRows(saved);
   }
 
-  async findAll(scope?: string): Promise<any[]> {
+  async findAll(scope?: string, userId?: number): Promise<any[]> {
     let templates: Template[];
     if (scope === 'common') {
       templates = await this.templatesRepository.find({
         where: { userId: IsNull(), is_active: true },
         order: { createdAt: 'DESC' },
       });
+    } else if (userId) {
+      // Return user's own templates + all active common templates
+      templates = await this.templatesRepository.find({ order: { createdAt: 'DESC' } });
+      templates = templates.filter(t =>
+        t.userId === userId || (t.userId == null && (t.is_active ?? true))
+      );
     } else {
       templates = await this.templatesRepository.find({ order: { createdAt: 'DESC' } });
     }

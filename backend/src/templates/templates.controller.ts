@@ -30,8 +30,8 @@ export class TemplatesController {
 
   @Get()
   @ApiOperation({ summary: 'Получить все шаблоны (scope=common — только общие без владельца)' })
-  findAll(@Query('scope') scope?: string) {
-    return this.templatesService.findAll(scope);
+  findAll(@Request() req, @Query('scope') scope?: string) {
+    return this.templatesService.findAll(scope, req.user?.userId);
   }
 
   @Get(':id')
