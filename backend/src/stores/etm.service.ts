@@ -37,12 +37,20 @@ export class EtmService {
     }
 
     if (method === 'POST') {
-      args.push('-X', 'POST', '-d', '');
+      args.push('-X', 'POST', '-H', 'Content-Length: 0');
     }
 
     args.push(url);
 
-    const { stdout } = await execFileAsync('curl', args, { timeout: 35_000 });
+    let stdout = '';
+    let stderr = '';
+    try {
+      const result = await execFileAsync('curl', args, { timeout: 35_000 });
+      stdout = result.stdout;
+      stderr = result.stderr;
+    } catch (e: any) {
+      throw new Error(`curl failed: ${e?.stderr || e?.message}`);
+    }
 
     try {
       return JSON.parse(stdout || '{}');
