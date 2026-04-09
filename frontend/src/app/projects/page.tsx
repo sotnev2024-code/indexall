@@ -8,6 +8,13 @@ import { useAppStore } from '@/store/app.store';
 
 const formatMoney = (n: number) =>
   n ? n.toLocaleString('ru-RU', { minimumFractionDigits: 2 }) + ' ₽' : '–';
+
+/** Returns adjusted {x, y} so the context menu (approx 180×220px) stays inside the viewport */
+function safeMenuPos(clientX: number, clientY: number, menuW = 184, menuH = 220) {
+  const x = clientX + menuW > window.innerWidth  ? clientX - menuW : clientX;
+  const y = clientY + menuH > window.innerHeight ? clientY - menuH : clientY;
+  return { x: Math.max(4, x), y: Math.max(4, y) };
+}
 const formatDate = (d: string) =>
   d ? new Date(d).toLocaleDateString('ru-RU') : '';
 
@@ -341,7 +348,7 @@ export default function ProjectsPage() {
           <div>
             <button className="more-btn" onClick={e => {
               e.stopPropagation();
-              setCtx({ x: e.clientX, y: e.clientY, type: 'folder', id: folder.id, name: folder.name });
+              setCtx({ ...safeMenuPos(e.clientX, e.clientY), type: 'folder', id: folder.id, name: folder.name });
             }}>···</button>
           </div>
         </div>
@@ -382,7 +389,7 @@ export default function ProjectsPage() {
         onDrop={e => onDrop(e, 'sheet', sheet.id, folderId)}
         onDragEnd={() => { setDrag(null); setDropId(null); }}
         onDoubleClick={() => folderId !== null && openSheet(folderId, sheet.id)}
-        onContextMenu={e => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY, type: 'sheet', id: sheet.id, folderId, name: sheet.name }); }}
+        onContextMenu={e => { e.preventDefault(); setCtx({ ...safeMenuPos(e.clientX, e.clientY), type: 'sheet', id: sheet.id, folderId, name: sheet.name }); }}
       >
         <div className="project-name">
           <span className="drag-handle" title="Переместить">⠿</span>
