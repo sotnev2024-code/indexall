@@ -456,18 +456,18 @@ export class CatalogService implements OnModuleInit {
       .map(c => ({ ...c, children: this.buildTree(categories, c.id) }));
   }
 
-  async getPricesByArticles(articles: string[]): Promise<Record<string, number | null>> {
+  async getPricesByArticles(articles: string[]): Promise<Record<string, { price: number; manufacturer: string } | null>> {
     if (!articles.length) return {};
-    const result: Record<string, number | null> = {};
-    const products = await this.prodRepo.createQueryBuilder('p')
-      .where('p.article IN (:...articles)', { articles })
-      .andWhere('p.price IS NOT NULL')
-      .andWhere('p.price > 0')
-      .select(['p.article', 'p.price'])
-      .getMany();
-    const map = new Map<string, number>();
+    const result: Record<string, { price: number; manufacturer: string } | null> = {};
+    const products = await this.prodRepo.find({
+      where: articles.map(a => ({ article: a })),
+      relations: ['manufacturer'],
+    });
+    const map = new Map<string, { price: number; manufacturer: string }>();
     for (const p of products) {
-      if (p.article && !map.has(p.article)) map.set(p.article, Number(p.price));
+      if (p.article && p.price != null && Number(p.price) > 0 && !map.has(p.article)) {
+        map.set(p.article, { price: Number(p.price), manufacturer: p.manufacturer?.name || '' });
+      }
     }
     for (const a of articles) {
       result[a] = map.get(a) ?? null;

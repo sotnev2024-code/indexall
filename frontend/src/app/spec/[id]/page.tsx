@@ -290,6 +290,8 @@ export default function SpecPage() {
   const focusSnapshotRef = useRef<any[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshProgress, setRefreshProgress] = useState<{ done: number; total: number } | null>(null);
+  const [priceSourceModal, setPriceSourceModal] = useState(false);
+  const [etmUnconfigured, setEtmUnconfigured] = useState(false);
   useEffect(() => { rowsRef.current = rows; }, [rows]);
 
   // Sync helpers: update both React state AND ref synchronously
@@ -639,14 +641,14 @@ export default function SpecPage() {
     updateRow(rowIdx, 'store', store);
     // If switched to a pricelist name and row has an article, fetch price from catalog
     const article = rowsRef.current[rowIdx]?.article;
-    if (store && store !== 'ЭТМ' && article) {
+    if (store && store !== 'ЭТМ' && store !== '' && article) {
       try {
         const { data: prices } = await catalogApi.getPricesByArticles([article]);
-        const price = prices[article];
-        if (price != null && price > 0) {
+        const entry = prices[article];
+        if (entry != null) {
           setRows(prev => {
             const next = [...prev];
-            const priceStr = String(price);
+            const priceStr = String(entry.price);
             next[rowIdx] = { ...next[rowIdx], price: priceStr, auto_price: false, total: calcTotal(priceStr, next[rowIdx].qty, next[rowIdx].coef) };
             return next;
           });
@@ -1435,11 +1437,28 @@ export default function SpecPage() {
     } catch { toast.error('Ошибка экспорта'); }
   }
 
-  async function handleRefreshPrices() {
+  function handleRefreshPrices() {
+    setPriceSourceModal(true);
+  }
+
+  async function handleRefreshFromEtm() {
+    setPriceSourceModal(false);
+    // Check ETM credentials
+    try {
+      const { data: creds } = await storesApi.getEtmCredentials();
+      if (!creds?.configured) {
+        setEtmUnconfigured(true);
+        return;
+      }
+    } catch {
+      setEtmUnconfigured(true);
+      return;
+    }
+
     const targets = rowsRef.current
       .map((r, i) => ({ r, i }))
       .filter(({ r }) => r.article && r.store === 'ЭТМ');
-    if (targets.length === 0) { toast('Нет строк с магазином ЭТМ для обновления цены'); return; }
+    if (targets.length === 0) { toast('Нет строк с магазином ЭТМ'); return; }
 
     setRefreshing(true);
     setRefreshProgress({ done: 0, total: targets.length });
@@ -1447,15 +1466,9 @@ export default function SpecPage() {
     const articles = targets.map(({ r }) => r.article as string);
 
     try {
-      // Single request — backend handles 1 req/sec throttling internally
       const { data: prices } = await storesApi.getEtmPrices(articles);
-
-      // Count updates synchronously before setRows (setRows callback is async)
       let updated = 0;
-      for (const { r } of targets) {
-        const price = prices[r.article];
-        if (price != null && price > 0) updated++;
-      }
+      for (const { r } of targets) { if ((prices[r.article] ?? 0) > 0) updated++; }
 
       setRows(prev => {
         const next = [...prev];
@@ -1463,10 +1476,51 @@ export default function SpecPage() {
           const price = prices[r.article];
           if (price != null && price > 0) {
             const priceStr = String(price);
+            next[i] = { ...next[i], price: priceStr, store: 'ЭТМ', total: calcTotal(priceStr, next[i].qty, next[i].coef) };
+          }
+        }
+        return next;
+      });
+
+      if (updated > 0) { pushHistorySnapshot(snap); setUnsaved(true); toast.success(`ЭТМ: обновлено ${updated} из ${targets.length} цен`); }
+      else toast('ЭТМ: цены не найдены. Проверьте артикулы.');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Ошибка запроса к ЭТМ');
+    } finally {
+      setRefreshing(false);
+      setRefreshProgress(null);
+    }
+  }
+
+  async function handleRefreshFromPricelist() {
+    setPriceSourceModal(false);
+    if (pricelists.length === 0) { toast('Нет активных прайсов. Загрузите прайс в разделе Администратор.'); return; }
+
+    const targets = rowsRef.current
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => r.article);
+    if (targets.length === 0) { toast('Нет строк с артикулом'); return; }
+
+    setRefreshing(true);
+    const snap = JSON.parse(JSON.stringify(rowsRef.current));
+    const articles = targets.map(({ r }) => r.article as string);
+
+    try {
+      const { data: prices } = await catalogApi.getPricesByArticles(articles);
+      let updated = 0;
+      for (const { r } of targets) { if (prices[r.article] != null) updated++; }
+
+      setRows(prev => {
+        const next = [...prev];
+        for (const { r, i } of targets) {
+          const entry = prices[r.article];
+          if (entry != null) {
+            const priceStr = String(entry.price);
             next[i] = {
               ...next[i],
               price: priceStr,
-              store: 'ЭТМ',
+              store: entry.manufacturer || next[i].store,
+              auto_price: false,
               total: calcTotal(priceStr, next[i].qty, next[i].coef),
             };
           }
@@ -1474,20 +1528,10 @@ export default function SpecPage() {
         return next;
       });
 
-      if (updated > 0) {
-        pushHistorySnapshot(snap);
-        setUnsaved(true);
-        toast.success(`ЭТМ: обновлено ${updated} из ${targets.length} цен`);
-      } else {
-        toast('ЭТМ: цены не найдены. Проверьте артикулы в строках.');
-      }
-    } catch (err: any) {
-      const msg = err?.response?.data?.message || 'Ошибка запроса к ЭТМ';
-      toast.error(msg);
-    } finally {
-      setRefreshing(false);
-      setRefreshProgress(null);
-    }
+      if (updated > 0) { pushHistorySnapshot(snap); setUnsaved(true); toast.success(`Прайс: обновлено ${updated} из ${targets.length} цен`); }
+      else toast('Прайс: цены не найдены. Загрузите актуальный прайс в Администраторе.');
+    } catch { toast.error('Ошибка загрузки цен из прайса'); }
+    finally { setRefreshing(false); }
   }
 
   const sheetTotal = rows.reduce((s, r) => {
@@ -1593,11 +1637,11 @@ export default function SpecPage() {
               style={{ marginLeft: 6, padding: '5px 10px', fontSize: 12 }}
               onClick={handleRefreshPrices}
               disabled={refreshing}
-              title="Обновить цены по артикулам из ЭТМ (1 арт/сек)"
+              title="Обновить цены из ЭТМ или прайса"
             >
               {refreshing
                 ? (refreshProgress ? `↻ ~${refreshProgress.total} арт…` : '↻ …')
-                : '↻ Цены ЭТМ'}
+                : '↻ Обновить цены'}
             </button>
           </div>
         </div>
@@ -1983,6 +2027,60 @@ export default function SpecPage() {
         onClose={() => setImportModalOpen(false)}
         onImport={handleImport}
       />
+
+      {/* ── Price source modal ── */}
+      {priceSourceModal && (
+        <div className="modal-overlay" onClick={() => setPriceSourceModal(false)}>
+          <div className="modal-box" style={{ maxWidth: 380, padding: 28 }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Обновить цены</h3>
+            <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>Выберите источник цен:</p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                className="btn-primary"
+                style={{ flex: 1, padding: '10px 0', fontSize: 13 }}
+                onClick={handleRefreshFromPricelist}
+                disabled={pricelists.length === 0}
+                title={pricelists.length === 0 ? 'Нет активных прайсов' : ''}
+              >
+                Из прайса
+              </button>
+              <button
+                className="btn-outline"
+                style={{ flex: 1, padding: '10px 0', fontSize: 13 }}
+                onClick={handleRefreshFromEtm}
+              >
+                ЭТМ
+              </button>
+            </div>
+            {pricelists.length === 0 && (
+              <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 8 }}>Прайс недоступен — загрузите его в разделе Администратор</p>
+            )}
+            <button className="btn-cancel" style={{ width: '100%', marginTop: 10 }} onClick={() => setPriceSourceModal(false)}>Отмена</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── ETM not configured modal ── */}
+      {etmUnconfigured && (
+        <div className="modal-overlay" onClick={() => setEtmUnconfigured(false)}>
+          <div className="modal-box" style={{ maxWidth: 380, padding: 28 }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>ЭТМ не настроен</h3>
+            <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>
+              Для загрузки цен из ЭТМ укажите логин и пароль в настройках профиля.
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                className="btn-primary"
+                style={{ flex: 1 }}
+                onClick={() => { setEtmUnconfigured(false); router.push('/profile'); }}
+              >
+                Настроить
+              </button>
+              <button className="btn-cancel" style={{ flex: 1 }} onClick={() => setEtmUnconfigured(false)}>Закрыть</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
