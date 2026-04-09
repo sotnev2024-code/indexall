@@ -20,11 +20,13 @@ export class EtmService {
   private get login() { return process.env.ETM_LOGIN; }
   private get pwd() { return process.env.ETM_PASSWORD; }
 
+  private readonly cookieJar = '/tmp/etm_cookies.txt';
+
   isConfigured(): boolean {
     return !!(this.login && this.pwd);
   }
 
-  private async curlRequest(url: string, method: 'GET' | 'POST' = 'GET'): Promise<any> {
+  private async curlRequest(url: string, method: 'GET' | 'POST' = 'GET', saveCookies = false): Promise<any> {
     const args = [
       '-s',
       '--show-error',
@@ -32,7 +34,12 @@ export class EtmService {
       '--max-time', '30',
       '-H', 'Accept: application/json',
       '-H', `Host: ${this.host}`,
+      '-b', this.cookieJar,
     ];
+
+    if (saveCookies) {
+      args.push('-c', this.cookieJar);
+    }
 
     if (process.env.ETM_HTTPS_PROXY?.trim()) {
       args.push('-x', process.env.ETM_HTTPS_PROXY.trim());
@@ -71,7 +78,7 @@ export class EtmService {
 
     let json: any;
     try {
-      json = await this.curlRequest(url, 'POST');
+      json = await this.curlRequest(url, 'POST', true);
     } catch (e: any) {
       this.logger.error(`ETM login error: ${e?.message}`);
       throw new HttpException(`ETM login error: ${e?.message}`, HttpStatus.BAD_GATEWAY);
