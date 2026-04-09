@@ -3,7 +3,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
-import { authApi, profileApi, paymentsApi } from '@/lib/api';
+import { authApi, profileApi, paymentsApi, storesApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 
 // ── helpers ──────────────────────────────────────────────────
@@ -111,6 +111,12 @@ export default function ProfilePage() {
   const [payLoading, setPayLoading] = useState<string | null>(null);
   const [prices, setPrices] = useState<{ monthly: number; annual: number }>({ monthly: 0, annual: 0 });
 
+  // ETM credentials
+  const [etmLogin, setEtmLogin] = useState('');
+  const [etmPassword, setEtmPassword] = useState('');
+  const [etmSaved, setEtmSaved] = useState(false);
+  const [etmLoading, setEtmLoading] = useState(false);
+
   const refreshUser = useCallback(async () => {
     try {
       const token = localStorage.getItem('token');
@@ -140,6 +146,13 @@ export default function ProfilePage() {
       router.replace('/auth/login');
     }
   }, [router]);
+
+  // Load ETM credentials status
+  useEffect(() => {
+    storesApi.getEtmCredentials().then(({ data }) => {
+      if (data?.login) { setEtmLogin(data.login); setEtmSaved(true); }
+    }).catch(() => {});
+  }, []);
 
   async function handleSaveProfile(e: React.FormEvent) {
     e.preventDefault();
@@ -191,6 +204,30 @@ export default function ProfilePage() {
     } finally {
       setPayLoading(null);
     }
+  }
+
+  async function handleSaveEtm(e: React.FormEvent) {
+    e.preventDefault();
+    if (!etmLogin.trim() || !etmPassword.trim()) { toast.error('Введите логин и пароль'); return; }
+    setEtmLoading(true);
+    try {
+      await storesApi.saveEtmCredentials(etmLogin.trim(), etmPassword.trim());
+      setEtmSaved(true);
+      setEtmPassword('');
+      toast.success('Данные ЭТМ сохранены');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Ошибка сохранения');
+    } finally { setEtmLoading(false); }
+  }
+
+  async function handleRemoveEtm() {
+    if (!confirm('Удалить данные ЭТМ?')) return;
+    setEtmLoading(true);
+    try {
+      await storesApi.removeEtmCredentials();
+      setEtmLogin(''); setEtmPassword(''); setEtmSaved(false);
+      toast.success('Данные ЭТМ удалены');
+    } catch { toast.error('Ошибка'); } finally { setEtmLoading(false); }
   }
 
   const plan = user?.plan || 'free';
@@ -377,6 +414,37 @@ export default function ProfilePage() {
         {subscriptionBlock}
         {profileForm}
         {passwordForm}
+
+        {/* ETM integration */}
+        <div style={{ background: '#fff', borderRadius: 12, padding: 24, marginTop: 20, border: '1px solid #e5e7eb' }}>
+          <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Интеграция с ЭТМ</h2>
+          <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>
+            Логин и пароль от личного кабинета ЭТМ iPRO. Используются для получения цен в спецификации.
+          </p>
+          {etmSaved && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, padding: '8px 12px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, fontSize: 13 }}>
+              <span style={{ color: '#166534', fontWeight: 600 }}>Подключено: {etmLogin}</span>
+              <button onClick={handleRemoveEtm} disabled={etmLoading} style={{ marginLeft: 'auto', padding: '4px 12px', background: 'transparent', border: '1px solid #dc2626', color: '#dc2626', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+                Отключить
+              </button>
+            </div>
+          )}
+          <form onSubmit={handleSaveEtm}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Логин ЭТМ</label>
+                <input value={etmLogin} onChange={e => setEtmLogin(e.target.value)} className="input-field" placeholder="login@etm.ru" autoComplete="off" />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>{etmSaved ? 'Новый пароль (оставьте пустым чтобы не менять)' : 'Пароль ЭТМ'}</label>
+                <input type="password" value={etmPassword} onChange={e => setEtmPassword(e.target.value)} className="input-field" placeholder="••••••••" autoComplete="new-password" />
+              </div>
+            </div>
+            <button type="submit" disabled={etmLoading} style={{ padding: '8px 20px', background: '#1a1a1a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: etmLoading ? 0.6 : 1 }}>
+              {etmLoading ? 'Сохранение…' : 'Сохранить'}
+            </button>
+          </form>
+        </div>
       </div>
     </>
   );

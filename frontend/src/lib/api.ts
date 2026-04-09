@@ -120,6 +120,7 @@ export const catalogApi = {
   uploadTileImage: (id: number, fd: FormData) => api.post(`/catalog/tiles/${id}/image`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }),
   /** Returns dynamic filter options from bot_database.db for a given category slug */
   getFilterOptions: (slug: string) => api.get<{ label: string; opts: string[] }[]>('/catalog/filter-options', { params: { slug } }),
+  getPricesByArticles: (articles: string[]) => api.post<Record<string, number | null>>('/catalog/prices-by-articles', { articles }),
 };
 
 // ── Templates ─────────────────────────────────────────────────
@@ -152,6 +153,9 @@ export const storesApi = {
   getEtmStatus: () => api.get<{ configured: boolean; usingProxy?: boolean }>('/stores/etm/status'),
   // Returns { [article]: price | null } — takes up to 1.1s per article (ETM rate limit)
   getEtmPrices: (articles: string[]) => api.post<Record<string, number | null>>('/stores/etm/prices', { articles }),
+  getEtmCredentials: () => api.get('/stores/etm/credentials'),
+  saveEtmCredentials: (login: string, password: string) => api.post('/stores/etm/credentials', { login, password }),
+  removeEtmCredentials: () => api.delete('/stores/etm/credentials'),
 };
 
 // ── Trash ─────────────────────────────────────────────────────

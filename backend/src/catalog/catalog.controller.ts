@@ -2,6 +2,7 @@ import {
   Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, Res,
   UseGuards, Req, ParseIntPipe, UseInterceptors, UploadedFile,
 } from '@nestjs/common';
+import { ApiOperation } from '@nestjs/swagger';
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -154,6 +155,7 @@ export class CatalogController {
       g4: body.g4, g5: body.g5, g6: body.g6,
       nameCol: body.nameCol,
       artCol: body.artCol,
+      priceCol: body.priceCol || undefined,
     };
     return this.service.uploadPriceList(file, mapping, req.user.userId);
   }
@@ -167,7 +169,7 @@ export class CatalogController {
     @Body() body: any,
     @Req() req: any,
   ) {
-    const mapping = { firstRow: Number(body.firstRow) || 2, g1: body.g1, g2: body.g2, g3: body.g3, g4: body.g4, g5: body.g5, g6: body.g6, nameCol: body.nameCol, artCol: body.artCol };
+    const mapping = { firstRow: Number(body.firstRow) || 2, g1: body.g1, g2: body.g2, g3: body.g3, g4: body.g4, g5: body.g5, g6: body.g6, nameCol: body.nameCol, artCol: body.artCol, priceCol: body.priceCol || undefined };
     return this.service.replacePriceList(id, file, mapping, req.user.userId);
   }
 
@@ -181,5 +183,12 @@ export class CatalogController {
   @UseGuards(JwtAuthGuard, AdminGuard)
   deletePriceList(@Param('id', ParseIntPipe) id: number) {
     return this.service.deletePriceList(id);
+  }
+
+  @Post('prices-by-articles')
+  @ApiOperation({ summary: 'Get catalog prices by article array' })
+  async getPricesByArticles(@Body('articles') articles: string[]) {
+    if (!Array.isArray(articles) || articles.length === 0) return {};
+    return this.service.getPricesByArticles(articles);
   }
 }

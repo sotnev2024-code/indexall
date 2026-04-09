@@ -41,6 +41,8 @@ interface RowProps {
   onSearch: (q: string, rowIdx: number, field: string, el: HTMLInputElement) => void;
   onInputKeyDown: (e: React.KeyboardEvent<HTMLInputElement>, rowIdx: number, colIdx: number) => void;
   onStoreClick: (rowIdx: number, el: HTMLSelectElement) => void;
+  pricelists: string[];
+  onStoreChange: (rowIdx: number, store: string) => void;
   inputRef: (el: HTMLElement | null, key: string) => void;
   onFocus: () => void;
   onBlur: () => void;
@@ -57,7 +59,7 @@ interface RowProps {
 }
 
 const SpecRow = memo(function SpecRow({
-  row, idx, isFirst, onUpdate, onSearch, onInputKeyDown, onStoreClick, inputRef, onFocus, onBlur,
+  row, idx, isFirst, onUpdate, onSearch, onInputKeyDown, onStoreClick, pricelists, onStoreChange, inputRef, onFocus, onBlur,
   onNonEditableMouseDown,
   activeCellRow, activeCellCol, isEditing, selR1, selC1, selR2, selC2,
   onCellMouseDown, onCellMouseEnter, onCellDoubleClick, onRowContextMenu,
@@ -149,13 +151,13 @@ const SpecRow = memo(function SpecRow({
           ref={el => inputRef(el, `store-${idx}`)}
           value={row.store ?? ''}
           tabIndex={-1}
-          onChange={e => onUpdate(idx, 'store', e.target.value)}
-          onClick={e => onStoreClick(idx, e.target as HTMLSelectElement)}
+          onMouseDown={e => e.stopPropagation()}
+          onChange={e => onStoreChange(idx, e.target.value)}
           onFocus={onFocus}
           onBlur={onBlur}
         >
           <option value="ЭТМ">ЭТМ</option>
-          <option value="EKF">EKF</option>
+          {pricelists.map(pl => <option key={pl} value={pl}>{pl}</option>)}
           <option value="">—</option>
         </select>
       </td>
@@ -229,6 +231,9 @@ export default function SpecPage() {
 
   const [brandFilter, setBrandFilter] = useState<string>('all');
   const [brands, setBrands] = useState<string[]>(STATIC_BRANDS);
+  const [pricelists, setPricelists] = useState<string[]>([]);
+  const pricelistsRef = useRef<string[]>([]);
+  useEffect(() => { pricelistsRef.current = pricelists; }, [pricelists]);
   const [globalSearch, setGlobalSearch] = useState('');
   const [globalResults, setGlobalResults] = useState<any[]>([]);
   const globalSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -402,7 +407,7 @@ export default function SpecPage() {
   // ── Load data on sheet change ─────────────────────────────────
   useEffect(() => {
     loadData();
-    if (currentId === Number(_routeId)) loadBrands();
+    if (currentId === Number(_routeId)) { loadBrands(); loadPricelists(); }
     const close = (e: Event) => {
       setAcDrops(null); setStoreDropdown(null); setGlobalResults([]);
       const t = e.target as HTMLElement;
@@ -426,6 +431,17 @@ export default function SpecPage() {
         .slice(0, 12);
       if (names.length > 0) setBrands(names);
     } catch { /* keep static list */ }
+  }
+
+  async function loadPricelists() {
+    try {
+      const { data } = await catalogApi.getPriceLists();
+      const names: string[] = (data as any[])
+        .filter((p: any) => p.is_active)
+        .map((p: any) => p.name as string)
+        .filter(Boolean);
+      setPricelists(names);
+    } catch { /* no pricelists */ }
   }
 
   async function loadData() {
@@ -509,15 +525,17 @@ export default function SpecPage() {
       const next = [...prev];
       const q = next[i].qty;
       const c = next[i].coef;
+      const mfr = p.manufacturer?.name || p.brand || '';
+      const matchedPl = pricelistsRef.current.find(pl => pl === mfr);
       next[i] = {
         ...next[i],
         name: p.name,
-        brand: p.manufacturer?.name || p.brand || '',
+        brand: mfr,
         article: p.article || '',
         unit: p.unit || '',
         price: p.price ? String(p.price) : '',
-        store: 'ЭТМ',
-        auto_price: true,
+        store: matchedPl || 'ЭТМ',
+        auto_price: !matchedPl,
         total: calcTotal(p.price ? String(p.price) : '', q, c),
       };
       return next;
@@ -616,6 +634,27 @@ export default function SpecPage() {
       } catch { setGlobalResults([]); }
     }, 300);
   }
+
+  const handleStoreChange = useCallback(async (rowIdx: number, store: string) => {
+    updateRow(rowIdx, 'store', store);
+    // If switched to a pricelist name and row has an article, fetch price from catalog
+    const article = rowsRef.current[rowIdx]?.article;
+    if (store && store !== 'ЭТМ' && article) {
+      try {
+        const { data: prices } = await catalogApi.getPricesByArticles([article]);
+        const price = prices[article];
+        if (price != null && price > 0) {
+          setRows(prev => {
+            const next = [...prev];
+            const priceStr = String(price);
+            next[rowIdx] = { ...next[rowIdx], price: priceStr, auto_price: false, total: calcTotal(priceStr, next[rowIdx].qty, next[rowIdx].coef) };
+            return next;
+          });
+          setUnsaved(true);
+        }
+      } catch { /* no price */ }
+    }
+  }, [updateRow, setUnsaved]);
 
   const openStoreDropdown = useCallback(async (rowIdx: number, el: HTMLSelectElement) => {
     const article = rowsRef.current[rowIdx]?.article;
@@ -1399,17 +1438,8 @@ export default function SpecPage() {
   async function handleRefreshPrices() {
     const targets = rowsRef.current
       .map((r, i) => ({ r, i }))
-      .filter(({ r }) => r.article && r.auto_price !== false);
-    if (targets.length === 0) { toast('Нет строк с артикулом для обновления цены'); return; }
-
-    // Check ETM is configured
-    try {
-      const { data: status } = await storesApi.getEtmStatus();
-      if (!status.configured) {
-        toast.error('ЭТМ не настроен. Укажите ETM_LOGIN и ETM_PASSWORD на сервере.');
-        return;
-      }
-    } catch { toast.error('Не удалось проверить статус ЭТМ'); return; }
+      .filter(({ r }) => r.article && r.store === 'ЭТМ');
+    if (targets.length === 0) { toast('Нет строк с магазином ЭТМ для обновления цены'); return; }
 
     setRefreshing(true);
     setRefreshProgress({ done: 0, total: targets.length });
@@ -1725,6 +1755,8 @@ export default function SpecPage() {
                   onSearch={debouncedSearch}
                   onInputKeyDown={handleInputKeyDown}
                   onStoreClick={openStoreDropdown}
+                  pricelists={pricelists}
+                  onStoreChange={handleStoreChange}
                   inputRef={setInputRef}
                   onFocus={handleCellFocus}
                   onBlur={handleCellBlur}

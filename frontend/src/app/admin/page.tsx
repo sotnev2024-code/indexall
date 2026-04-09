@@ -55,7 +55,7 @@ export default function AdminPage() {
   // Pricelists (Каталог: Прайс-листы)
   const [pricelists, setPricelists] = useState<any[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [mapping, setMapping] = useState({ firstRow: '2', g1: '', g2: '', g3: '', g4: '', g5: '', g6: '', nameCol: '', artCol: '' });
+  const [mapping, setMapping] = useState({ firstRow: '2', g1: '', g2: '', g3: '', g4: '', g5: '', g6: '', nameCol: '', artCol: '', priceCol: '' });
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [replaceTarget, setReplaceTarget] = useState<number | null>(null);
@@ -404,7 +404,7 @@ export default function AdminPage() {
       await catalogApi.uploadPriceList(fd);
       toast.success('Загружено, обрабатывается…');
       setFile(null); setPreview(null);
-      setMapping({ firstRow: '2', g1: '', g2: '', g3: '', g4: '', g5: '', g6: '', nameCol: '', artCol: '' });
+      setMapping({ firstRow: '2', g1: '', g2: '', g3: '', g4: '', g5: '', g6: '', nameCol: '', artCol: '', priceCol: '' });
       loadPricelists();
     } catch { toast.error('Ошибка загрузки'); }
     finally { setUploading(false); }
@@ -419,7 +419,7 @@ export default function AdminPage() {
       await catalogApi.replacePriceList(id, fd);
       toast.success('Прайс заменён, обрабатывается…');
       setReplaceTarget(null); setReplaceFile(null);
-      setMapping({ firstRow: '2', g1: '', g2: '', g3: '', g4: '', g5: '', g6: '', nameCol: '', artCol: '' });
+      setMapping({ firstRow: '2', g1: '', g2: '', g3: '', g4: '', g5: '', g6: '', nameCol: '', artCol: '', priceCol: '' });
       loadPricelists();
     } catch { toast.error('Ошибка замены'); }
     finally { setUploading(false); }
@@ -1065,6 +1065,10 @@ export default function AdminPage() {
                     <label>Столбец артикула *</label>
                     <input value={mapping.artCol} onChange={e => setMapping(m => ({ ...m, artCol: e.target.value.toUpperCase() }))} placeholder="U" />
                   </div>
+                  <div className="form-col">
+                    <label>Столбец цены (необяз.)</label>
+                    <input value={mapping.priceCol} onChange={e => setMapping(m => ({ ...m, priceCol: e.target.value.toUpperCase() }))} placeholder="V" />
+                  </div>
                 </div>
                 <div className="categories-bg">
                   <div className="categories-bg-title">Столбцы категорий (дерево)</div>
@@ -1306,6 +1310,10 @@ export default function AdminPage() {
               <div className="form-col">
                 <label>Столбец артикула *</label>
                 <input value={mapping.artCol} onChange={e => setMapping(m => ({ ...m, artCol: e.target.value.toUpperCase() }))} />
+              </div>
+              <div className="form-col">
+                <label>Столбец цены (необяз.)</label>
+                <input value={mapping.priceCol} onChange={e => setMapping(m => ({ ...m, priceCol: e.target.value.toUpperCase() }))} />
               </div>
             </div>
             <div className="modal-actions">

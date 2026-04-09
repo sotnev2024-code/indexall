@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Query, Body, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Query, Body, Req, Request, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
 import { StoresService } from './stores.service';
 import { EtmService } from './etm.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -29,16 +29,36 @@ export class StoresController {
   }
 
   @Post('etm/prices')
-  async getEtmPrices(@Body('articles') articles: string[]) {
-    if (!this.etmService.isConfigured()) {
-      throw new HttpException(
-        'ETM не настроен. Укажите ETM_LOGIN и ETM_PASSWORD в .env на сервере.',
-        HttpStatus.SERVICE_UNAVAILABLE,
-      );
-    }
+  async getEtmPrices(@Body('articles') articles: string[], @Req() req: any) {
     if (!Array.isArray(articles) || articles.length === 0) {
       throw new HttpException('articles must be a non-empty array', HttpStatus.BAD_REQUEST);
     }
-    return this.etmService.getPrices(articles);
+    // Use per-user credentials if configured, fall back to global
+    const userId = req.user?.userId;
+    return this.etmService.getPricesForUser(articles, userId);
+  }
+
+  // ── ETM per-user credentials ──────────────────────────────────
+  @Get('etm/credentials')
+  async getEtmCredentials(@Req() req: any) {
+    return this.etmService.getCredentials(req.user.userId);
+  }
+
+  @Post('etm/credentials')
+  async saveEtmCredentials(
+    @Req() req: any,
+    @Body('login') login: string,
+    @Body('password') password: string,
+  ) {
+    await this.etmService.saveCredentials(req.user.userId, login, password);
+    // Test auth immediately
+    const credentials = await this.etmService.getCredentials(req.user.userId);
+    return { ok: true, ...credentials };
+  }
+
+  @Delete('etm/credentials')
+  async removeEtmCredentials(@Req() req: any) {
+    await this.etmService.removeCredentials(req.user.userId);
+    return { ok: true };
   }
 }

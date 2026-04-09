@@ -12,6 +12,7 @@ export interface PriceListMapping {
   g1: string; g2?: string; g3?: string; g4?: string; g5?: string; g6?: string;
   nameCol: string;
   artCol: string;
+  priceCol?: string;  // ADD THIS
 }
 
 // Only 4 categories per TZ — opts are loaded dynamically from bot_database.db
@@ -396,6 +397,7 @@ export class CatalogService implements OnModuleInit {
         .map(c => XLSX.utils.decode_col(c.toUpperCase()));
       const nameCol = XLSX.utils.decode_col(mapping.nameCol.toUpperCase());
       const artCol = XLSX.utils.decode_col(mapping.artCol.toUpperCase());
+      const priceCol = mapping.priceCol ? XLSX.utils.decode_col(mapping.priceCol.toUpperCase()) : -1;
 
       const catCache: Map<string, number> = new Map();
 
@@ -427,12 +429,15 @@ export class CatalogService implements OnModuleInit {
           parentId = catCache.get(cacheKey);
         }
 
+        const rawPrice = priceCol >= 0 ? String(row[priceCol] || '').replace(/\s/g, '').replace(',', '.') : '';
+        const price = rawPrice ? parseFloat(rawPrice) : null;
         await this.prodRepo.save({
           manufacturer_id: manufacturerId,
           category_id: parentId,
           name: productName,
           article: article || null,
           is_active: true,
+          ...(price && !isNaN(price) && price > 0 ? { price } : {}),
         });
         productCount++;
       }
@@ -449,6 +454,25 @@ export class CatalogService implements OnModuleInit {
     return categories
       .filter(c => (c.parent_id ?? null) === parentId)
       .map(c => ({ ...c, children: this.buildTree(categories, c.id) }));
+  }
+
+  async getPricesByArticles(articles: string[]): Promise<Record<string, number | null>> {
+    if (!articles.length) return {};
+    const result: Record<string, number | null> = {};
+    const products = await this.prodRepo.createQueryBuilder('p')
+      .where('p.article IN (:...articles)', { articles })
+      .andWhere('p.price IS NOT NULL')
+      .andWhere('p.price > 0')
+      .select(['p.article', 'p.price'])
+      .getMany();
+    const map = new Map<string, number>();
+    for (const p of products) {
+      if (p.article && !map.has(p.article)) map.set(p.article, Number(p.price));
+    }
+    for (const a of articles) {
+      result[a] = map.get(a) ?? null;
+    }
+    return result;
   }
 
   /** Fix Cyrillic garbling: multer decodes multipart filenames as latin-1,
