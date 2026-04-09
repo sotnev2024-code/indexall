@@ -33,8 +33,12 @@ export class EtmService {
     @InjectRepository(EtmCredential)
     private readonly credRepo: Repository<EtmCredential>,
   ) {
-    const rawKey = process.env.ETM_ENCRYPTION_KEY || 'default-secret-key-32-chars!!!!!';
-    this.ENCRYPTION_KEY = crypto.scryptSync(rawKey, 'salt', 32);
+    const rawKey = (process.env.ETM_ENCRYPTION_KEY || 'default-secret-key-indexall-2024').padEnd(32, '!').slice(0, 32);
+    try {
+      this.ENCRYPTION_KEY = crypto.scryptSync(rawKey, 'salt', 32);
+    } catch {
+      this.ENCRYPTION_KEY = Buffer.from(rawKey.padEnd(32, '0').slice(0, 32));
+    }
   }
 
   encryptPassword(pwd: string): string {

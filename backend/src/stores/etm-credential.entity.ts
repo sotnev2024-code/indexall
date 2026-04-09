@@ -5,7 +5,7 @@ export class EtmCredential {
   @PrimaryColumn() user_id: number;
   @Column() login: string;
   @Column() password_enc: string;
-  @Column({ nullable: true }) session_key: string | null;
+  @Column({ nullable: true, type: 'varchar' }) session_key: string | null;
   @Column({ nullable: true, type: 'timestamptz' }) session_expires_at: Date | null;
-  @UpdateDateColumn() updated_at: Date;
+  @UpdateDateColumn({ type: 'timestamptz' }) updated_at: Date;
 }
