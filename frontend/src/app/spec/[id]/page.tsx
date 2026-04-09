@@ -4,7 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import ImportModal from '@/components/ImportModal';
-import { sheetsApi, projectsApi, catalogApi, exportApi, storesApi, templatesApi } from '@/lib/api';
+import { sheetsApi, projectsApi, foldersApi, catalogApi, exportApi, storesApi, templatesApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 
 const MAX_UNDO = 30;
@@ -459,8 +459,14 @@ export default function SpecPage() {
         setUndoStack([]);
         setRedoStack([]);
       }
+      // Prefer folder_id (new system), fall back to projectId (legacy)
+      const folderId = s.folder_id;
       const projId = activeProjectId || s.projectId;
-      if (projId) {
+      if (folderId) {
+        const { data: p } = await foldersApi.getOne(folderId);
+        setProject(p);
+        setActive(folderId, currentIdRef.current);
+      } else if (projId) {
         const { data: p } = await projectsApi.getOne(projId);
         setProject(p);
         setActive(projId, currentIdRef.current);
@@ -639,7 +645,18 @@ export default function SpecPage() {
   async function addSheet() {
     if (!activeProjectId) return;
     try {
-      const { data } = await sheetsApi.create(activeProjectId);
+      // activeProjectId may be a folderId (new) or a legacy projectId
+      // We detect by looking at the current sheet's folder_id
+      const sheet = await sheetsApi.getOne(currentIdRef.current);
+      const folderId = sheet.data?.folder_id;
+      let data: any;
+      if (folderId) {
+        const res = await foldersApi.createSheet(folderId);
+        data = res.data;
+      } else {
+        const res = await sheetsApi.create(activeProjectId);
+        data = res.data;
+      }
       setProject((p: any) => p ? { ...p, sheets: [...(p.sheets || []), data] } : p);
       toast.success('Лист добавлен');
     } catch { toast.error('Ошибка'); }
@@ -742,7 +759,13 @@ export default function SpecPage() {
       let toIdx = sheets.findIndex((s: any) => s.id === tabDropSide.id);
       if (tabDropSide.side === 'right') toIdx++;
       sheets.splice(toIdx, 0, item);
-      projectsApi.reorderSheets(prev.id, sheets.map((s: any) => s.id)).catch(() => {});
+      // Use folders API if sheets are folder-based
+      const sheetSample = sheets[0];
+      if (sheetSample?.folder_id) {
+        foldersApi.reorderSheets(sheetSample.folder_id, sheets.map((s: any) => s.id)).catch(() => {});
+      } else {
+        projectsApi.reorderSheets(prev.id, sheets.map((s: any) => s.id)).catch(() => {});
+      }
       return { ...prev, sheets };
     });
     onTabDragEnd();

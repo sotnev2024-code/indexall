@@ -14,6 +14,7 @@ import { TrashModule } from './trash/trash.module';
 import { MailModule } from './mail/mail.module';
 import { ExportModule } from './export/export.module';
 import { PaymentsModule } from './payments/payments.module';
+import { FoldersModule } from './folders/folders.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { PaymentsModule } from './payments/payments.module';
     MailModule,
     ExportModule,
     PaymentsModule,
+    FoldersModule,
   ],
 })
 export class AppModule {}

@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import { Sheet } from './sheet.entity';
 import { EquipmentRow } from '../equipment/equipment-row.entity';
 import { Project } from '../projects/project.entity';
+import { Folder } from '../folders/folder.entity';
 import { TrashService } from '../trash/trash.service';
 
 @Injectable()
@@ -17,9 +18,11 @@ export class SheetsService {
     @InjectRepository(Sheet) private sheetsRepo: Repository<Sheet>,
     @InjectRepository(EquipmentRow) private rowsRepo: Repository<EquipmentRow>,
     @InjectRepository(Project) private projectsRepo: Repository<Project>,
+    @InjectRepository(Folder) private foldersRepo: Repository<Folder>,
     private readonly trashService: TrashService,
   ) {}
 
+  /** Create sheet in a project (legacy — keeps backward compat) */
   async createSheet(projectId: number, userId: number, name?: string) {
     await this.checkProjectOwner(projectId, userId);
     const count = await this.sheetsRepo.count({ where: { projectId } });
@@ -28,6 +31,7 @@ export class SheetsService {
 
     const sheet = await this.sheetsRepo.save({
       projectId,
+      owner_id: userId,
       name: name || `Спецификация${count + 1}`,
     });
     const rows = Array.from({ length: 25 }, () => ({
@@ -68,9 +72,10 @@ export class SheetsService {
     return { ...sheet, total };
   }
 
-  async updateSheet(sheetId: number, userId: number, data: { name?: string }) {
+  async updateSheet(sheetId: number, userId: number, data: Partial<Sheet>) {
     await this.checkSheetOwner(sheetId, userId);
-    await this.sheetsRepo.update(sheetId, data);
+    const { folder_id, ...safe } = data as any;
+    await this.sheetsRepo.update(sheetId, safe);
     return this.getSheetWithRows(sheetId);
   }
 
@@ -79,6 +84,8 @@ export class SheetsService {
     const original = await this.getSheetWithRows(sheetId);
     const newSheet = await this.sheetsRepo.save({
       projectId: original.projectId,
+      folder_id: original.folder_id,
+      owner_id: userId,
       name: original.name + ' (копия)',
     });
     if (original.rows?.length) {
@@ -103,11 +110,15 @@ export class SheetsService {
 
   async removeSheet(sheetId: number, userId: number) {
     const sheet = await this.checkSheetOwner(sheetId, userId);
-    const count = await this.sheetsRepo.count({
-      where: { projectId: sheet.projectId },
-    });
-    if (count <= 1)
-      throw new BadRequestException('Нельзя удалить последний лист');
+
+    // Legacy check: prevent deleting last sheet in a project
+    if (sheet.projectId && !sheet.folder_id) {
+      const count = await this.sheetsRepo.count({
+        where: { projectId: sheet.projectId },
+      });
+      if (count <= 1)
+        throw new BadRequestException('Нельзя удалить последний лист проекта');
+    }
 
     await this.trashService.addToTrash({
       entity_type: 'sheet',
@@ -141,6 +152,8 @@ export class SheetsService {
     return this.getSheetWithRows(sheetId);
   }
 
+  // ── Ownership checks ──────────────────────────────────────────
+
   private async checkProjectOwner(projectId: number, userId: number) {
     const p = await this.projectsRepo.findOne({ where: { id: projectId } });
     if (!p) throw new NotFoundException('Проект не найден');
@@ -148,10 +161,31 @@ export class SheetsService {
     return p;
   }
 
-  private async checkSheetOwner(sheetId: number, userId: number) {
+  async checkSheetOwner(sheetId: number, userId: number) {
     const sheet = await this.sheetsRepo.findOne({ where: { id: sheetId } });
     if (!sheet) throw new NotFoundException('Лист не найден');
-    await this.checkProjectOwner(sheet.projectId, userId);
-    return sheet;
+
+    // Folder-based ownership
+    if (sheet.folder_id) {
+      const folder = await this.foldersRepo.findOne({ where: { id: sheet.folder_id } });
+      if (!folder || folder.owner_id !== userId) {
+        throw new ForbiddenException('Нет доступа');
+      }
+      return sheet;
+    }
+
+    // owner_id direct check
+    if (sheet.owner_id) {
+      if (sheet.owner_id !== userId) throw new ForbiddenException('Нет доступа');
+      return sheet;
+    }
+
+    // Legacy: check via project
+    if (sheet.projectId) {
+      await this.checkProjectOwner(sheet.projectId, userId);
+      return sheet;
+    }
+
+    throw new ForbiddenException('Нет доступа');
   }
 }

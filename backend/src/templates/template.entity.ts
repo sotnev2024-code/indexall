@@ -8,6 +8,7 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { User } from '../users/user.entity';
+import { Folder } from '../folders/folder.entity';
 
 @Entity('templates')
 export class Template {
@@ -41,6 +42,13 @@ export class Template {
   @ManyToOne(() => User, { onDelete: 'SET NULL' })
   @JoinColumn({ name: 'userId' })
   user: User;
+
+  @Column({ nullable: true })
+  folder_id: number | null;
+
+  @ManyToOne(() => Folder, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'folder_id' })
+  folder: Folder | null;
 
   @CreateDateColumn()
   createdAt: Date;

@@ -35,6 +35,27 @@ export const authApi = {
   resetPassword: (token: string, newPassword: string) => api.post('/auth/password/reset', { token, newPassword }),
 };
 
+// ── Folders ───────────────────────────────────────────────────
+export const foldersApi = {
+  getTree:        (type = 'projects') => api.get('/folders', { params: { type } }),
+  getOne:         (id: number) => api.get(`/folders/${id}`),
+  create:         (name: string, parent_id: number | null, type = 'projects') =>
+                    api.post('/folders', { name, parent_id, type }),
+  rename:         (id: number, name: string) => api.put(`/folders/${id}`, { name }),
+  move:           (id: number, parent_id: number | null) =>
+                    api.put(`/folders/${id}/move`, { parent_id }),
+  remove:         (id: number) => api.delete(`/folders/${id}`),
+  createSheet:    (folderId: number, name?: string) =>
+                    api.post(`/folders/${folderId}/sheets`, { name }),
+  moveSheet:      (sheetId: number, folder_id: number) =>
+                    api.put(`/folders/sheets/${sheetId}/move`, { folder_id }),
+  moveTemplate:   (templateId: number, folder_id: number | null) =>
+                    api.put(`/folders/templates/${templateId}/move`, { folder_id }),
+  reorderSheets:  (folderId: number, ids: number[]) =>
+                    api.put(`/folders/${folderId}/sheets/reorder`, { ids }),
+  reorder:        (ids: number[]) => api.put('/folders/reorder/batch', { ids }),
+};
+
 // ── Projects ──────────────────────────────────────────────────
 export const projectsApi = {
   getAll: () => api.get('/projects'),

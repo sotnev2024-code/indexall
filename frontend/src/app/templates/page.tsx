@@ -1,53 +1,71 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
-import { templatesApi, sheetsApi } from '@/lib/api';
+import { foldersApi, templatesApi, sheetsApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 
 const SHIELD_TYPES = ['ГРЩ', 'ВРУ', 'ВП', 'РП', 'ПЭСПЗ', 'ЩО', 'ЩС'];
+
+type FolderNode = { id: number; name: string; children: FolderNode[]; items: any[] };
 
 export default function TemplatesPage() {
   const router = useRouter();
   const { activeSheetId, activeProjectId } = useAppStore();
   const [templates, setTemplates] = useState<any[]>([]);
-  const [selected, setSelected] = useState<{ group: string; tmpl: any } | null>(null);
+  const [folderTree, setFolderTree] = useState<{ children: FolderNode[]; items: any[] }>({ children: [], items: [] });
+  const [selected, setSelected] = useState<any | null>(null);
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<any>({});
   const [loading, setLoading] = useState(true);
   const [applyModalOpen, setApplyModalOpen] = useState(false);
+
+  // Folder tree UI
+  const [expandedFolders, setExpandedFolders] = useState<Set<number>>(new Set());
+  const [folderView, setFolderView] = useState(false); // toggle folder view vs flat groups
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
-  const toggleGroup = (key: string) =>
-    setCollapsedGroups(prev => {
-      const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
-      return next;
-    });
+  // Folder CRUD
+  const [ctx, setCtx] = useState<any | null>(null);
+  const [renaming, setRenaming] = useState<{ id: number; type: 'folder' | 'template'; val: string } | null>(null);
+  const renameRef = useRef<HTMLInputElement>(null);
+  const [showNewFolder, setShowNewFolder] = useState(false);
+  const [newFolderParent, setNewFolderParent] = useState<number | null>(null);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [moveTarget, setMoveTarget] = useState<{ type: 'folder' | 'template'; id: number } | null>(null);
+  const [moveDest, setMoveDest] = useState<number | null>(null);
 
-  useEffect(() => { loadTemplates(); }, []);
-
-  const sel = selected?.tmpl || null;
+  useEffect(() => {
+    Promise.all([loadTemplates(), loadFolderTree()]).finally(() => setLoading(false));
+  }, []);
 
   async function loadTemplates() {
-    try {
-      const { data } = await templatesApi.getAll({ search, ...filters });
-      setTemplates(data);
-      if (data.length > 0 && !selected) {
-        const first = data[0];
-        setSelected({ group: first.scope === 'common' ? 'common' : 'my', tmpl: first });
-      }
-    } finally { setLoading(false); }
+    const { data } = await templatesApi.getAll({ search, ...filters });
+    setTemplates(data);
+    if (data.length > 0 && !selected) setSelected(data[0]);
   }
 
+  async function loadFolderTree() {
+    try {
+      const { data } = await foldersApi.getTree('templates');
+      setFolderTree(data);
+      setExpandedFolders(new Set(data.children.map((f: FolderNode) => f.id)));
+    } catch { /* folder feature may not be used yet */ }
+  }
+
+  async function reload() {
+    await Promise.all([loadTemplates(), loadFolderTree()]);
+  }
+
+  // ── Template actions ──────────────────────────────────────────
   async function applyTemplate(mode: 'new' | 'replace' | 'append') {
-    if (!sel) { toast.error('Выберите шаблон'); return; }
-    const rows = (sel.rows || []).map((r: any, i: number) => ({ ...r, row_number: i + 1 }));
+    if (!selected) { toast.error('Выберите шаблон'); return; }
+    const rows = (selected.rows || []).map((r: any, i: number) => ({ ...r, row_number: i + 1 }));
     try {
       if (mode === 'new') {
         if (!activeProjectId) { toast.error('Сначала откройте проект'); return; }
-        const { data: newSheet } = await sheetsApi.create(activeProjectId, sel.name);
+        const { data: newSheet } = await sheetsApi.create(activeProjectId, selected.name);
         if (rows.length > 0) await sheetsApi.saveRows(newSheet.id, rows);
         toast.success('Шаблон вставлен на новый лист');
         setApplyModalOpen(false);
@@ -69,44 +87,181 @@ export default function TemplatesPage() {
     } catch { toast.error('Ошибка применения шаблона'); }
   }
 
-  async function deleteTemplate() {
-    if (!sel) return;
-    if (sel.scope === 'common') { toast.error('Общие шаблоны нельзя удалить'); return; }
-    if (!confirm(`Удалить шаблон «${sel.name}»?`)) return;
+  async function deleteTemplate(tmpl?: any) {
+    const t = tmpl || selected;
+    if (!t) return;
+    if (t.scope === 'common') { toast.error('Общие шаблоны нельзя удалить'); return; }
+    if (!confirm(`Удалить шаблон «${t.name}»?`)) return;
     try {
-      await templatesApi.remove(sel.id);
-      const next = templates.filter(t => t.id !== sel.id);
-      setTemplates(next);
-      setSelected(next.length > 0 ? { group: 'my', tmpl: next[0] } : null);
+      await templatesApi.remove(t.id);
+      await reload();
+      if (selected?.id === t.id) setSelected(null);
       toast.success('Шаблон удалён');
     } catch { toast.error('Ошибка удаления'); }
   }
 
   async function toggleFavorite(tmpl?: any) {
-    const target = tmpl || sel;
+    const target = tmpl || selected;
     if (!target) return;
     try {
       await templatesApi.toggleFavorite(target.id);
       const updated = { ...target, is_favorite: !target.is_favorite };
-      if (sel?.id === target.id) setSelected(prev => prev ? { ...prev, tmpl: updated } : null);
+      if (selected?.id === target.id) setSelected(updated);
       setTemplates(prev => prev.map(t => t.id === target.id ? updated : t));
       toast.success(updated.is_favorite ? 'Добавлено в избранное' : 'Убрано из избранного');
     } catch { toast.error('Ошибка'); }
   }
 
+  // ── Folder CRUD ───────────────────────────────────────────────
+  async function createFolder(parentId: number | null) {
+    const name = newFolderName.trim() || 'Новая папка';
+    try {
+      await foldersApi.create(name, parentId, 'templates');
+      setShowNewFolder(false);
+      setNewFolderName('');
+      await loadFolderTree();
+      toast.success(`Папка «${name}» создана`);
+    } catch { toast.error('Ошибка создания папки'); }
+  }
+
+  async function renameFolder(id: number, name: string) {
+    if (!name.trim()) return;
+    try { await foldersApi.rename(id, name.trim()); await loadFolderTree(); }
+    catch { toast.error('Ошибка переименования'); }
+  }
+
+  async function renameTemplateItem(id: number, name: string) {
+    if (!name.trim()) return;
+    try { await templatesApi.update(id, { name: name.trim() }); await reload(); }
+    catch { toast.error('Ошибка переименования'); }
+  }
+
+  async function deleteFolder(id: number, name: string) {
+    if (!confirm(`Удалить папку «${name}»? Шаблоны внутри останутся без папки.`)) return;
+    try { await foldersApi.remove(id); await loadFolderTree(); toast.success('Папка удалена'); }
+    catch { toast.error('Ошибка удаления папки'); }
+  }
+
+  function startRename(id: number, type: 'folder' | 'template', val: string) {
+    setRenaming({ id, type, val });
+    setCtx(null);
+    setTimeout(() => renameRef.current?.focus(), 50);
+  }
+
+  async function commitRename() {
+    if (!renaming) return;
+    const { id, type, val } = renaming;
+    setRenaming(null);
+    if (type === 'folder') await renameFolder(id, val);
+    else await renameTemplateItem(id, val);
+  }
+
+  async function confirmMove() {
+    if (!moveTarget) return;
+    try {
+      if (moveTarget.type === 'folder') {
+        await foldersApi.move(moveTarget.id, moveDest);
+      } else {
+        await foldersApi.moveTemplate(moveTarget.id, moveDest);
+      }
+      setMoveTarget(null); setMoveDest(null);
+      await loadFolderTree();
+      toast.success('Перемещено');
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Ошибка перемещения');
+    }
+  }
+
+  function toggleFolderExpand(id: number) {
+    setExpandedFolders(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+
+  function toggleGroup(key: string) {
+    setCollapsedGroups(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  }
+
+  function collectFoldersList(nodes: FolderNode[], depth = 0): { id: number; name: string; depth: number }[] {
+    const res: { id: number; name: string; depth: number }[] = [];
+    for (const n of nodes) {
+      res.push({ id: n.id, name: n.name, depth });
+      res.push(...collectFoldersList(n.children, depth + 1));
+    }
+    return res;
+  }
+
+  // ── Render ────────────────────────────────────────────────────
+  function renderFolderNode(node: FolderNode, depth: number): React.ReactNode {
+    const isOpen = expandedFolders.has(node.id);
+    return (
+      <div key={node.id}>
+        <div
+          className="template-item folder-item"
+          style={{ paddingLeft: 8 + depth * 14, display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
+          onClick={() => toggleFolderExpand(node.id)}
+          onContextMenu={e => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY, type: 'folder', id: node.id, name: node.name }); }}
+        >
+          <span style={{ fontSize: 10, color: 'var(--muted)', minWidth: 10 }}>{isOpen ? '▼' : '▶'}</span>
+          <span>📁</span>
+          {renaming?.id === node.id && renaming.type === 'folder' ? (
+            <input
+              ref={renameRef}
+              style={{ flex: 1, fontSize: 12, background: 'var(--bg2)', border: '1px solid var(--accent)', borderRadius: 3, padding: '1px 4px', color: 'var(--text)' }}
+              value={renaming.val}
+              onChange={e => setRenaming(r => r ? { ...r, val: e.target.value } : null)}
+              onBlur={commitRename}
+              onKeyDown={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setRenaming(null); }}
+              onClick={e => e.stopPropagation()}
+            />
+          ) : (
+            <span style={{ flex: 1, fontSize: 12 }}>{node.name}</span>
+          )}
+        </div>
+        {isOpen && (
+          <>
+            {node.children.map(child => renderFolderNode(child, depth + 1))}
+            {node.items.map(t => renderTemplateItem(t, depth + 1))}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  function renderTemplateItem(t: any, depth = 0): React.ReactNode {
+    return (
+      <div
+        key={t.id}
+        className={`template-item${selected?.id === t.id ? ' active' : ''}`}
+        style={{ paddingLeft: 8 + depth * 14 }}
+        onClick={() => setSelected(t)}
+        onContextMenu={e => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY, type: 'template', id: t.id, name: t.name, scope: t.scope }); }}
+      >
+        <button className={`tmpl-star-btn${t.is_favorite ? ' is-fav' : ''}`}
+          onClick={e => { e.stopPropagation(); toggleFavorite(t); }}
+          title={t.is_favorite ? 'Убрать из избранного' : 'В избранное'}>
+          {t.is_favorite ? '★' : '☆'}
+        </button>
+        <span className="tmpl-item-name">{t.name}</span>
+      </div>
+    );
+  }
+
+  const filtered = templates.filter(t => !search || t.name.toLowerCase().includes(search.toLowerCase()));
+
   const groups = [
-    { key: 'my',     label: 'Мои шаблоны',    filter: (t: any) => t.scope === 'my' },
-    { key: 'fav',    label: 'Избранное',       filter: (t: any) => !!t.is_favorite },
-    { key: 'common', label: 'Общие шаблоны',   filter: (t: any) => t.scope === 'common' },
+    { key: 'my',     label: 'Мои шаблоны',  filter: (t: any) => t.scope === 'my' },
+    { key: 'fav',    label: 'Избранное',     filter: (t: any) => !!t.is_favorite },
+    { key: 'common', label: 'Общие шаблоны', filter: (t: any) => t.scope === 'common' },
   ];
 
-  const filtered = templates
-    .filter(t => !search || t.name.toLowerCase().includes(search.toLowerCase()));
+  const allFolders = collectFoldersList(folderTree.children);
+  const hasFolders = folderTree.children.length > 0;
+
+  if (loading) return <div style={{ paddingTop: 100, textAlign: 'center', color: 'var(--muted)' }}>Загрузка…</div>;
 
   return (
     <>
       <Header breadcrumb="Шаблоны" />
-      <div className="templates-screen">
+      <div className="templates-screen" onClick={() => setCtx(null)}>
         {/* Top toolbar */}
         <div className="templates-toolbar">
           <div className="templates-search">
@@ -117,7 +272,21 @@ export default function TemplatesPage() {
             </span>
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск по названию шаблонов" />
           </div>
-          <button className="btn-back" onClick={() => router.back()}>← Вернуться на лист</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {hasFolders && (
+              <button
+                className={folderView ? 'btn-primary' : 'btn-outline'}
+                style={{ fontSize: 12, padding: '5px 10px' }}
+                onClick={() => setFolderView(v => !v)}
+              >
+                📁 {folderView ? 'Папки (вкл)' : 'Папки (выкл)'}
+              </button>
+            )}
+            <button className="btn-outline" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => { setNewFolderParent(null); setNewFolderName(''); setShowNewFolder(true); }}>
+              + Папка
+            </button>
+            <button className="btn-back" onClick={() => router.back()}>← Вернуться на лист</button>
+          </div>
         </div>
 
         {/* Shield filters */}
@@ -133,59 +302,56 @@ export default function TemplatesPage() {
         <div className="templates-body">
           {/* Left — template list */}
           <div className="templates-left">
-            {groups.map(g => {
-              const items = filtered.filter(g.filter);
-              const isGroupCollapsed = collapsedGroups.has(g.key);
-              return (
-                <div key={g.key} className="template-group">
-                  <div
-                    className="template-group-title"
-                    style={{ cursor: 'pointer', userSelect: 'none' }}
-                    onClick={() => toggleGroup(g.key)}
-                    title={isGroupCollapsed ? 'Раскрыть' : 'Свернуть'}
-                  >
-                    <span>{isGroupCollapsed ? '▶' : '▼'} 📁</span>
-                    <span>{g.label} <span className="template-group-count">({items.length})</span></span>
-                  </div>
-                  {!isGroupCollapsed && items.map(t => (
-                    <div
-                      key={`${g.key}-${t.id}`}
-                      className={`template-item${selected?.group === g.key && selected?.tmpl?.id === t.id ? ' active' : ''}`}
-                      onClick={() => setSelected({ group: g.key, tmpl: t })}
-                    >
-                      <button
-                        className={`tmpl-star-btn${t.is_favorite ? ' is-fav' : ''}`}
-                        onClick={e => { e.stopPropagation(); toggleFavorite(t); }}
-                        title={t.is_favorite ? 'Убрать из избранного' : 'Добавить в избранное'}
-                      >
-                        {t.is_favorite ? '★' : '☆'}
-                      </button>
-                      <span className="tmpl-item-name">{t.name}</span>
-                    </div>
-                  ))}
+            {folderView && hasFolders ? (
+              /* Folder tree view */
+              <>
+                <div className="template-group-title" style={{ cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>📂 По папкам</span>
+                  <button className="more-btn" onClick={e => { e.stopPropagation(); setCtx({ x: e.clientX, y: e.clientY, type: 'root' }); }}>···</button>
                 </div>
-              );
-            })}
+                {folderTree.children.map(f => renderFolderNode(f, 0))}
+                {folderTree.items.map(t => renderTemplateItem(t, 0))}
+              </>
+            ) : (
+              /* Flat group view */
+              groups.map(g => {
+                const items = filtered.filter(g.filter);
+                const isCollapsed = collapsedGroups.has(g.key);
+                return (
+                  <div key={g.key} className="template-group">
+                    <div
+                      className="template-group-title"
+                      style={{ cursor: 'pointer', userSelect: 'none' }}
+                      onClick={() => toggleGroup(g.key)}
+                    >
+                      <span>{isCollapsed ? '▶' : '▼'} 📁</span>
+                      <span>{g.label} <span className="template-group-count">({items.length})</span></span>
+                    </div>
+                    {!isCollapsed && items.map(t => renderTemplateItem(t))}
+                  </div>
+                );
+              })
+            )}
           </div>
 
           {/* Right — preview */}
           <div className="templates-right">
-            {sel ? (
+            {selected ? (
               <>
-                <div className="template-preview-name">{sel.name}</div>
+                <div className="template-preview-name">{selected.name}</div>
                 <div className="template-preview-meta">
-                  {sel.scope === 'common' ? 'Общий шаблон' : 'Мой шаблон'}
-                  {sel.is_favorite ? ' · ★ Избранное' : ''}
+                  {selected.scope === 'common' ? 'Общий шаблон' : 'Мой шаблон'}
+                  {selected.is_favorite ? ' · ★ Избранное' : ''}
                 </div>
                 <div className="template-actions">
                   <button className="btn-primary" style={{ fontSize: 12 }} onClick={() => setApplyModalOpen(true)}>
                     + Добавить в лист
                   </button>
                   <button className="btn-outline" style={{ fontSize: 12 }} onClick={() => toggleFavorite()}>
-                    {sel.is_favorite ? '★' : '☆'} В избранное
+                    {selected.is_favorite ? '★' : '☆'} В избранное
                   </button>
-                  {sel.scope !== 'common' && (
-                    <button className="btn-danger" style={{ fontSize: 12 }} onClick={deleteTemplate}>
+                  {selected.scope !== 'common' && (
+                    <button className="btn-danger" style={{ fontSize: 12 }} onClick={() => deleteTemplate()}>
                       🗑 Удалить
                     </button>
                   )}
@@ -195,7 +361,7 @@ export default function TemplatesPage() {
                     <tr>{['№', 'Название', 'Бренд', 'Артикул', 'Кол-во'].map(h => <th key={h}>{h}</th>)}</tr>
                   </thead>
                   <tbody>
-                    {(sel.rows || []).map((r: any, i: number) => (
+                    {(selected.rows || []).map((r: any, i: number) => (
                       <tr key={i}>
                         <td>{r.row_number}</td>
                         <td>{r.name}</td>
@@ -213,6 +379,100 @@ export default function TemplatesPage() {
           </div>
         </div>
       </div>
+
+      {/* Context menu */}
+      {ctx && (
+        <div className="context-menu" style={{ left: ctx.x, top: ctx.y }} onClick={e => e.stopPropagation()}>
+          {ctx.type === 'root' && (
+            <div className="context-item" onClick={() => { setNewFolderParent(null); setNewFolderName(''); setShowNewFolder(true); setCtx(null); }}>
+              + Создать папку
+            </div>
+          )}
+          {ctx.type === 'folder' && (
+            <>
+              <div className="context-item" onClick={() => { setNewFolderParent(ctx.id); setNewFolderName(''); setShowNewFolder(true); setCtx(null); }}>
+                + Создать подпапку
+              </div>
+              <div className="context-item" onClick={() => startRename(ctx.id, 'folder', ctx.name)}>
+                Переименовать
+              </div>
+              <div className="context-item" onClick={() => { setMoveTarget({ type: 'folder', id: ctx.id }); setMoveDest(null); setCtx(null); }}>
+                Переместить
+              </div>
+              <div className="context-item danger" onClick={() => { deleteFolder(ctx.id, ctx.name); setCtx(null); }}>
+                Удалить
+              </div>
+            </>
+          )}
+          {ctx.type === 'template' && (
+            <>
+              <div className="context-item" onClick={() => startRename(ctx.id, 'template', ctx.name)}>
+                Переименовать
+              </div>
+              <div className="context-item" onClick={() => { setMoveTarget({ type: 'template', id: ctx.id }); setMoveDest(null); setCtx(null); }}>
+                В папку
+              </div>
+              {ctx.scope !== 'common' && (
+                <div className="context-item danger" onClick={() => { deleteTemplate({ id: ctx.id, name: ctx.name, scope: ctx.scope }); setCtx(null); }}>
+                  Удалить
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* New folder modal */}
+      {showNewFolder && (
+        <div className="modal-overlay" onClick={() => setShowNewFolder(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()}>
+            <div className="modal-title">{newFolderParent === null ? 'Новая корневая папка' : 'Новая подпапка'}</div>
+            <input
+              style={{ width: '100%', marginBottom: 16, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg2)', color: 'var(--text)', fontSize: 13 }}
+              value={newFolderName}
+              onChange={e => setNewFolderName(e.target.value)}
+              placeholder="Название папки"
+              autoFocus
+              onKeyDown={e => e.key === 'Enter' && createFolder(newFolderParent)}
+            />
+            <div className="modal-actions">
+              <button className="btn-cancel" onClick={() => setShowNewFolder(false)}>Отмена</button>
+              <button className="btn-primary" onClick={() => createFolder(newFolderParent)}>Создать</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Move modal */}
+      {moveTarget && (
+        <div className="modal-overlay" onClick={() => setMoveTarget(null)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()}>
+            <div className="modal-title">Переместить {moveTarget.type === 'folder' ? 'папку' : 'шаблон'}</div>
+            <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Выберите папку назначения:</p>
+            <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6, marginBottom: 16 }}>
+              <div
+                style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13, background: moveDest === null ? 'var(--accent-subtle)' : 'transparent' }}
+                onClick={() => setMoveDest(null)}
+              >
+                📁 Без папки (корень)
+              </div>
+              {allFolders.filter(f => f.id !== moveTarget.id).map(f => (
+                <div
+                  key={f.id}
+                  style={{ padding: '8px 12px', paddingLeft: 12 + f.depth * 14, cursor: 'pointer', fontSize: 13, background: moveDest === f.id ? 'var(--accent-subtle)' : 'transparent' }}
+                  onClick={() => setMoveDest(f.id)}
+                >
+                  📁 {f.name}
+                </div>
+              ))}
+            </div>
+            <div className="modal-actions">
+              <button className="btn-cancel" onClick={() => setMoveTarget(null)}>Отмена</button>
+              <button className="btn-primary" onClick={confirmMove}>Переместить</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Apply modal */}
       {applyModalOpen && (
