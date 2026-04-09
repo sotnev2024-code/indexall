@@ -1,18 +1,19 @@
 'use client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
-import api from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 
 function AuthHydrator() {
   const { user, setAuth, clearAuth } = useAppStore();
 
   useEffect(() => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    const token = localStorage.getItem('token');
     if (token && !user) {
-      api.get('/auth/me')
-        .then(({ data }) => setAuth(data, token))
-        .catch(() => clearAuth());
+      import('@/lib/api').then(({ default: api }) => {
+        api.get('/auth/me')
+          .then(({ data }) => setAuth(data, token))
+          .catch(() => clearAuth());
+      });
     }
   }, []);
 
