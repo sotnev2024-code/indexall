@@ -1,10 +1,12 @@
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
-import * as https from 'https';
-import { HttpsProxyAgent } from 'https-proxy-agent';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
 
 /**
- * ETM iPRO API — Node https (not fetch).
- * Если с VPS до ipro.etm.ru обрывается соединение (socket hang up), задайте ETM_HTTPS_PROXY.
+ * ETM iPRO API — uses curl subprocess to bypass Node.js TLS fingerprint filtering.
+ * ETM server rejects Node.js https requests (JA3 mismatch) but accepts curl.
  */
 @Injectable()
 export class EtmService {
@@ -15,33 +17,6 @@ export class EtmService {
 
   private readonly host = 'ipro.etm.ru';
 
-  /** One connection at a time, no keep-alive — reduces «socket hang up» from picky servers */
-  private readonly httpsAgent = new https.Agent({
-    keepAlive: false,
-    maxSockets: 1,
-    maxFreeSockets: 0,
-    // Allow all TLS versions — ETM server may reject TLS 1.2-only handshakes in Docker
-    minVersion: 'TLSv1.2' as const,
-  });
-
-  private proxyAgent: HttpsProxyAgent<string> | null = null;
-
-  private getOutboundAgent(): https.Agent {
-    const proxyUrl = process.env.ETM_HTTPS_PROXY?.trim();
-    if (proxyUrl) {
-      if (!this.proxyAgent) {
-        this.proxyAgent = new HttpsProxyAgent(proxyUrl);
-        this.logger.warn('ETM: outbound traffic uses ETM_HTTPS_PROXY');
-      }
-      return this.proxyAgent;
-    }
-    return this.httpsAgent;
-  }
-
-  private useDirectSocketOpts(): boolean {
-    return !process.env.ETM_HTTPS_PROXY?.trim();
-  }
-
   private get login() { return process.env.ETM_LOGIN; }
   private get pwd() { return process.env.ETM_PASSWORD; }
 
@@ -49,51 +24,31 @@ export class EtmService {
     return !!(this.login && this.pwd);
   }
 
-  private etmRequest(method: 'GET' | 'POST', pathWithLeadingSlash: string): Promise<any> {
-    return new Promise((resolve, reject) => {
-      const headers: Record<string, string> = {
-        Accept: 'application/json',
-        'User-Agent': 'Mozilla/5.0 (compatible; INDEXALL-Backend/1.0)',
-        Connection: 'close',
-        Host: this.host,
-      };
-      if (method === 'POST') {
-        headers['Content-Length'] = '0';
-      }
+  private async curlRequest(url: string, method: 'GET' | 'POST' = 'GET'): Promise<any> {
+    const args = [
+      '-s',
+      '--max-time', '30',
+      '-H', 'Accept: application/json',
+      '-H', `Host: ${this.host}`,
+    ];
 
-      const direct = this.useDirectSocketOpts();
-      const options: https.RequestOptions = {
-        hostname: this.host,
-        port: 443,
-        path: pathWithLeadingSlash,
-        method,
-        agent: this.getOutboundAgent(),
-        servername: this.host,
-        ...(direct ? { family: 4 as const } : {}),
-        timeout: 90_000,
-        headers,
-      };
+    if (process.env.ETM_HTTPS_PROXY?.trim()) {
+      args.push('-x', process.env.ETM_HTTPS_PROXY.trim());
+    }
 
-      const req = https.request(options, (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('aborted', () => reject(new Error('ETM response aborted')));
-        res.on('end', () => {
-          try {
-            resolve(JSON.parse(data || '{}'));
-          } catch {
-            reject(new Error(`Invalid JSON from ETM (HTTP ${res.statusCode})`));
-          }
-        });
-      });
+    if (method === 'POST') {
+      args.push('-X', 'POST', '-d', '');
+    }
 
-      req.on('error', (err) => reject(err));
-      req.on('timeout', () => {
-        req.destroy();
-        reject(new Error('ETM request timeout'));
-      });
-      req.end();
-    });
+    args.push(url);
+
+    const { stdout } = await execFileAsync('curl', args, { timeout: 35_000 });
+
+    try {
+      return JSON.parse(stdout || '{}');
+    } catch {
+      throw new Error(`Invalid JSON from ETM: ${stdout?.slice(0, 200)}`);
+    }
   }
 
   private async authenticate(): Promise<string> {
@@ -104,20 +59,14 @@ export class EtmService {
       );
     }
 
-    const path =
-      `/api/v1/user/login?log=${encodeURIComponent(this.login)}&pwd=${encodeURIComponent(this.pwd)}`;
+    const url = `https://${this.host}/api/v1/user/login?log=${encodeURIComponent(this.login)}&pwd=${encodeURIComponent(this.pwd)}`;
 
     let json: any;
     try {
-      json = await this.etmRequest('POST', path);
+      json = await this.curlRequest(url, 'POST');
     } catch (e: any) {
-      let msg = e?.message || String(e);
-      this.logger.error(`ETM login network error: ${msg}`);
-      if (/hang up|ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(msg) && !process.env.ETM_HTTPS_PROXY?.trim()) {
-        msg +=
-          ' Прямой доступ с сервера до ipro.etm.ru недоступен — задайте в .env ETM_HTTPS_PROXY (HTTP-прокси с методом CONNECT).';
-      }
-      throw new HttpException(`ETM login network error: ${msg}`, HttpStatus.BAD_GATEWAY);
+      this.logger.error(`ETM login error: ${e?.message}`);
+      throw new HttpException(`ETM login error: ${e?.message}`, HttpStatus.BAD_GATEWAY);
     }
 
     if (json?.status?.code !== 200) {
@@ -145,13 +94,13 @@ export class EtmService {
   }
 
   private async fetchPrice(article: string, session: string): Promise<number | null> {
-    const path =
-      `/api/v1/goods/${encodeURIComponent(article)}/price` +
+    const url =
+      `https://${this.host}/api/v1/goods/${encodeURIComponent(article)}/price` +
       `?type=mnf&sessionid=${encodeURIComponent(session)}`;
 
     let json: any;
     try {
-      json = await this.etmRequest('GET', path);
+      json = await this.curlRequest(url, 'GET');
     } catch {
       return null;
     }

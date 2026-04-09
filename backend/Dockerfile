@@ -2,7 +2,7 @@
 FROM node:20-alpine
 
 # Install Python and build tools for native modules (better-sqlite3)
-RUN apk add --no-cache python3 make g++ sqlite-dev
+RUN apk add --no-cache python3 make g++ sqlite-dev curl
 
 WORKDIR /app
 
