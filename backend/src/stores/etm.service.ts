@@ -28,6 +28,7 @@ export class EtmService {
     const args = [
       '-s',
       '--show-error',
+      '--http1.1',
       '--max-time', '30',
       '-H', 'Accept: application/json',
       '-H', `Host: ${this.host}`,
