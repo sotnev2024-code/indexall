@@ -23,16 +23,12 @@ export default function TemplatesPage() {
 
   // Folder tree UI
   const [expandedFolders, setExpandedFolders] = useState<Set<number>>(new Set());
-  const [folderView, setFolderView] = useState(false); // toggle folder view vs flat groups
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   // Folder CRUD
   const [ctx, setCtx] = useState<any | null>(null);
   const [renaming, setRenaming] = useState<{ id: number; type: 'folder' | 'template'; val: string } | null>(null);
   const renameRef = useRef<HTMLInputElement>(null);
-  const [showNewFolder, setShowNewFolder] = useState(false);
-  const [newFolderParent, setNewFolderParent] = useState<number | null>(null);
-  const [newFolderName, setNewFolderName] = useState('');
   const [moveTarget, setMoveTarget] = useState<{ type: 'folder' | 'template'; id: number } | null>(null);
   const [moveDest, setMoveDest] = useState<number | null>(null);
 
@@ -113,17 +109,6 @@ export default function TemplatesPage() {
   }
 
   // ── Folder CRUD ───────────────────────────────────────────────
-  async function createFolder(parentId: number | null) {
-    const name = newFolderName.trim() || 'Новая папка';
-    try {
-      await foldersApi.create(name, parentId, 'templates');
-      setShowNewFolder(false);
-      setNewFolderName('');
-      await loadFolderTree();
-      toast.success(`Папка «${name}» создана`);
-    } catch { toast.error('Ошибка создания папки'); }
-  }
-
   async function renameFolder(id: number, name: string) {
     if (!name.trim()) return;
     try { await foldersApi.rename(id, name.trim()); await loadFolderTree(); }
@@ -273,18 +258,6 @@ export default function TemplatesPage() {
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск по названию шаблонов" />
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            {hasFolders && (
-              <button
-                className={folderView ? 'btn-primary' : 'btn-outline'}
-                style={{ fontSize: 12, padding: '5px 10px' }}
-                onClick={() => setFolderView(v => !v)}
-              >
-                📁 {folderView ? 'Папки (вкл)' : 'Папки (выкл)'}
-              </button>
-            )}
-            <button className="btn-outline" style={{ fontSize: 12, padding: '5px 10px' }} onClick={() => { setNewFolderParent(null); setNewFolderName(''); setShowNewFolder(true); }}>
-              + Папка
-            </button>
             <button className="btn-back" onClick={() => router.back()}>← Вернуться на лист</button>
           </div>
         </div>
@@ -302,15 +275,24 @@ export default function TemplatesPage() {
         <div className="templates-body">
           {/* Left — template list */}
           <div className="templates-left">
-            {folderView && hasFolders ? (
-              /* Folder tree view */
+            {hasFolders ? (
+              /* Folder tree view — shown automatically when folders exist */
               <>
-                <div className="template-group-title" style={{ cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>📂 По папкам</span>
-                  <button className="more-btn" onClick={e => { e.stopPropagation(); setCtx({ x: e.clientX, y: e.clientY, type: 'root' }); }}>···</button>
+                <div className="template-group-title" style={{ userSelect: 'none' }}>
+                  <span>📂 Мои шаблоны</span>
                 </div>
                 {folderTree.children.map(f => renderFolderNode(f, 0))}
                 {folderTree.items.map(t => renderTemplateItem(t, 0))}
+                {/* Common templates below folders */}
+                {filtered.filter((t: any) => t.scope === 'common').length > 0 && (
+                  <div className="template-group">
+                    <div className="template-group-title" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleGroup('common')}>
+                      <span>{collapsedGroups.has('common') ? '▶' : '▼'} 📁</span>
+                      <span>Общие шаблоны <span className="template-group-count">({filtered.filter((t: any) => t.scope === 'common').length})</span></span>
+                    </div>
+                    {!collapsedGroups.has('common') && filtered.filter((t: any) => t.scope === 'common').map((t: any) => renderTemplateItem(t))}
+                  </div>
+                )}
               </>
             ) : (
               /* Flat group view */
@@ -383,21 +365,10 @@ export default function TemplatesPage() {
       {/* Context menu */}
       {ctx && (
         <div className="context-menu" style={{ left: ctx.x, top: ctx.y }} onClick={e => e.stopPropagation()}>
-          {ctx.type === 'root' && (
-            <div className="context-item" onClick={() => { setNewFolderParent(null); setNewFolderName(''); setShowNewFolder(true); setCtx(null); }}>
-              + Создать папку
-            </div>
-          )}
           {ctx.type === 'folder' && (
             <>
-              <div className="context-item" onClick={() => { setNewFolderParent(ctx.id); setNewFolderName(''); setShowNewFolder(true); setCtx(null); }}>
-                + Создать подпапку
-              </div>
               <div className="context-item" onClick={() => startRename(ctx.id, 'folder', ctx.name)}>
                 Переименовать
-              </div>
-              <div className="context-item" onClick={() => { setMoveTarget({ type: 'folder', id: ctx.id }); setMoveDest(null); setCtx(null); }}>
-                Переместить
               </div>
               <div className="context-item danger" onClick={() => { deleteFolder(ctx.id, ctx.name); setCtx(null); }}>
                 Удалить
@@ -419,27 +390,6 @@ export default function TemplatesPage() {
               )}
             </>
           )}
-        </div>
-      )}
-
-      {/* New folder modal */}
-      {showNewFolder && (
-        <div className="modal-overlay" onClick={() => setShowNewFolder(false)}>
-          <div className="modal-box" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">{newFolderParent === null ? 'Новая корневая папка' : 'Новая подпапка'}</div>
-            <input
-              style={{ width: '100%', marginBottom: 16, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg2)', color: 'var(--text)', fontSize: 13 }}
-              value={newFolderName}
-              onChange={e => setNewFolderName(e.target.value)}
-              placeholder="Название папки"
-              autoFocus
-              onKeyDown={e => e.key === 'Enter' && createFolder(newFolderParent)}
-            />
-            <div className="modal-actions">
-              <button className="btn-cancel" onClick={() => setShowNewFolder(false)}>Отмена</button>
-              <button className="btn-primary" onClick={() => createFolder(newFolderParent)}>Создать</button>
-            </div>
-          </div>
         </div>
       )}
 

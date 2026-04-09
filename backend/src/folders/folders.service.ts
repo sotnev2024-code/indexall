@@ -101,10 +101,11 @@ export class FoldersService implements OnModuleInit {
       });
       rootItems = sheets.map((s) => this.enrichSheet(s));
     } else {
-      rootItems = await this.templatesRepo.find({
+      const rawTpls = await this.templatesRepo.find({
         where: { userId, folder_id: IsNull() },
         order: { createdAt: 'ASC' },
       });
+      rootItems = rawTpls.map(t => this.enrichTemplate(t));
     }
 
     const children = await this.buildTree(folders, null, userId, type);
@@ -131,10 +132,11 @@ export class FoldersService implements OnModuleInit {
         });
         folderItems = sheets.map((s) => this.enrichSheet(s));
       } else {
-        folderItems = await this.templatesRepo.find({
+        const rawTpls = await this.templatesRepo.find({
           where: { userId, folder_id: folder.id },
           order: { createdAt: 'ASC' },
         });
+        folderItems = rawTpls.map(t => this.enrichTemplate(t));
       }
 
       const subFolders = await this.buildTree(
@@ -152,6 +154,12 @@ export class FoldersService implements OnModuleInit {
     }
 
     return result;
+  }
+
+  private enrichTemplate(t: any) {
+    let rows: any[] = [];
+    try { const parsed = JSON.parse(t.meta); if (Array.isArray(parsed)) rows = parsed; } catch {}
+    return { ...t, rows, scope: t.userId == null ? 'common' : 'my' };
   }
 
   private enrichSheet(s: any) {
