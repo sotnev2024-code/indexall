@@ -149,9 +149,8 @@ const SpecRow = memo(function SpecRow({
           ref={el => inputRef(el, `store-${idx}`)}
           value={row.store ?? ''}
           tabIndex={-1}
-          style={{ pointerEvents: cellEditing(6) ? 'auto' : 'none' }}
           onChange={e => onUpdate(idx, 'store', e.target.value)}
-          onClick={e => cellEditing(6) && onStoreClick(idx, e.target as HTMLSelectElement)}
+          onClick={e => onStoreClick(idx, e.target as HTMLSelectElement)}
           onFocus={onFocus}
           onBlur={onBlur}
         >
