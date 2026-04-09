@@ -1,22 +1,60 @@
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import * as https from 'https';
 
+/** ETM iPRO API — use Node https instead of fetch (avoids TLS/fetch issues in Docker Alpine). */
 @Injectable()
 export class EtmService {
   private readonly logger = new Logger(EtmService.name);
 
-  // In-memory session (survives for 8h; resets on server restart → re-auth automatic)
   private sessionKey: string | null = null;
   private sessionExpiry = 0;
 
-  // ── Credentials ───────────────────────────────────────────────
+  private readonly host = 'ipro.etm.ru';
+
   private get login() { return process.env.ETM_LOGIN; }
-  private get pwd()   { return process.env.ETM_PASSWORD; }
+  private get pwd() { return process.env.ETM_PASSWORD; }
 
   isConfigured(): boolean {
     return !!(this.login && this.pwd);
   }
 
-  // ── Session management ────────────────────────────────────────
+  private etmRequest(method: 'GET' | 'POST', pathWithLeadingSlash: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const options: https.RequestOptions = {
+        hostname: this.host,
+        port: 443,
+        path: pathWithLeadingSlash,
+        method,
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': 'INDEXALL-Backend/1.0',
+        },
+        // Allow slightly older TLS if server requires it
+        minVersion: 'TLSv1.2' as const,
+        timeout: 60_000,
+      };
+
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data || '{}'));
+          } catch {
+            reject(new Error(`Invalid JSON from ETM (HTTP ${res.statusCode})`));
+          }
+        });
+      });
+
+      req.on('error', (err) => reject(err));
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('ETM request timeout'));
+      });
+      req.end();
+    });
+  }
+
   private async authenticate(): Promise<string> {
     if (!this.login || !this.pwd) {
       throw new HttpException(
@@ -25,17 +63,16 @@ export class EtmService {
       );
     }
 
-    const url =
-      `https://ipro.etm.ru/api/v1/user/login` +
-      `?log=${encodeURIComponent(this.login)}` +
-      `&pwd=${encodeURIComponent(this.pwd)}`;
+    const path =
+      `/api/v1/user/login?log=${encodeURIComponent(this.login)}&pwd=${encodeURIComponent(this.pwd)}`;
 
     let json: any;
     try {
-      const res = await fetch(url, { method: 'POST' });
-      json = await res.json();
-    } catch (e) {
-      throw new HttpException(`ETM login network error: ${e}`, HttpStatus.BAD_GATEWAY);
+      json = await this.etmRequest('POST', path);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      this.logger.error(`ETM login network error: ${msg}`);
+      throw new HttpException(`ETM login network error: ${msg}`, HttpStatus.BAD_GATEWAY);
     }
 
     if (json?.status?.code !== 200) {
@@ -46,7 +83,6 @@ export class EtmService {
     }
 
     this.sessionKey = String(json.data.session);
-    // Use 7.5h so we re-auth 30min before expiry
     this.sessionExpiry = Date.now() + 7.5 * 60 * 60 * 1000;
     this.logger.log('ETM session refreshed');
     return this.sessionKey;
@@ -59,41 +95,33 @@ export class EtmService {
     return this.authenticate();
   }
 
-  // ── Helpers ───────────────────────────────────────────────────
   private sleep(ms: number) {
-    return new Promise<void>(r => setTimeout(r, ms));
+    return new Promise<void>((r) => setTimeout(r, ms));
   }
 
-  // ── Price fetch for a single article ─────────────────────────
   private async fetchPrice(article: string, session: string): Promise<number | null> {
-    const url =
-      `https://ipro.etm.ru/api/v1/goods/${encodeURIComponent(article)}/price` +
-      `?type=mnf&sessionid=${session}`;
+    const path =
+      `/api/v1/goods/${encodeURIComponent(article)}/price` +
+      `?type=mnf&sessionid=${encodeURIComponent(session)}`;
 
     let json: any;
     try {
-      const res = await fetch(url);
-      if (!res.ok) return null;
-      json = await res.json();
+      json = await this.etmRequest('GET', path);
     } catch {
       return null;
     }
 
     if (json?.status?.code !== 200 || !json.data) return null;
 
-    // Prefer price с НДС (pricewnds), fall back to price без НДС
     const p = json.data.pricewnds ?? json.data.price ?? 0;
     return Number(p) > 0 ? Number(p) : null;
   }
 
-  // ── Public: get prices for a list of articles ─────────────────
-  // Returns { article: price | null }
-  // Rate-limited to 1 request / 1.1s as per ETM requirements
   async getPrices(
     articles: string[],
     onProgress?: (done: number, total: number) => void,
   ): Promise<Record<string, number | null>> {
-    const unique = [...new Set(articles.filter(a => a && a.trim()))];
+    const unique = [...new Set(articles.filter((a) => a && a.trim()))];
     const results: Record<string, number | null> = {};
 
     if (unique.length === 0) return results;
@@ -110,7 +138,6 @@ export class EtmService {
 
       onProgress?.(i + 1, unique.length);
 
-      // 1.1s delay between requests (rate limit 1 req/sec)
       if (i < unique.length - 1) {
         await this.sleep(1100);
       }
@@ -118,7 +145,7 @@ export class EtmService {
 
     this.logger.log(
       `ETM prices fetched: ${unique.length} articles, ` +
-      `${Object.values(results).filter(v => v !== null).length} found`,
+        `${Object.values(results).filter((v) => v !== null).length} found`,
     );
 
     return results;
