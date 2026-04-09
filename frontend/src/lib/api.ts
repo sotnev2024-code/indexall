@@ -53,7 +53,17 @@ export const foldersApi = {
                     api.put(`/folders/templates/${templateId}/move`, { folder_id }),
   reorderSheets:  (folderId: number, ids: number[]) =>
                     api.put(`/folders/${folderId}/sheets/reorder`, { ids }),
-  reorder:        (ids: number[]) => api.put('/folders/reorder/batch', { ids }),
+  reorder:             (ids: number[]) => api.put('/folders/reorder/batch', { ids }),
+  // Save as template
+  saveFolderAsTemplate:(id: number, name: string, templateFolderId?: number | null) =>
+                         api.post(`/folders/${id}/save-as-template`, { name, template_folder_id: templateFolderId ?? null }),
+  saveSheetAsTemplate: (sheetId: number, name: string, templateFolderId?: number | null) =>
+                         api.post(`/folders/sheets/${sheetId}/save-as-template`, { name, template_folder_id: templateFolderId ?? null }),
+  // Load template
+  loadTemplateFolder:  (templateFolderId: number, mode: 'new'|'into', targetFolderId?: number | null) =>
+                         api.post('/folders/load-template-folder', { template_folder_id: templateFolderId, mode, target_folder_id: targetFolderId ?? null }),
+  loadTemplateSheet:   (templateId: number, mode: 'new'|'into', targetFolderId?: number | null) =>
+                         api.post('/folders/load-template-sheet', { template_id: templateId, mode, target_folder_id: targetFolderId ?? null }),
 };
 
 // ── Projects ──────────────────────────────────────────────────
@@ -123,6 +133,10 @@ export const templatesApi = {
   toggleFavorite: (id: number) => api.post(`/templates/${id}/favorite`),
   addFile: (id: number, formData: FormData) => api.post(`/templates/${id}/files`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
   removeFile: (fileId: number) => api.delete(`/templates/files/${fileId}`),
+  // Admin
+  getAllForAdmin: () => api.get('/templates/admin/all'),
+  makeCommon:    (id: number) => api.post(`/templates/${id}/make-common`),
+  unmakeCommon:  (id: number) => api.post(`/templates/${id}/unmake-common`),
 };
 
 // ── Export ────────────────────────────────────────────────────

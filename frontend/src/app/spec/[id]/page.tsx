@@ -245,6 +245,7 @@ export default function SpecPage() {
   // ── Save as template modal ────────────────────────────────────
   const [tplModal, setTplModal] = useState<{ sheetId: number } | null>(null);
   const [tplName, setTplName] = useState('');
+  const [tplSaveMode, setTplSaveMode] = useState<'sheet' | 'folder' | null>(null); // null = asking
 
   // ── Sheet tab drag-and-drop ───────────────────────────────────
   const [tabDrag, setTabDrag] = useState<number | null>(null);
@@ -580,7 +581,7 @@ export default function SpecPage() {
   }
 
   async function searchCatalog(q: string, rowIdx: number, field: string, el: HTMLInputElement) {
-    if (!q || q.length < 2) { setAcDrops(null); return; }
+    if (!q || q.length < 3) { setAcDrops(null); return; }
     const { data } = await catalogApi.search(q);
     let results = data as any[];
     if (brandFilter !== 'all') {
@@ -601,7 +602,7 @@ export default function SpecPage() {
   async function handleGlobalSearch(q: string) {
     setGlobalSearch(q);
     if (globalSearchTimer.current) clearTimeout(globalSearchTimer.current);
-    if (!q || q.length < 2) { setGlobalResults([]); return; }
+    if (!q || q.length < 3) { setGlobalResults([]); return; }
     globalSearchTimer.current = setTimeout(async () => {
       try {
         const { data } = await catalogApi.search(q);
@@ -703,6 +704,33 @@ export default function SpecPage() {
 
   // ── Save as template ─────────────────────────────────────────
   async function saveAsTemplate() {
+    if (!tplName.trim() || !tplModal || !tplSaveMode) return;
+    try {
+      if (tplSaveMode === 'sheet') {
+        await foldersApi.saveSheetAsTemplate(tplModal.sheetId, tplName.trim());
+        toast.success(`Шаблон «${tplName.trim()}» сохранён`);
+        setTplModal(null); setTplName(''); setTplSaveMode(null);
+        return;
+      }
+      // folder mode — save the whole folder
+      const { data: sheetData } = await sheetsApi.getOne(tplModal.sheetId);
+      const folderId = sheetData.folder_id;
+      if (!folderId) {
+        // No folder → fall back to sheet save
+        await foldersApi.saveSheetAsTemplate(tplModal.sheetId, tplName.trim());
+        toast.success(`Шаблон «${tplName.trim()}» сохранён`);
+        setTplModal(null); setTplName(''); setTplSaveMode(null);
+        return;
+      }
+      await foldersApi.saveFolderAsTemplate(folderId, tplName.trim());
+      toast.success(`Шаблон папки «${tplName.trim()}» сохранён`);
+      setTplModal(null); setTplName(''); setTplSaveMode(null);
+      return;
+    } catch { toast.error('Ошибка сохранения шаблона'); }
+  }
+
+  // legacy path kept for reference but replaced by saveAsTemplate above
+  async function _saveAsTemplateLegacy() {
     if (!tplName.trim() || !tplModal) return;
     try {
       // Load the sheet's rows, then create a template storing them in `meta`
@@ -1835,26 +1863,50 @@ export default function SpecPage() {
       {tplModal && (
         <div
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          onClick={() => setTplModal(null)}
+          onClick={() => { setTplModal(null); setTplSaveMode(null); }}
         >
           <div
-            style={{ background: '#fff', borderRadius: 12, padding: 28, width: 420, maxWidth: '95vw', boxShadow: '0 8px 40px rgba(0,0,0,0.18)' }}
+            style={{ background: 'var(--bg)', borderRadius: 12, padding: 28, width: 420, maxWidth: '95vw', boxShadow: '0 8px 40px rgba(0,0,0,0.25)' }}
             onClick={e => e.stopPropagation()}
           >
-            <h3 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700 }}>Сохранить как шаблон</h3>
-            <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--muted)' }}>Введите название шаблона</p>
-            <input
-              autoFocus
-              value={tplName}
-              onChange={e => setTplName(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') saveAsTemplate(); if (e.key === 'Escape') setTplModal(null); }}
-              placeholder="Название шаблона"
-              style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, boxSizing: 'border-box', marginBottom: 16 }}
-            />
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button className="btn-outline" onClick={() => setTplModal(null)}>Отмена</button>
-              <button className="btn-primary" onClick={saveAsTemplate} disabled={!tplName.trim()}>Сохранить</button>
-            </div>
+            <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>Сохранить как шаблон</h3>
+
+            {/* Step 1: choose sheet or folder */}
+            {!tplSaveMode ? (
+              <>
+                <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--muted)' }}>Что сохранить?</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+                  <div className="modal-option" onClick={() => setTplSaveMode('sheet')}>
+                    ≡ Только этот лист
+                  </div>
+                  <div className="modal-option" onClick={() => setTplSaveMode('folder')}>
+                    📁 Всю папку со всеми листами и подпапками
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button className="btn-outline" onClick={() => { setTplModal(null); setTplSaveMode(null); }}>Отмена</button>
+                </div>
+              </>
+            ) : (
+              /* Step 2: enter name and save */
+              <>
+                <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--muted)' }}>
+                  {tplSaveMode === 'sheet' ? 'Сохранить лист как шаблон' : 'Сохранить всю папку как шаблон'}
+                </p>
+                <input
+                  autoFocus
+                  value={tplName}
+                  onChange={e => setTplName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') saveAsTemplate(); if (e.key === 'Escape') setTplSaveMode(null); }}
+                  placeholder="Название шаблона"
+                  style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, boxSizing: 'border-box', marginBottom: 16 }}
+                />
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                  <button className="btn-outline" onClick={() => setTplSaveMode(null)}>← Назад</button>
+                  <button className="btn-primary" onClick={saveAsTemplate} disabled={!tplName.trim()}>Сохранить</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

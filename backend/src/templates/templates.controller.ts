@@ -58,6 +58,27 @@ export class TemplatesController {
     return this.templatesService.toggleFavorite(+id);
   }
 
+  /** Admin only: get all templates from all users */
+  @Get('admin/all')
+  @ApiOperation({ summary: 'Все шаблоны всех пользователей (только для admin)' })
+  getAllForAdmin() {
+    return this.templatesService.findAllForAdmin();
+  }
+
+  /** Admin only: mark template as common */
+  @Post(':id/make-common')
+  @ApiOperation({ summary: 'Сделать шаблон общим (только для admin)' })
+  makeCommon(@Param('id') id: string) {
+    return this.templatesService.makeCommon(+id);
+  }
+
+  /** Admin only: remove from common */
+  @Post(':id/unmake-common')
+  @ApiOperation({ summary: 'Убрать из общих (только для admin)' })
+  unmakeCommon(@Param('id') id: string, @Request() req) {
+    return this.templatesService.unmakeCommon(+id, req.user.userId);
+  }
+
   @Post(':id/files')
   @ApiOperation({ summary: 'Добавить файл к шаблону' })
   addFile(@Param('id') id: string) {

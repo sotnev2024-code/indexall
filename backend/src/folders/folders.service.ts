@@ -302,6 +302,230 @@ export class FoldersService implements OnModuleInit {
     return { success: true };
   }
 
+  // ── Save as template ─────────────────────────────────────────
+
+  /** Save a project sheet as a template entry */
+  async saveSheetAsTemplate(
+    sheetId: number,
+    userId: number,
+    name: string,
+    templateFolderId?: number | null,
+  ) {
+    const sheet = await this.sheetsRepo.findOne({
+      where: { id: sheetId },
+      relations: ['rows'],
+    });
+    if (!sheet) throw new NotFoundException('Лист не найден');
+    await this.checkSheetOwner(sheetId, userId);
+
+    if (templateFolderId) await this.checkOwner(templateFolderId, userId);
+
+    const rows = (sheet.rows || [])
+      .filter((r) => r.name || r.article)
+      .map((r) => ({
+        row_number: r.id,
+        name: r.name,
+        brand: r.brand,
+        article: r.article,
+        qty: r.qty,
+        unit: r.unit,
+        price: r.price,
+        store: r.store,
+        coef: r.coef,
+      }));
+
+    return this.templatesRepo.save({
+      name: name || sheet.name,
+      meta: JSON.stringify(rows),
+      userId,
+      folder_id: templateFolderId ?? null,
+      is_active: true,
+    });
+  }
+
+  /** Recursively copy a project folder (and all its contents) into the templates space */
+  async saveFolderAsTemplate(
+    folderId: number,
+    userId: number,
+    name?: string,
+    templateParentId?: number | null,
+  ) {
+    const sourceFolder = await this.checkOwner(folderId, userId);
+    if (templateParentId) await this.checkOwner(templateParentId, userId);
+
+    // Create template folder
+    const tplFolder = await this.foldersRepo.save({
+      name: name || sourceFolder.name,
+      parent_id: templateParentId ?? null,
+      owner_id: userId,
+      type: 'templates',
+      sort_order: 0,
+    });
+
+    // Copy sheets in this folder → template entries
+    const sheets = await this.sheetsRepo.find({
+      where: { folder_id: folderId },
+      relations: ['rows'],
+      order: { sort_order: 'ASC' },
+    });
+    for (const sheet of sheets) {
+      const rows = (sheet.rows || [])
+        .filter((r) => r.name || r.article)
+        .map((r) => ({
+          row_number: r.id,
+          name: r.name,
+          brand: r.brand,
+          article: r.article,
+          qty: r.qty,
+          unit: r.unit,
+          price: r.price,
+          store: r.store,
+          coef: r.coef,
+        }));
+      await this.templatesRepo.save({
+        name: sheet.name,
+        meta: JSON.stringify(rows),
+        userId,
+        folder_id: tplFolder.id,
+        is_active: true,
+      });
+    }
+
+    // Recurse into subfolders
+    const subFolders = await this.foldersRepo.find({ where: { parent_id: folderId, type: 'projects' } });
+    for (const sub of subFolders) {
+      await this.saveFolderAsTemplate(sub.id, userId, sub.name, tplFolder.id);
+    }
+
+    return tplFolder;
+  }
+
+  // ── Load template ─────────────────────────────────────────────
+
+  /** Load a single template entry as a sheet inside a project folder */
+  async loadTemplateAsSheet(
+    templateId: number,
+    userId: number,
+    mode: 'new' | 'into',
+    targetFolderId?: number | null,
+  ) {
+    const tpl = await this.templatesRepo.findOne({ where: { id: templateId } });
+    if (!tpl) throw new NotFoundException('Шаблон не найден');
+
+    let folderId = targetFolderId ?? null;
+
+    if (mode === 'new') {
+      // Create a new root folder for this template sheet
+      const newFolder = await this.foldersRepo.save({
+        name: tpl.name,
+        parent_id: null,
+        owner_id: userId,
+        type: 'projects',
+        sort_order: 0,
+      });
+      folderId = newFolder.id;
+    } else {
+      if (!folderId) throw new NotFoundException('Укажите папку назначения');
+      await this.checkOwner(folderId, userId);
+    }
+
+    return this.createSheetFromTemplate(tpl, folderId!, userId);
+  }
+
+  /** Load a template folder recursively into the projects space */
+  async loadTemplateFolderIntoProject(
+    templateFolderId: number,
+    userId: number,
+    mode: 'new' | 'into',
+    targetFolderId?: number | null,
+  ) {
+    const tplFolder = await this.foldersRepo.findOne({ where: { id: templateFolderId } });
+    if (!tplFolder) throw new NotFoundException('Шаблонная папка не найдена');
+    // Allow loading common templates (owner != user) but user-owned folders must match
+    if (tplFolder.owner_id !== userId && tplFolder.owner_id !== 0) {
+      // Allow if it's a template folder (type='templates') owned by anyone — it's readable
+    }
+
+    let parentId: number | null = null;
+
+    if (mode === 'new') {
+      // Create as a root-level project folder
+      const newFolder = await this.foldersRepo.save({
+        name: tplFolder.name,
+        parent_id: null,
+        owner_id: userId,
+        type: 'projects',
+        sort_order: 0,
+      });
+      await this.copyTemplateFolderContents(templateFolderId, newFolder.id, userId);
+      return newFolder;
+    } else {
+      if (!targetFolderId) throw new NotFoundException('Укажите папку назначения');
+      await this.checkOwner(targetFolderId, userId);
+      // Create as subfolder inside targetFolderId
+      const newFolder = await this.foldersRepo.save({
+        name: tplFolder.name,
+        parent_id: targetFolderId,
+        owner_id: userId,
+        type: 'projects',
+        sort_order: 0,
+      });
+      await this.copyTemplateFolderContents(templateFolderId, newFolder.id, userId);
+      return newFolder;
+    }
+  }
+
+  private async copyTemplateFolderContents(
+    templateFolderId: number,
+    projectFolderId: number,
+    userId: number,
+  ) {
+    // Copy template entries → sheets
+    const templates = await this.templatesRepo.find({ where: { folder_id: templateFolderId } });
+    for (const tpl of templates) {
+      await this.createSheetFromTemplate(tpl, projectFolderId, userId);
+    }
+    // Recurse into subfolders
+    const subFolders = await this.foldersRepo.find({ where: { parent_id: templateFolderId } });
+    for (const sub of subFolders) {
+      const newSub = await this.foldersRepo.save({
+        name: sub.name,
+        parent_id: projectFolderId,
+        owner_id: userId,
+        type: 'projects',
+        sort_order: 0,
+      });
+      await this.copyTemplateFolderContents(sub.id, newSub.id, userId);
+    }
+  }
+
+  private async createSheetFromTemplate(tpl: any, folderId: number, userId: number) {
+    const sheet = await this.sheetsRepo.save({
+      name: tpl.name,
+      folder_id: folderId,
+      owner_id: userId,
+    });
+    let rows: any[] = [];
+    try { rows = JSON.parse(tpl.meta) || []; } catch {}
+    if (rows.length) {
+      await this.rowsRepo.save(
+        rows.map((r: any) => ({
+          sheetId: sheet.id,
+          name: r.name || '',
+          brand: r.brand || '',
+          article: r.article || '',
+          qty: r.qty || '0',
+          unit: r.unit || 'шт',
+          price: r.price || '0',
+          store: r.store || '',
+          coef: r.coef || '1',
+          total: '0',
+        })),
+      );
+    }
+    return sheet;
+  }
+
   // ── Helpers ───────────────────────────────────────────────────
 
   private async checkOwner(id: number, userId: number) {

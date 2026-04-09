@@ -3,8 +3,17 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
-import { foldersApi, sheetsApi, trashApi } from '@/lib/api';
+import { foldersApi, sheetsApi, trashApi, templatesApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
+
+type TplFolderNode = {
+  id: number;
+  name: string;
+  parent_id: number | null;
+  children: TplFolderNode[];
+  items: TplItem[];
+};
+type TplItem = { id: number; name: string; folder_id: number | null };
 
 const formatMoney = (n: number) =>
   n ? n.toLocaleString('ru-RU', { minimumFractionDigits: 2 }) + ' ₽' : '–';
@@ -54,7 +63,7 @@ export default function ProjectsPage() {
     x: number; y: number;
     type: 'folder' | 'sheet';
     id: number;
-    folderId?: number;
+    folderId?: number | null;
     name: string;
   } | null>(null);
 
@@ -75,10 +84,26 @@ export default function ProjectsPage() {
   const [trashItems, setTrashItems] = useState<any[]>([]);
   const [trashLoading, setTrashLoading] = useState(false);
 
+  // Save as template
+  const [saveAsTpl, setSaveAsTpl] = useState<{ type: 'folder' | 'sheet'; id: number; name: string } | null>(null);
+  const [saveAsTplName, setSaveAsTplName] = useState('');
+
+  // Load from template modal
+  const [showLoadTpl, setShowLoadTpl] = useState(false);
+  const [tplTree, setTplTree] = useState<{ children: TplFolderNode[]; items: TplItem[] }>({ children: [], items: [] });
+  const [tplCommon, setTplCommon] = useState<TplItem[]>([]);
+  const [tplTreeLoading, setTplTreeLoading] = useState(false);
+  const [tplTreeExpanded, setTplTreeExpanded] = useState<Set<number>>(new Set());
+  const [loadTplSel, setLoadTplSel] = useState<{ type: 'folder' | 'sheet'; id: number; name: string } | null>(null);
+  const [loadTplMode, setLoadTplMode] = useState<'new' | 'into' | null>(null);
+  const [loadTplDest, setLoadTplDest] = useState<number | null>(null);
+
   // Drag & drop
   const [drag, setDrag] = useState<{ type: 'folder' | 'sheet'; id: number; folderId?: number | null } | null>(null);
   const [dropId, setDropId] = useState<number | null>(null);
   const [dropHalf, setDropHalf] = useState<'top' | 'bottom' | 'inside'>('inside');
+
+  const firstLoad = useRef(true);
 
   useEffect(() => { loadTree(); }, []);
 
@@ -87,8 +112,12 @@ export default function ProjectsPage() {
       const { data } = await foldersApi.getTree('projects');
       setTree(data);
       if (data.children.length === 0 && data.items.length === 0) setShowWelcome(true);
-      // Auto-expand root folders
-      setExpanded(new Set(data.children.map((f: FolderNode) => f.id)));
+      if (firstLoad.current) {
+        // Auto-expand root folders only on the very first load
+        setExpanded(new Set(data.children.map((f: FolderNode) => f.id)));
+        firstLoad.current = false;
+      }
+      // On subsequent reloads (after move/rename/etc.) keep expanded state as-is
     } catch { toast.error('Ошибка загрузки проектов'); }
     finally { setLoading(false); }
   }
@@ -285,6 +314,111 @@ export default function ProjectsPage() {
 
     setDrag(null);
     setDropId(null);
+  }
+
+  // ── Save as template ──────────────────────────────────────────
+  async function doSaveAsTemplate() {
+    if (!saveAsTpl || !saveAsTplName.trim()) return;
+    try {
+      if (saveAsTpl.type === 'folder') {
+        await foldersApi.saveFolderAsTemplate(saveAsTpl.id, saveAsTplName.trim());
+      } else {
+        await foldersApi.saveSheetAsTemplate(saveAsTpl.id, saveAsTplName.trim());
+      }
+      toast.success(`Шаблон «${saveAsTplName.trim()}» сохранён`);
+      setSaveAsTpl(null);
+      setSaveAsTplName('');
+    } catch { toast.error('Ошибка сохранения шаблона'); }
+  }
+
+  // ── Load from template ────────────────────────────────────────
+  async function openLoadTplModal() {
+    setShowLoadTpl(true);
+    setLoadTplSel(null);
+    setLoadTplMode(null);
+    setLoadTplDest(null);
+    setTplTreeLoading(true);
+    try {
+      const [{ data: myTree }, { data: common }] = await Promise.all([
+        foldersApi.getTree('templates'),
+        templatesApi.getAll({ scope: 'common' }),
+      ]);
+      setTplTree(myTree);
+      setTplCommon((common as any[]).filter((t: any) => !t.folder_id));
+      setTplTreeExpanded(new Set(myTree.children.map((f: TplFolderNode) => f.id)));
+    } catch { toast.error('Ошибка загрузки шаблонов'); }
+    finally { setTplTreeLoading(false); }
+  }
+
+  async function doLoadFromTemplate() {
+    if (!loadTplSel) return;
+    if (loadTplMode === 'into' && loadTplDest === null) { toast.error('Выберите папку назначения'); return; }
+    try {
+      if (loadTplSel.type === 'folder') {
+        await foldersApi.loadTemplateFolder(loadTplSel.id, loadTplMode!, loadTplMode === 'into' ? loadTplDest : undefined);
+      } else {
+        await foldersApi.loadTemplateSheet(loadTplSel.id, loadTplMode!, loadTplMode === 'into' ? loadTplDest : undefined);
+      }
+      toast.success(`Шаблон «${loadTplSel.name}» загружен`);
+      setShowLoadTpl(false);
+      setLoadTplSel(null);
+      setLoadTplMode(null);
+      setLoadTplDest(null);
+      await loadTree();
+    } catch { toast.error('Ошибка загрузки шаблона'); }
+  }
+
+  function renderTplFolder(folder: TplFolderNode, depth = 0): React.ReactNode {
+    const isOpen = tplTreeExpanded.has(folder.id);
+    const isSelected = loadTplSel?.type === 'folder' && loadTplSel.id === folder.id;
+    return (
+      <div key={folder.id}>
+        <div
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '6px 10px', paddingLeft: 10 + depth * 16,
+            cursor: 'pointer', fontSize: 13,
+            background: isSelected ? 'var(--accent-subtle)' : 'transparent',
+            borderRadius: 4,
+          }}
+          onClick={() => {
+            setTplTreeExpanded(prev => { const s = new Set(prev); s.has(folder.id) ? s.delete(folder.id) : s.add(folder.id); return s; });
+            setLoadTplSel({ type: 'folder', id: folder.id, name: folder.name });
+          }}
+        >
+          <span style={{ fontSize: 11, color: 'var(--muted)', minWidth: 10 }}>{folder.children.length > 0 || folder.items.length > 0 ? (isOpen ? '▼' : '▶') : ''}</span>
+          <span>📁</span>
+          <span>{folder.name}</span>
+        </div>
+        {isOpen && (
+          <>
+            {folder.children.map(c => renderTplFolder(c, depth + 1))}
+            {folder.items.map(t => renderTplItem(t, depth + 1))}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  function renderTplItem(t: TplItem, depth = 0): React.ReactNode {
+    const isSelected = loadTplSel?.type === 'sheet' && loadTplSel.id === t.id;
+    return (
+      <div
+        key={t.id}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '6px 10px', paddingLeft: 10 + depth * 16,
+          cursor: 'pointer', fontSize: 13,
+          background: isSelected ? 'var(--accent-subtle)' : 'transparent',
+          borderRadius: 4,
+        }}
+        onClick={() => setLoadTplSel({ type: 'sheet', id: t.id, name: t.name })}
+      >
+        <span style={{ minWidth: 10 }}></span>
+        <span>≡</span>
+        <span>{t.name}</span>
+      </div>
+    );
   }
 
   // ── Collect all folders flat (for move modal) ─────────────────
@@ -485,6 +619,7 @@ export default function ProjectsPage() {
             <button className="btn-create" onClick={() => { setNewFolderParent(null); setNewFolderName(''); setShowNewFolder(true); }}>
               + Создать папку
             </button>
+            <button className="btn-outline" onClick={openLoadTplModal}>📥 Загрузить шаблон</button>
             <button className="btn-outline" onClick={async () => {
               setShowTrash(true); setTrashLoading(true);
               try { const { data } = await trashApi.getAll(); setTrashItems(data); }
@@ -535,6 +670,9 @@ export default function ProjectsPage() {
               <div className="context-item" onClick={() => { setMoveTarget({ type: 'folder', id: ctx.id }); setMoveDest(null); setCtx(null); }}>
                 Переместить
               </div>
+              <div className="context-item" onClick={() => { setSaveAsTpl({ type: 'folder', id: ctx.id, name: ctx.name }); setSaveAsTplName(ctx.name); setCtx(null); }}>
+                Сохранить как шаблон
+              </div>
               <div className="context-item danger" onClick={() => { deleteFolder(ctx.id, ctx.name); setCtx(null); }}>
                 Удалить
               </div>
@@ -552,6 +690,9 @@ export default function ProjectsPage() {
               </div>
               <div className="context-item" onClick={() => { setMoveTarget({ type: 'sheet', id: ctx.id }); setMoveDest(null); setCtx(null); }}>
                 Переместить
+              </div>
+              <div className="context-item" onClick={() => { setSaveAsTpl({ type: 'sheet', id: ctx.id, name: ctx.name }); setSaveAsTplName(ctx.name); setCtx(null); }}>
+                Сохранить как шаблон
               </div>
               <div className="context-item danger" onClick={() => { deleteSheet(ctx.id, ctx.name); setCtx(null); }}>
                 Удалить
@@ -631,6 +772,138 @@ export default function ProjectsPage() {
               <button className="btn-cancel" onClick={() => setMoveTarget(null)}>Отмена</button>
               <button className="btn-primary" onClick={confirmMove}>Переместить</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save as template modal */}
+      {saveAsTpl && (
+        <div className="modal-overlay" onClick={() => setSaveAsTpl(null)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()}>
+            <div className="modal-title">
+              Сохранить как шаблон — {saveAsTpl.type === 'folder' ? 'папку' : 'лист'}
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
+              {saveAsTpl.type === 'folder'
+                ? 'Папка со всеми листами и подпапками будет сохранена как шаблон.'
+                : 'Лист будет сохранён как шаблон.'}
+            </p>
+            <input
+              className="modal-input"
+              style={{ width: '100%', marginBottom: 16, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg2)', color: 'var(--text)', fontSize: 13 }}
+              value={saveAsTplName}
+              onChange={e => setSaveAsTplName(e.target.value)}
+              placeholder="Название шаблона"
+              autoFocus
+              onKeyDown={e => e.key === 'Enter' && doSaveAsTemplate()}
+            />
+            <div className="modal-actions">
+              <button className="btn-cancel" onClick={() => setSaveAsTpl(null)}>Отмена</button>
+              <button className="btn-primary" onClick={doSaveAsTemplate} disabled={!saveAsTplName.trim()}>
+                Сохранить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Load from template modal */}
+      {showLoadTpl && (
+        <div className="modal-overlay" onClick={() => setShowLoadTpl(false)}>
+          <div className="modal-box" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-title">📥 Загрузить шаблон</div>
+
+            {/* Step 1: pick template */}
+            {!loadTplMode && (
+              <>
+                <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>
+                  Выберите шаблон (папку или лист):
+                </p>
+                <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6, marginBottom: 16, padding: 4 }}>
+                  {tplTreeLoading && <p style={{ color: 'var(--muted)', fontSize: 13, padding: '16px', textAlign: 'center' }}>Загрузка…</p>}
+                  {!tplTreeLoading && tplTree.children.length === 0 && tplTree.items.length === 0 && (
+                    <p style={{ color: 'var(--muted)', fontSize: 13, padding: '16px', textAlign: 'center' }}>Нет шаблонов</p>
+                  )}
+                  {(tplTree.children.length > 0 || tplTree.items.length > 0) && (
+                    <div style={{ padding: '4px 10px 2px', fontSize: 11, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Мои шаблоны</div>
+                  )}
+                  {tplTree.children.map(f => renderTplFolder(f, 0))}
+                  {tplTree.items.map(t => renderTplItem(t, 0))}
+                  {tplCommon.length > 0 && (
+                    <div style={{ padding: '8px 10px 2px', fontSize: 11, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', borderTop: '1px solid var(--border)', marginTop: 4 }}>Общие шаблоны</div>
+                  )}
+                  {tplCommon.map(t => renderTplItem(t, 0))}
+                </div>
+                <div className="modal-actions">
+                  <button className="btn-cancel" onClick={() => setShowLoadTpl(false)}>Отмена</button>
+                  <button className="btn-primary" disabled={!loadTplSel} onClick={() => setLoadTplMode('new')}>
+                    Далее →
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Step 2: pick mode */}
+            {loadTplMode && loadTplDest === null && !(loadTplMode === 'into') && (
+              <>
+                <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>
+                  Шаблон: <strong>{loadTplSel?.name}</strong>
+                </p>
+                <p style={{ fontSize: 13, marginBottom: 12 }}>Куда загрузить?</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+                  <button
+                    className="modal-option"
+                    style={{ padding: '12px 16px', textAlign: 'left', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg2)', cursor: 'pointer', fontSize: 13 }}
+                    onClick={() => doLoadFromTemplate()}
+                  >
+                    <strong>📁 Создать новый проект</strong>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>Шаблон будет загружен как отдельная папка</div>
+                  </button>
+                  <button
+                    className="modal-option"
+                    style={{ padding: '12px 16px', textAlign: 'left', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg2)', cursor: 'pointer', fontSize: 13 }}
+                    onClick={() => setLoadTplMode('into')}
+                  >
+                    <strong>📥 Добавить в существующую папку</strong>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>Выберите папку куда добавить</div>
+                  </button>
+                </div>
+                <div className="modal-actions">
+                  <button className="btn-cancel" onClick={() => setLoadTplMode(null)}>← Назад</button>
+                </div>
+              </>
+            )}
+
+            {/* Step 3: pick target folder for "into" mode */}
+            {loadTplMode === 'into' && (
+              <>
+                <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>
+                  Выберите папку назначения:
+                </p>
+                <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6, marginBottom: 16 }}>
+                  {allFolders.map(f => (
+                    <div
+                      key={f.id}
+                      style={{
+                        padding: '8px 12px',
+                        paddingLeft: 12 + f.depth * 14,
+                        cursor: 'pointer', fontSize: 13,
+                        background: loadTplDest === f.id ? 'var(--accent-subtle)' : 'transparent',
+                      }}
+                      onClick={() => setLoadTplDest(f.id)}
+                    >
+                      📁 {f.name}
+                    </div>
+                  ))}
+                </div>
+                <div className="modal-actions">
+                  <button className="btn-cancel" onClick={() => { setLoadTplMode('new'); setLoadTplDest(null); }}>← Назад</button>
+                  <button className="btn-primary" disabled={loadTplDest === null} onClick={doLoadFromTemplate}>
+                    Загрузить
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

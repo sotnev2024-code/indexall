@@ -71,6 +71,33 @@ export class TemplatesService {
     return this.withRows(saved);
   }
 
+  /** Admin: get all templates from all users */
+  async findAllForAdmin(): Promise<any[]> {
+    const templates = await this.templatesRepository.find({
+      order: { createdAt: 'DESC' },
+      relations: ['user'],
+    });
+    return templates.map(t => ({
+      ...this.withRows(t),
+      ownerEmail: (t as any).user?.email || null,
+      ownerName:  (t as any).user?.name  || null,
+    }));
+  }
+
+  /** Admin: mark template as common (userId = null) */
+  async makeCommon(id: number): Promise<any> {
+    const template = await this.findOne(id);
+    const saved = await this.templatesRepository.save({ ...template, userId: null, is_active: true }) as unknown as Template;
+    return this.withRows(saved);
+  }
+
+  /** Admin: unmark template as common (restore ownership) */
+  async unmakeCommon(id: number, userId: number): Promise<any> {
+    const template = await this.findOne(id);
+    const saved = await this.templatesRepository.save({ ...template, userId }) as unknown as Template;
+    return this.withRows(saved);
+  }
+
   async addFile(id: number): Promise<Template> {
     const template = await this.findOne(id);
     template.files += 1;

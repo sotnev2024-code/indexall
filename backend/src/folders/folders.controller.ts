@@ -10,6 +10,7 @@ import {
   UseGuards,
   Request,
   ParseIntPipe,
+  DefaultValuePipe,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FoldersService } from './folders.service';
@@ -126,5 +127,61 @@ export class FoldersController {
   @ApiOperation({ summary: 'Изменить порядок папок' })
   reorder(@Body('ids') ids: number[], @Request() req) {
     return this.service.reorderFolders(req.user.userId, ids);
+  }
+
+  // ── Save as template ────────────────────────────────────────
+
+  /** POST /folders/:id/save-as-template — save project folder as template folder */
+  @Post(':id/save-as-template')
+  @ApiOperation({ summary: 'Сохранить папку как шаблон' })
+  saveFolderAsTemplate(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('name') name: string,
+    @Body('template_folder_id') templateFolderId: number | null,
+    @Request() req,
+  ) {
+    return this.service.saveFolderAsTemplate(id, req.user.userId, name, templateFolderId ?? null);
+  }
+
+  /** POST /folders/sheets/:id/save-as-template — save sheet as template */
+  @Post('sheets/:id/save-as-template')
+  @ApiOperation({ summary: 'Сохранить лист как шаблон' })
+  saveSheetAsTemplate(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('name') name: string,
+    @Body('template_folder_id') templateFolderId: number | null,
+    @Request() req,
+  ) {
+    return this.service.saveSheetAsTemplate(id, req.user.userId, name, templateFolderId ?? null);
+  }
+
+  // ── Load template ────────────────────────────────────────────
+
+  /** POST /folders/load-template-folder — load template folder into projects */
+  @Post('load-template-folder')
+  @ApiOperation({ summary: 'Загрузить шаблонную папку в проект' })
+  loadTemplateFolder(
+    @Body('template_folder_id') templateFolderId: number,
+    @Body('mode') mode: 'new' | 'into',
+    @Body('target_folder_id') targetFolderId: number | null,
+    @Request() req,
+  ) {
+    return this.service.loadTemplateFolderIntoProject(
+      templateFolderId, req.user.userId, mode, targetFolderId ?? null,
+    );
+  }
+
+  /** POST /folders/load-template-sheet — load single template as sheet */
+  @Post('load-template-sheet')
+  @ApiOperation({ summary: 'Загрузить шаблон-лист в проект' })
+  loadTemplateSheet(
+    @Body('template_id') templateId: number,
+    @Body('mode') mode: 'new' | 'into',
+    @Body('target_folder_id') targetFolderId: number | null,
+    @Request() req,
+  ) {
+    return this.service.loadTemplateAsSheet(
+      templateId, req.user.userId, mode, targetFolderId ?? null,
+    );
   }
 }
