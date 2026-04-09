@@ -272,7 +272,7 @@ export default function CatalogPage() {
               placeholder={mode === 'filter' ? 'Поиск по всем разделам' : 'Поиск по выбранному разделу'}
             />
           </div>
-          <button className="btn-back-to-sheet" onClick={() => router.back()}>
+          <button className="btn-back-to-sheet" onClick={() => activeSheetId ? router.push(`/spec/${activeSheetId}`) : router.back()}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M9 14l-4-4 4-4"/><path d="M5 10h11a4 4 0 010 8h-1"/>
             </svg>

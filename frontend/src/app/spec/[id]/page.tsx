@@ -1611,6 +1611,7 @@ export default function SpecPage() {
                         }
                         if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
                         setCurrentId(s.id);
+                        if (activeProjectId) setActive(activeProjectId, s.id);
                         window.history.replaceState(null, '', `/spec/${s.id}`);
                       }}
                       onDoubleClick={() => startRenameSheet(s)}
