@@ -84,9 +84,10 @@ export class EtmService {
       );
     }
 
+    this.logger.debug(`ETM login response data: ${JSON.stringify(json.data)}`);
     this.sessionKey = String(json.data.session);
     this.sessionExpiry = Date.now() + 7.5 * 60 * 60 * 1000;
-    this.logger.log('ETM session refreshed');
+    this.logger.log(`ETM session refreshed, key=${this.sessionKey}`);
     return this.sessionKey;
   }
 
