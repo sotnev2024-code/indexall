@@ -11,6 +11,13 @@ export class EtmService {
 
   private readonly host = 'ipro.etm.ru';
 
+  /** One connection at a time, no keep-alive — reduces «socket hang up» from picky servers */
+  private readonly httpsAgent = new https.Agent({
+    keepAlive: false,
+    maxSockets: 1,
+    maxFreeSockets: 0,
+  });
+
   private get login() { return process.env.ETM_LOGIN; }
   private get pwd() { return process.env.ETM_PASSWORD; }
 
@@ -20,23 +27,36 @@ export class EtmService {
 
   private etmRequest(method: 'GET' | 'POST', pathWithLeadingSlash: string): Promise<any> {
     return new Promise((resolve, reject) => {
+      const headers: Record<string, string> = {
+        Accept: 'application/json',
+        'User-Agent': 'Mozilla/5.0 (compatible; INDEXALL-Backend/1.0)',
+        Connection: 'close',
+        Host: this.host,
+      };
+      if (method === 'POST') {
+        headers['Content-Length'] = '0';
+      }
+
       const options: https.RequestOptions = {
         hostname: this.host,
         port: 443,
         path: pathWithLeadingSlash,
         method,
-        headers: {
-          Accept: 'application/json',
-          'User-Agent': 'INDEXALL-Backend/1.0',
-        },
-        // Allow slightly older TLS if server requires it
+        agent: this.httpsAgent,
+        servername: this.host,
+        // Prefer IPv4 — часто IPv6 до внешних API с VPS «висят» или рвутся
+        family: 4,
+        // Только TLS 1.2 — у части API ЭТМ/прокси TLS 1.3 даёт обрыв (socket hang up)
         minVersion: 'TLSv1.2' as const,
-        timeout: 60_000,
+        maxVersion: 'TLSv1.2' as const,
+        timeout: 90_000,
+        headers,
       };
 
       const req = https.request(options, (res) => {
         let data = '';
         res.on('data', (chunk) => { data += chunk; });
+        res.on('aborted', () => reject(new Error('ETM response aborted')));
         res.on('end', () => {
           try {
             resolve(JSON.parse(data || '{}'));
