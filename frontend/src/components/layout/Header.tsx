@@ -93,7 +93,7 @@ export default function Header({ breadcrumb = 'Проекты', projectCost, sho
         {/* User menu */}
         <div className="user-menu-wrap">
           <button className="user-btn" onClick={() => setMenuOpen(v => !v)}>
-            <span>{user?.email?.split('@')[0] || 'User'}</span>
+            <span>{user?.name || user?.email?.split('@')[0] || '—'}</span>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
             </svg>
@@ -106,7 +106,7 @@ export default function Header({ breadcrumb = 'Проекты', projectCost, sho
                 </div>
               )}
               <div className="user-menu-item" onClick={() => router.push('/pricing')}>
-                <span>★ Тарифы</span>
+                <span>Тарифы</span>
                 {user?.plan === 'free' && (
                   <span style={{ fontSize: 10, color: '#f5c800', marginLeft: 6, fontWeight: 700 }}>UPGRADE</span>
                 )}

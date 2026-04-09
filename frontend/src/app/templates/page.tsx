@@ -332,18 +332,18 @@ export default function TemplatesPage() {
                 <div className="template-preview-name">{selected.name}</div>
                 <div className="template-preview-meta">
                   {selected.scope === 'common' ? 'Общий шаблон' : 'Мой шаблон'}
-                  {selected.is_favorite ? ' · ★ Избранное' : ''}
+                  {selected.is_favorite ? ' · Избранное' : ''}
                 </div>
                 <div className="template-actions">
                   <button className="btn-primary" style={{ fontSize: 12 }} onClick={() => setApplyModalOpen(true)}>
                     + Добавить в лист
                   </button>
                   <button className="btn-outline" style={{ fontSize: 12 }} onClick={() => toggleFavorite()}>
-                    {selected.is_favorite ? '★' : '☆'} В избранное
+                    {selected.is_favorite ? 'Убрать из избранного' : 'В избранное'}
                   </button>
                   {selected.scope !== 'common' && (
                     <button className="btn-danger" style={{ fontSize: 12 }} onClick={() => deleteTemplate()}>
-                      🗑 Удалить
+                      Удалить
                     </button>
                   )}
                 </div>

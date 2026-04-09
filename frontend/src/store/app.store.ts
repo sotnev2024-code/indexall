@@ -21,15 +21,22 @@ interface AppStore {
   setUnsaved: (v: boolean) => void;
 }
 
+function loadStoredUser(): User | null {
+  if (typeof window === 'undefined') return null;
+  try { const raw = localStorage.getItem('user'); return raw ? JSON.parse(raw) : null; } catch { return null; }
+}
+
 export const useAppStore = create<AppStore>((set) => ({
-  user: null,
+  user: loadStoredUser(),
   token: typeof window !== 'undefined' ? localStorage.getItem('token') : null,
   setAuth: (user, token) => {
     localStorage.setItem('token', token);
+    localStorage.setItem('user', JSON.stringify(user));
     set({ user, token });
   },
   clearAuth: () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('user');
     set({ user: null, token: null });
   },
   activeProjectId: typeof window !== 'undefined' ? (Number(localStorage.getItem('activeProjectId')) || null) : null,
