@@ -1,7 +1,10 @@
 'use client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
+import axios from 'axios';
 import { useAppStore } from '@/store/app.store';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
 function AuthHydrator() {
   const { user, setAuth, clearAuth } = useAppStore();
@@ -9,11 +12,12 @@ function AuthHydrator() {
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token && !user) {
-      import('@/lib/api').then(({ default: api }) => {
-        api.get('/auth/me')
-          .then(({ data }) => setAuth(data, token))
-          .catch(() => clearAuth());
-      });
+      axios.get(`${API_BASE}/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
+      })
+        .then(({ data }) => setAuth(data, token))
+        .catch(() => clearAuth());
     }
   }, []);
 
