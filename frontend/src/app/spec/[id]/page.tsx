@@ -1364,7 +1364,13 @@ export default function SpecPage() {
       // Single request — backend handles 1 req/sec throttling internally
       const { data: prices } = await storesApi.getEtmPrices(articles);
 
+      // Count updates synchronously before setRows (setRows callback is async)
       let updated = 0;
+      for (const { r } of targets) {
+        const price = prices[r.article];
+        if (price != null && price > 0) updated++;
+      }
+
       setRows(prev => {
         const next = [...prev];
         for (const { r, i } of targets) {
@@ -1377,7 +1383,6 @@ export default function SpecPage() {
               store: 'ЭТМ',
               total: calcTotal(priceStr, next[i].qty, next[i].coef),
             };
-            updated++;
           }
         }
         return next;
