@@ -91,10 +91,9 @@ export class EtmService {
       );
     }
 
-    this.logger.debug(`ETM login response data: ${JSON.stringify(json.data)}`);
     this.sessionKey = String(json.data.session);
     this.sessionExpiry = Date.now() + 7.5 * 60 * 60 * 1000;
-    this.logger.log(`ETM session refreshed, key=${this.sessionKey}`);
+    this.logger.log('ETM session refreshed');
     return this.sessionKey;
   }
 
@@ -121,10 +120,11 @@ export class EtmService {
       return null;
     }
 
-    this.logger.debug(`ETM price response for ${article}: ${JSON.stringify(json)}`);
     if (json?.status?.code !== 200 || !json.data) return null;
 
-    const p = json.data.pricewnds ?? json.data.price ?? 0;
+    // API returns data.rows[] array
+    const row = Array.isArray(json.data.rows) ? json.data.rows[0] : json.data;
+    const p = row?.pricewnds ?? row?.price ?? 0;
     return Number(p) > 0 ? Number(p) : null;
   }
 
