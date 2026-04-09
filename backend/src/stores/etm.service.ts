@@ -39,7 +39,7 @@ export class EtmService {
     }
 
     if (method === 'POST') {
-      args.push('-X', 'POST', '-H', 'Content-Length: 0');
+      args.push('--data', '');
     }
 
     args.push(url);
