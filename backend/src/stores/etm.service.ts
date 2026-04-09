@@ -27,6 +27,7 @@ export class EtmService {
   private async curlRequest(url: string, method: 'GET' | 'POST' = 'GET'): Promise<any> {
     const args = [
       '-s',
+      '--show-error',
       '--max-time', '30',
       '-H', 'Accept: application/json',
       '-H', `Host: ${this.host}`,
