@@ -1,9 +1,7 @@
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
-import Providers from '@/components/Providers';
-import NavigationProgress from '@/components/NavigationProgress';
-import ToasterClient from '@/components/ToasterClient';
+import ClientLayout from '@/components/ClientLayout';
 
 const inter = Inter({ subsets: ['latin', 'cyrillic'] });
 
@@ -16,11 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ru">
       <body className={inter.className}>
-        <Providers>
-          <NavigationProgress />
-          {children}
-          <ToasterClient />
-        </Providers>
+        <ClientLayout>{children}</ClientLayout>
       </body>
     </html>
   );
