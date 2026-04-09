@@ -40,6 +40,7 @@ services:
       BOT_SECRET: ${BOT_SECRET:-}
       ETM_LOGIN: ${ETM_LOGIN:-}
       ETM_PASSWORD: ${ETM_PASSWORD:-}
+      ETM_HTTPS_PROXY: ${ETM_HTTPS_PROXY:-}
     volumes:
       - uploads:/app/uploads
 

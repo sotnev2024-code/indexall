@@ -1,7 +1,11 @@
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import * as https from 'https';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 
-/** ETM iPRO API — use Node https instead of fetch (avoids TLS/fetch issues in Docker Alpine). */
+/**
+ * ETM iPRO API — Node https (not fetch).
+ * Если с VPS до ipro.etm.ru обрывается соединение (socket hang up), задайте ETM_HTTPS_PROXY.
+ */
 @Injectable()
 export class EtmService {
   private readonly logger = new Logger(EtmService.name);
@@ -17,6 +21,24 @@ export class EtmService {
     maxSockets: 1,
     maxFreeSockets: 0,
   });
+
+  private proxyAgent: HttpsProxyAgent<string> | null = null;
+
+  private getOutboundAgent(): https.Agent {
+    const proxyUrl = process.env.ETM_HTTPS_PROXY?.trim();
+    if (proxyUrl) {
+      if (!this.proxyAgent) {
+        this.proxyAgent = new HttpsProxyAgent(proxyUrl);
+        this.logger.warn('ETM: outbound traffic uses ETM_HTTPS_PROXY');
+      }
+      return this.proxyAgent;
+    }
+    return this.httpsAgent;
+  }
+
+  private useDirectSocketOpts(): boolean {
+    return !process.env.ETM_HTTPS_PROXY?.trim();
+  }
 
   private get login() { return process.env.ETM_LOGIN; }
   private get pwd() { return process.env.ETM_PASSWORD; }
@@ -37,15 +59,15 @@ export class EtmService {
         headers['Content-Length'] = '0';
       }
 
+      const direct = this.useDirectSocketOpts();
       const options: https.RequestOptions = {
         hostname: this.host,
         port: 443,
         path: pathWithLeadingSlash,
         method,
-        agent: this.httpsAgent,
+        agent: this.getOutboundAgent(),
         servername: this.host,
-        // Prefer IPv4 — часто IPv6 до внешних API с VPS «висят» или рвутся
-        family: 4,
+        ...(direct ? { family: 4 as const } : {}),
         // Только TLS 1.2 — у части API ЭТМ/прокси TLS 1.3 даёт обрыв (socket hang up)
         minVersion: 'TLSv1.2' as const,
         maxVersion: 'TLSv1.2' as const,
@@ -90,8 +112,12 @@ export class EtmService {
     try {
       json = await this.etmRequest('POST', path);
     } catch (e: any) {
-      const msg = e?.message || String(e);
+      let msg = e?.message || String(e);
       this.logger.error(`ETM login network error: ${msg}`);
+      if (/hang up|ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(msg) && !process.env.ETM_HTTPS_PROXY?.trim()) {
+        msg +=
+          ' Прямой доступ с сервера до ipro.etm.ru недоступен — задайте в .env ETM_HTTPS_PROXY (HTTP-прокси с методом CONNECT).';
+      }
       throw new HttpException(`ETM login network error: ${msg}`, HttpStatus.BAD_GATEWAY);
     }
 

@@ -22,7 +22,10 @@ export class StoresController {
   // ── ETM price lookup ──────────────────────────────────────────
   @Get('etm/status')
   getEtmStatus() {
-    return { configured: this.etmService.isConfigured() };
+    return {
+      configured: this.etmService.isConfigured(),
+      usingProxy: !!process.env.ETM_HTTPS_PROXY?.trim(),
+    };
   }
 
   @Post('etm/prices')
