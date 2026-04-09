@@ -113,6 +113,7 @@ export class EtmService {
       return null;
     }
 
+    this.logger.debug(`ETM price response for ${article}: ${JSON.stringify(json)}`);
     if (json?.status?.code !== 200 || !json.data) return null;
 
     const p = json.data.pricewnds ?? json.data.price ?? 0;
