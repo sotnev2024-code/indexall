@@ -9,7 +9,7 @@ function AuthHydrator() {
 
   useEffect(() => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-    if (token && !user) {
+    if (token && !user && authApi?.me) {
       authApi.me()
         .then(({ data }) => setAuth(data, token))
         .catch(() => clearAuth());
