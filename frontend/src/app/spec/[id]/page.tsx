@@ -382,7 +382,13 @@ export default function SpecPage() {
       } catch { /* silent */ }
     }
     const handleVisibility = () => { if (document.visibilityState === 'hidden') autoSaveNow(); };
-    const handleUnload = () => autoSaveNow();
+    const handleUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedRef.current) {
+        e.preventDefault();
+        e.returnValue = '';
+        autoSaveNow();
+      }
+    };
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('beforeunload', handleUnload);
     return () => {
@@ -1595,8 +1601,14 @@ export default function SpecPage() {
                       onClick={async () => {
                         if (currentId === s.id) return;
                         if (hasUnsavedRef.current) {
-                          const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
-                          try { await sheetsApi.saveRows(currentIdRef.current, toSave); hasUnsavedRef.current = false; _setUnsaved(false); } catch {}
+                          const shouldSave = confirm('В текущем листе есть несохранённые изменения.\nСохранить перед переходом?');
+                          if (shouldSave) {
+                            const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
+                            try { await sheetsApi.saveRows(currentIdRef.current, toSave); hasUnsavedRef.current = false; _setUnsaved(false); } catch { toast.error('Ошибка сохранения'); }
+                          } else {
+                            hasUnsavedRef.current = false;
+                            _setUnsaved(false);
+                          }
                         }
                         if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
                         setCurrentId(s.id);
