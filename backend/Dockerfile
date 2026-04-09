@@ -1,8 +1,8 @@
-# Backend Dockerfile
-FROM node:20-alpine
+FROM node:20-bullseye-slim
 
-# Install Python and build tools for native modules (better-sqlite3)
-RUN apk add --no-cache python3 make g++ sqlite-dev curl
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 make g++ libsqlite3-dev curl \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
