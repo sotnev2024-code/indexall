@@ -20,6 +20,8 @@ export class EtmService {
     keepAlive: false,
     maxSockets: 1,
     maxFreeSockets: 0,
+    // Allow all TLS versions — ETM server may reject TLS 1.2-only handshakes in Docker
+    minVersion: 'TLSv1.2' as const,
   });
 
   private proxyAgent: HttpsProxyAgent<string> | null = null;
@@ -68,9 +70,6 @@ export class EtmService {
         agent: this.getOutboundAgent(),
         servername: this.host,
         ...(direct ? { family: 4 as const } : {}),
-        // Только TLS 1.2 — у части API ЭТМ/прокси TLS 1.3 даёт обрыв (socket hang up)
-        minVersion: 'TLSv1.2' as const,
-        maxVersion: 'TLSv1.2' as const,
         timeout: 90_000,
         headers,
       };
