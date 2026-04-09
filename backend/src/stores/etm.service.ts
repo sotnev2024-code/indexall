@@ -29,6 +29,8 @@ export class EtmService {
       '-s',
       '--show-error',
       '--http1.1',
+      '--tlsv1.2',
+      '--tls-max', '1.2',
       '--max-time', '30',
       '-H', 'Accept: application/json',
       '-H', `Host: ${this.host}`,
