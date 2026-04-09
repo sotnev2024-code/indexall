@@ -118,7 +118,7 @@ export default function ProjectsPage() {
         firstLoad.current = false;
       }
       // On subsequent reloads (after move/rename/etc.) keep expanded state as-is
-    } catch (err) { console.error('loadTree error:', err, 'foldersApi:', typeof foldersApi, foldersApi); toast.error('Ошибка загрузки проектов'); }
+    } catch { toast.error('Ошибка загрузки проектов'); }
     finally { setLoading(false); }
   }
 
