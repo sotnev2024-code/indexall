@@ -13,7 +13,7 @@ type TplFolderNode = {
   children: TplFolderNode[];
   items: TplItem[];
 };
-type TplItem = { id: number; name: string; folder_id: number | null };
+type TplItem = { id: number; name: string; folder_id: number | null; rows?: any[] };
 
 const formatMoney = (n: number) =>
   n ? n.toLocaleString('ru-RU', { minimumFractionDigits: 2 }) + ' ₽' : '–';
@@ -94,7 +94,7 @@ export default function ProjectsPage() {
   const [tplCommon, setTplCommon] = useState<TplItem[]>([]);
   const [tplTreeLoading, setTplTreeLoading] = useState(false);
   const [tplTreeExpanded, setTplTreeExpanded] = useState<Set<number>>(new Set());
-  const [loadTplSel, setLoadTplSel] = useState<{ type: 'folder' | 'sheet'; id: number; name: string } | null>(null);
+  const [loadTplSel, setLoadTplSel] = useState<{ type: 'folder' | 'sheet'; id: number; name: string; rows?: any[]; folderItems?: TplItem[] } | null>(null);
   const [loadTplMode, setLoadTplMode] = useState<'new' | 'into' | null>(null);
   const [loadTplDest, setLoadTplDest] = useState<number | null>(null);
 
@@ -344,7 +344,7 @@ export default function ProjectsPage() {
         templatesApi.getAll({ scope: 'common' }),
       ]);
       setTplTree(myTree);
-      setTplCommon((common as any[]).filter((t: any) => !t.folder_id));
+      setTplCommon(common as any[]);
       setTplTreeExpanded(new Set(myTree.children.map((f: TplFolderNode) => f.id)));
     } catch { toast.error('Ошибка загрузки шаблонов'); }
     finally { setTplTreeLoading(false); }
@@ -383,7 +383,7 @@ export default function ProjectsPage() {
           }}
           onClick={() => {
             setTplTreeExpanded(prev => { const s = new Set(prev); s.has(folder.id) ? s.delete(folder.id) : s.add(folder.id); return s; });
-            setLoadTplSel({ type: 'folder', id: folder.id, name: folder.name });
+            setLoadTplSel({ type: 'folder', id: folder.id, name: folder.name, folderItems: folder.items });
           }}
         >
           <span style={{ fontSize: 11, color: 'var(--muted)', minWidth: 10 }}>{folder.children.length > 0 || folder.items.length > 0 ? (isOpen ? '▼' : '▶') : ''}</span>
@@ -412,7 +412,7 @@ export default function ProjectsPage() {
           background: isSelected ? 'var(--accent-subtle)' : 'transparent',
           borderRadius: 4,
         }}
-        onClick={() => setLoadTplSel({ type: 'sheet', id: t.id, name: t.name })}
+        onClick={() => setLoadTplSel({ type: 'sheet', id: t.id, name: t.name, rows: t.rows || [] })}
       >
         <span style={{ minWidth: 10 }}></span>
         <span>≡</span>
@@ -619,13 +619,13 @@ export default function ProjectsPage() {
             <button className="btn-create" onClick={() => { setNewFolderParent(null); setNewFolderName(''); setShowNewFolder(true); }}>
               + Создать папку
             </button>
-            <button className="btn-outline" onClick={openLoadTplModal}>📥 Загрузить шаблон</button>
+            <button className="btn-outline" onClick={openLoadTplModal}>Загрузить шаблон</button>
             <button className="btn-outline" onClick={async () => {
               setShowTrash(true); setTrashLoading(true);
               try { const { data } = await trashApi.getAll(); setTrashItems(data); }
               catch { toast.error('Ошибка загрузки корзины'); }
               finally { setTrashLoading(false); }
-            }}>🗑 Корзина</button>
+            }}>Корзина</button>
           </div>
 
           {/* Table */}
@@ -810,8 +810,8 @@ export default function ProjectsPage() {
       {/* Load from template modal */}
       {showLoadTpl && (
         <div className="modal-overlay" onClick={() => setShowLoadTpl(false)}>
-          <div className="modal-box" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
-            <div className="modal-title">📥 Загрузить шаблон</div>
+          <div className="modal-box" style={{ maxWidth: 760 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-title">Загрузить шаблон</div>
 
             {/* Step 1: pick template */}
             {!loadTplMode && (
@@ -819,20 +819,72 @@ export default function ProjectsPage() {
                 <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 8 }}>
                   Выберите шаблон (папку или лист):
                 </p>
-                <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6, marginBottom: 16, padding: 4 }}>
-                  {tplTreeLoading && <p style={{ color: 'var(--muted)', fontSize: 13, padding: '16px', textAlign: 'center' }}>Загрузка…</p>}
-                  {!tplTreeLoading && tplTree.children.length === 0 && tplTree.items.length === 0 && (
-                    <p style={{ color: 'var(--muted)', fontSize: 13, padding: '16px', textAlign: 'center' }}>Нет шаблонов</p>
-                  )}
-                  {(tplTree.children.length > 0 || tplTree.items.length > 0) && (
-                    <div style={{ padding: '4px 10px 2px', fontSize: 11, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Мои шаблоны</div>
-                  )}
-                  {tplTree.children.map(f => renderTplFolder(f, 0))}
-                  {tplTree.items.map(t => renderTplItem(t, 0))}
-                  {tplCommon.length > 0 && (
-                    <div style={{ padding: '8px 10px 2px', fontSize: 11, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', borderTop: '1px solid var(--border)', marginTop: 4 }}>Общие шаблоны</div>
-                  )}
-                  {tplCommon.map(t => renderTplItem(t, 0))}
+                <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 12, marginBottom: 16, minHeight: 280 }}>
+                  {/* Left: tree */}
+                  <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6, padding: 4 }}>
+                    {tplTreeLoading && <p style={{ color: 'var(--muted)', fontSize: 13, padding: '16px', textAlign: 'center' }}>Загрузка…</p>}
+                    {!tplTreeLoading && tplTree.children.length === 0 && tplTree.items.length === 0 && tplCommon.length === 0 && (
+                      <p style={{ color: 'var(--muted)', fontSize: 13, padding: '16px', textAlign: 'center' }}>Нет шаблонов</p>
+                    )}
+                    {(tplTree.children.length > 0 || tplTree.items.length > 0) && (
+                      <div style={{ padding: '4px 10px 2px', fontSize: 11, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Мои шаблоны</div>
+                    )}
+                    {tplTree.children.map(f => renderTplFolder(f, 0))}
+                    {tplTree.items.map(t => renderTplItem(t, 0))}
+                    {tplCommon.length > 0 && (
+                      <div style={{ padding: '8px 10px 2px', fontSize: 11, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', borderTop: '1px solid var(--border)', marginTop: 4 }}>Общие шаблоны</div>
+                    )}
+                    {tplCommon.map(t => renderTplItem(t, 0))}
+                  </div>
+                  {/* Right: preview */}
+                  <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 12, overflowY: 'auto', maxHeight: 320 }}>
+                    {!loadTplSel && (
+                      <p style={{ color: 'var(--muted)', fontSize: 13, textAlign: 'center', paddingTop: 40 }}>Выберите шаблон слева</p>
+                    )}
+                    {loadTplSel?.type === 'folder' && (
+                      <>
+                        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>📁 {loadTplSel.name}</div>
+                        <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>Листы в папке:</p>
+                        {(loadTplSel.folderItems || []).length === 0
+                          ? <p style={{ fontSize: 12, color: 'var(--muted)' }}>Нет листов</p>
+                          : (loadTplSel.folderItems || []).map(item => (
+                            <div key={item.id} style={{ fontSize: 12, padding: '4px 0', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between' }}>
+                              <span>≡ {item.name}</span>
+                              <span style={{ color: 'var(--muted)' }}>{(item.rows || []).filter((r: any) => r.name || r.article).length} строк</span>
+                            </div>
+                          ))
+                        }
+                      </>
+                    )}
+                    {loadTplSel?.type === 'sheet' && (
+                      <>
+                        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>≡ {loadTplSel.name}</div>
+                        {(loadTplSel.rows || []).filter((r: any) => r.name || r.article).length === 0
+                          ? <p style={{ fontSize: 12, color: 'var(--muted)' }}>Шаблон пустой</p>
+                          : (
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                              <thead>
+                                <tr style={{ background: 'var(--bg2)' }}>
+                                  {['Название', 'Артикул', 'Кол-во'].map(h => (
+                                    <th key={h} style={{ padding: '4px 6px', border: '1px solid var(--border)', textAlign: 'left', fontWeight: 600 }}>{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(loadTplSel.rows || []).filter((r: any) => r.name || r.article).map((r: any, i: number) => (
+                                  <tr key={i}>
+                                    <td style={{ padding: '3px 6px', border: '1px solid var(--border)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</td>
+                                    <td style={{ padding: '3px 6px', border: '1px solid var(--border)', fontFamily: 'monospace' }}>{r.article}</td>
+                                    <td style={{ padding: '3px 6px', border: '1px solid var(--border)' }}>{r.qty}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )
+                        }
+                      </>
+                    )}
+                  </div>
                 </div>
                 <div className="modal-actions">
                   <button className="btn-cancel" onClick={() => setShowLoadTpl(false)}>Отмена</button>

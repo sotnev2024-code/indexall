@@ -96,14 +96,23 @@ export default function TemplatesPage() {
     } catch { toast.error('Ошибка удаления'); }
   }
 
+  function patchFolderTree(tree: { children: FolderNode[]; items: any[] }, id: number, patch: any): { children: FolderNode[]; items: any[] } {
+    function patchNode(n: FolderNode): FolderNode {
+      return { ...n, children: n.children.map(patchNode), items: n.items.map(t => t.id === id ? { ...t, ...patch } : t) };
+    }
+    return { children: tree.children.map(patchNode), items: tree.items.map(t => t.id === id ? { ...t, ...patch } : t) };
+  }
+
   async function toggleFavorite(tmpl?: any) {
     const target = tmpl || selected;
     if (!target) return;
     try {
       await templatesApi.toggleFavorite(target.id);
-      const updated = { ...target, is_favorite: !target.is_favorite };
+      const patch = { is_favorite: !target.is_favorite };
+      const updated = { ...target, ...patch };
       if (selected?.id === target.id) setSelected(updated);
       setTemplates(prev => prev.map(t => t.id === target.id ? updated : t));
+      setFolderTree(prev => patchFolderTree(prev, target.id, patch));
       toast.success(updated.is_favorite ? 'Добавлено в избранное' : 'Убрано из избранного');
     } catch { toast.error('Ошибка'); }
   }
