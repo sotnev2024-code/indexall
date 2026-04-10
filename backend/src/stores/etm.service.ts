@@ -77,23 +77,25 @@ export class EtmService {
     this.userSessions.delete(userId);
   }
 
-  private async getUserSession(userId: number): Promise<string | null> {
-    // Check in-memory cache
-    const cached = this.userSessions.get(userId);
-    if (cached && Date.now() < cached.expiry) return cached.key;
+  private async getUserSession(userId: number, forceRefresh = false): Promise<string | null> {
+    if (!forceRefresh) {
+      // Check in-memory cache
+      const cached = this.userSessions.get(userId);
+      if (cached && Date.now() < cached.expiry) return cached.key;
+    }
 
     // Load from DB
     const cred = await this.credRepo.findOne({ where: { user_id: userId } });
     if (!cred) return null;
 
-    // Check DB session
-    if (cred.session_key && cred.session_expires_at && new Date() < cred.session_expires_at) {
+    // Check DB session (skip if forcing refresh)
+    if (!forceRefresh && cred.session_key && cred.session_expires_at && new Date() < cred.session_expires_at) {
       const expiry = cred.session_expires_at.getTime();
       this.userSessions.set(userId, { key: cred.session_key, expiry });
       return cred.session_key;
     }
 
-    // Re-authenticate
+    // Re-authenticate using saved password
     const password = this.decryptPassword(cred.password_enc);
     const url = `https://${this.host}/api/v1/user/login?log=${encodeURIComponent(cred.login)}&pwd=${encodeURIComponent(password)}`;
     let json: any;
@@ -118,25 +120,53 @@ export class EtmService {
 
   async getPricesForUser(articles: string[], userId?: number): Promise<Record<string, number | null>> {
     if (userId) {
-      const userSession = await this.getUserSession(userId);
+      let userSession = await this.getUserSession(userId);
       if (userSession) {
-        return this.getPricesWithSession(articles, userSession);
+        try {
+          return await this.getPricesWithSession(articles, userSession, userId);
+        } catch (e: any) {
+          if (e?.message === 'SESSION_EXPIRED') {
+            // Force refresh session and retry once
+            this.logger.warn(`ETM session expired for user ${userId}, forcing refresh`);
+            userSession = await this.getUserSession(userId, true);
+            if (userSession) return this.getPricesWithSession(articles, userSession, userId);
+          }
+          throw e;
+        }
       }
       // Fall through to global session if user session unavailable
     }
     return this.getPrices(articles);
   }
 
-  private async getPricesWithSession(articles: string[], session: string): Promise<Record<string, number | null>> {
+  private async getPricesWithSession(
+    articles: string[],
+    session: string,
+    userId?: number,
+  ): Promise<Record<string, number | null>> {
     const unique = [...new Set(articles.filter((a) => a && a.trim()))];
     const results: Record<string, number | null> = {};
     if (unique.length === 0) return results;
 
+    let currentSession = session;
+    let refreshed = false;
+
     for (let i = 0; i < unique.length; i++) {
       const article = unique[i];
       try {
-        results[article] = await this.fetchPrice(article, session);
-      } catch {
+        results[article] = await this.fetchPrice(article, currentSession);
+      } catch (e: any) {
+        if (e?.message === 'SESSION_EXPIRED' && !refreshed && userId) {
+          // Try refreshing session once and retry this article
+          this.logger.warn(`ETM session expired mid-request for user ${userId}, refreshing`);
+          const newSession = await this.getUserSession(userId, true);
+          if (newSession) {
+            currentSession = newSession;
+            refreshed = true;
+            i--; // Retry current article
+            continue;
+          }
+        }
         results[article] = null;
       }
       if (i < unique.length - 1) await this.sleep(1100);
@@ -238,7 +268,14 @@ export class EtmService {
       return null;
     }
 
-    if (json?.status?.code !== 200 || !json.data) return null;
+    // ETM returns code 401/403 (or message containing "session"/"auth") when session is invalid
+    const code = json?.status?.code;
+    const msg = String(json?.status?.message || '').toLowerCase();
+    if (code === 401 || code === 403 || msg.includes('session') || msg.includes('auth') || msg.includes('unauthor')) {
+      throw new Error('SESSION_EXPIRED');
+    }
+
+    if (code !== 200 || !json.data) return null;
 
     // API returns data.rows[] array
     const row = Array.isArray(json.data.rows) ? json.data.rows[0] : json.data;
