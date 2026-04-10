@@ -290,7 +290,6 @@ export default function SpecPageClient() {
   const focusSnapshotRef = useRef<any[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshProgress, setRefreshProgress] = useState<{ done: number; total: number } | null>(null);
-  const [priceSourceModal, setPriceSourceModal] = useState(false);
   const [etmUnconfigured, setEtmUnconfigured] = useState(false);
   useEffect(() => { rowsRef.current = rows; }, [rows]);
 
@@ -1437,13 +1436,8 @@ export default function SpecPageClient() {
     } catch { toast.error('Ошибка экспорта'); }
   }
 
-  function handleRefreshPrices() {
-    setPriceSourceModal(true);
-  }
-
-  async function handleRefreshFromEtm() {
-    setPriceSourceModal(false);
-    // Check ETM credentials
+  async function handleRefreshPrices() {
+    // Check ETM credentials first
     try {
       const { data: creds } = await storesApi.getEtmCredentials();
       if (!creds?.configured) {
@@ -1490,48 +1484,6 @@ export default function SpecPageClient() {
       setRefreshing(false);
       setRefreshProgress(null);
     }
-  }
-
-  async function handleRefreshFromPricelist() {
-    setPriceSourceModal(false);
-    if (pricelists.length === 0) { toast('Нет активных прайсов. Загрузите прайс в разделе Администратор.'); return; }
-
-    const targets = rowsRef.current
-      .map((r, i) => ({ r, i }))
-      .filter(({ r }) => r.article);
-    if (targets.length === 0) { toast('Нет строк с артикулом'); return; }
-
-    setRefreshing(true);
-    const snap = JSON.parse(JSON.stringify(rowsRef.current));
-    const articles = targets.map(({ r }) => r.article as string);
-
-    try {
-      const { data: prices } = await catalogApi.getPricesByArticles(articles);
-      let updated = 0;
-      for (const { r } of targets) { if (prices[r.article] != null) updated++; }
-
-      setRows(prev => {
-        const next = [...prev];
-        for (const { r, i } of targets) {
-          const entry = prices[r.article];
-          if (entry != null) {
-            const priceStr = String(entry.price);
-            next[i] = {
-              ...next[i],
-              price: priceStr,
-              store: entry.manufacturer || next[i].store,
-              auto_price: false,
-              total: calcTotal(priceStr, next[i].qty, next[i].coef),
-            };
-          }
-        }
-        return next;
-      });
-
-      if (updated > 0) { pushHistorySnapshot(snap); setUnsaved(true); toast.success(`Прайс: обновлено ${updated} из ${targets.length} цен`); }
-      else toast('Прайс: цены не найдены. Загрузите актуальный прайс в Администраторе.');
-    } catch { toast.error('Ошибка загрузки цен из прайса'); }
-    finally { setRefreshing(false); }
   }
 
   const sheetTotal = rows.reduce((s, r) => {
@@ -2029,37 +1981,6 @@ export default function SpecPageClient() {
       />
 
       {/* ── Price source modal ── */}
-      {priceSourceModal && (
-        <div className="modal-overlay" onClick={() => setPriceSourceModal(false)}>
-          <div className="modal-box" style={{ maxWidth: 380, padding: 28 }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Обновить цены</h3>
-            <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 20 }}>Выберите источник цен:</p>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                className="btn-primary"
-                style={{ flex: 1, padding: '10px 0', fontSize: 13 }}
-                onClick={handleRefreshFromPricelist}
-                disabled={pricelists.length === 0}
-                title={pricelists.length === 0 ? 'Нет активных прайсов' : ''}
-              >
-                Из прайса
-              </button>
-              <button
-                className="btn-outline"
-                style={{ flex: 1, padding: '10px 0', fontSize: 13 }}
-                onClick={handleRefreshFromEtm}
-              >
-                ЭТМ
-              </button>
-            </div>
-            {pricelists.length === 0 && (
-              <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 8 }}>Прайс недоступен — загрузите его в разделе Администратор</p>
-            )}
-            <button className="btn-cancel" style={{ width: '100%', marginTop: 10 }} onClick={() => setPriceSourceModal(false)}>Отмена</button>
-          </div>
-        </div>
-      )}
-
       {/* ── ETM not configured modal ── */}
       {etmUnconfigured && (
         <div className="modal-overlay" onClick={() => setEtmUnconfigured(false)}>
