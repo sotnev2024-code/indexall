@@ -1451,8 +1451,8 @@ export default function SpecPageClient() {
 
     const targets = rowsRef.current
       .map((r, i) => ({ r, i }))
-      .filter(({ r }) => r.article && r.store === 'ЭТМ');
-    if (targets.length === 0) { toast('Нет строк с магазином ЭТМ'); return; }
+      .filter(({ r }) => r.article && (!r.store || r.store === 'ЭТМ' || r.store.toUpperCase() === 'ETM'));
+    if (targets.length === 0) { toast('Нет строк с артикулом для обновления'); return; }
 
     setRefreshing(true);
     setRefreshProgress({ done: 0, total: targets.length });
