@@ -7,12 +7,13 @@ import { User } from '../users/user.entity';
 import { Project } from '../projects/project.entity';
 import { Sheet } from '../sheets/sheet.entity';
 import { Template } from '../templates/template.entity';
+import { Folder } from '../folders/folder.entity';
 import { PriceList, Manufacturer, CatalogProduct, CatalogTile, CatalogCategory } from '../catalog/entities/catalog.entities';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
-      User, Project, Sheet, Template,
+      User, Project, Sheet, Template, Folder,
       PriceList, Manufacturer, CatalogProduct, CatalogTile, CatalogCategory,
       TariffOperation, TariffConfig,
     ]),

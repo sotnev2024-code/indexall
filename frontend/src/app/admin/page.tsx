@@ -83,9 +83,12 @@ export default function AdminPage() {
 
   // Templates
   const [adminTemplates, setAdminTemplates] = useState<any[]>([]);
+  const [tmplTree, setTmplTree] = useState<{ users: any[]; common: any[] }>({ users: [], common: [] });
   const [tmplSearch, setTmplSearch] = useState('');
   const [tmplUserFilter, setTmplUserFilter] = useState('');
   const [tmplPreview, setTmplPreview] = useState<any | null>(null);
+  const [expandedUsers, setExpandedUsers] = useState<Set<number>>(new Set());
+  const [expandedFolders, setExpandedFolders] = useState<Set<number>>(new Set());
 
   // Tiles (Каталог: База)
   const [tiles, setTiles] = useState<any[]>([]);
@@ -170,8 +173,14 @@ export default function AdminPage() {
     catch { toast.error('Ошибка загрузки статистики'); }
   }
   async function loadAdminTemplates() {
-    try { const { data } = await adminApi.getAdminTemplates(); setAdminTemplates(data); }
-    catch { toast.error('Ошибка загрузки шаблонов'); }
+    try {
+      const [{ data: list }, { data: tree }] = await Promise.all([
+        adminApi.getAdminTemplates(),
+        adminApi.getAdminTemplatesTree(),
+      ]);
+      setAdminTemplates(list);
+      setTmplTree(tree);
+    } catch { toast.error('Ошибка загрузки шаблонов'); }
   }
   async function loadTiles() {
     try { const { data } = await catalogApi.getTilesAll(); setTiles(data); }
@@ -259,6 +268,15 @@ export default function AdminPage() {
       toast.success('Шаблон добавлен в Общие');
       loadAdminTemplates();
     } catch { toast.error('Ошибка публикации шаблона'); }
+  }
+
+  async function handlePublishFolder(folder: any) {
+    if (!confirm(`Опубликовать папку «${folder.name}» со всем содержимым в Общие шаблоны?\nСоздастся независимая копия — оригинал останется у пользователя.`)) return;
+    try {
+      await adminApi.publishFolderAsCommon(folder.id);
+      toast.success('Папка опубликована в Общие');
+      loadAdminTemplates();
+    } catch { toast.error('Ошибка публикации папки'); }
   }
 
   async function handleToggleTemplateActive(t: any) {
@@ -821,125 +839,158 @@ export default function AdminPage() {
 
           {/* ── Шаблоны ── */}
           {tab === 'templates' && (() => {
-            const uniqueUsers = Array.from(
-              new Map(adminTemplates.filter(t => t.userId).map(t => [t.userId, t.userName || t.userEmail || fmtId(t.userId)])).entries()
-            );
-            const filtered = adminTemplates.filter(t => {
-              const matchName = !tmplSearch || t.name.toLowerCase().includes(tmplSearch.toLowerCase());
-              const matchUser = !tmplUserFilter || String(t.userId) === tmplUserFilter;
-              return matchName && matchUser;
-            });
             const COLS = ['name', 'brand', 'article', 'qty', 'unit', 'price', 'store', 'coef', 'total', 'deadline'];
             const COL_LABELS: Record<string, string> = { name: 'Название', brand: 'Бренд', article: 'Артикул', qty: 'Кол-во', unit: 'Ед.', price: 'Цена', store: 'Магазин', coef: 'Коэф.', total: 'Итого', deadline: 'Срок' };
+
+            const matchName = (name: string) => !tmplSearch || name.toLowerCase().includes(tmplSearch.toLowerCase());
+
+            const toggleUser = (uid: number) => {
+              setExpandedUsers(prev => {
+                const next = new Set(prev);
+                if (next.has(uid)) next.delete(uid); else next.add(uid);
+                return next;
+              });
+            };
+            const toggleFolder = (fid: number) => {
+              setExpandedFolders(prev => {
+                const next = new Set(prev);
+                if (next.has(fid)) next.delete(fid); else next.add(fid);
+                return next;
+              });
+            };
+
+            const renderFolder = (folder: any, depth: number) => {
+              const isOpen = expandedFolders.has(folder.id);
+              const visibleItems = folder.items.filter((it: any) => matchName(it.name));
+              const hasMatchingChildren = (f: any): boolean =>
+                f.items.some((it: any) => matchName(it.name)) || f.children.some(hasMatchingChildren);
+              if (tmplSearch && !hasMatchingChildren(folder)) return null;
+              return (
+                <div key={folder.id} style={{ marginLeft: depth * 18 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0' }}>
+                    <button
+                      onClick={() => toggleFolder(folder.id)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, padding: 0, width: 16 }}
+                    >
+                      {isOpen ? '▾' : '▸'}
+                    </button>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>📁 {folder.name}</span>
+                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>({visibleItems.length})</span>
+                    <button
+                      className="btn-primary"
+                      style={{ fontSize: 10, padding: '2px 8px', marginLeft: 8 }}
+                      onClick={() => handlePublishFolder(folder)}
+                      title="Опубликовать всю папку в Общие шаблоны"
+                    >
+                      → В общие
+                    </button>
+                  </div>
+                  {isOpen && (
+                    <div style={{ marginLeft: 22 }}>
+                      {folder.children.map((c: any) => renderFolder(c, depth + 1))}
+                      {visibleItems.map((t: any) => renderTemplateItem(t))}
+                    </div>
+                  )}
+                </div>
+              );
+            };
+
+            const renderTemplateItem = (t: any) => (
+              <div
+                key={t.id}
+                onClick={() => setTmplPreview(tmplPreview?.id === t.id ? null : t)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px',
+                  cursor: 'pointer', borderRadius: 4,
+                  background: tmplPreview?.id === t.id ? 'var(--bg)' : 'transparent',
+                  fontSize: 12,
+                }}
+              >
+                <span>📄</span>
+                <span style={{ flex: 1 }}><strong>{t.name}</strong></span>
+                <span style={{ color: 'var(--muted)', fontSize: 11 }}>{t.rowCount} стр.</span>
+                <span style={{
+                  padding: '1px 6px', borderRadius: 4, fontSize: 10, whiteSpace: 'nowrap',
+                  background: t.scope === 'common' ? (t.is_active ? '#d1fae5' : '#fee2e2') : '#fef9c3',
+                  color: t.scope === 'common' ? (t.is_active ? '#065f46' : '#991b1b') : '#78350f',
+                }}>
+                  {t.scope === 'common' ? (t.is_active ? 'Общий' : 'Скрыт') : 'Личный'}
+                </span>
+                <span onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 4 }}>
+                  {t.scope !== 'common' && (
+                    <button className="btn-primary" style={{ fontSize: 10, padding: '2px 8px' }} onClick={() => handlePublishTemplate(t)}>→ В общие</button>
+                  )}
+                  {t.scope === 'common' && (
+                    <button className="btn-outline" style={{ fontSize: 10, padding: '2px 8px' }} onClick={() => handleToggleTemplateActive(t)}>
+                      {t.is_active ? 'Скрыть' : 'Показать'}
+                    </button>
+                  )}
+                </span>
+              </div>
+            );
+
             return (
               <>
                 <div className="admin-section-title">Шаблоны пользователей</div>
 
-                {/* Toolbar */}
                 <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
                   <input
                     value={tmplSearch}
                     onChange={e => setTmplSearch(e.target.value)}
                     placeholder="Поиск по названию…"
-                    style={{ padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, width: 220 }}
+                    style={{ padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, width: 240 }}
                   />
-                  <select
-                    value={tmplUserFilter}
-                    onChange={e => setTmplUserFilter(e.target.value)}
-                    style={{ padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13 }}
-                  >
-                    <option value="">Все пользователи</option>
-                    <option value="null">Общие (нет автора)</option>
-                    {uniqueUsers.map(([uid, uname]) => (
-                      <option key={uid} value={String(uid)}>{fmtId(Number(uid))} {uname}</option>
-                    ))}
-                  </select>
-                  <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 'auto' }}>
-                    Найдено: {filtered.length}
-                  </span>
                 </div>
 
-                {/* Two-panel layout */}
                 <div style={{ display: 'grid', gridTemplateColumns: tmplPreview ? '1fr 1fr' : '1fr', gap: 16, alignItems: 'start' }}>
 
-                  {/* Left: template list */}
-                  <div style={{ overflowX: 'auto' }}>
-                    <table className="admin-table" style={{ minWidth: 580 }}>
-                      <thead>
-                        <tr>
-                          <th>Автор</th>
-                          <th>Дата</th>
-                          <th>Название шаблона</th>
-                          <th>Статус</th>
-                          <th>Строк</th>
-                          <th></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filtered.map(t => (
-                          <tr
-                            key={t.id}
-                            style={{ cursor: 'pointer', background: tmplPreview?.id === t.id ? 'var(--bg)' : undefined }}
-                            onClick={() => setTmplPreview(tmplPreview?.id === t.id ? null : t)}
+                  {/* Left: tree */}
+                  <div style={{ background: '#fff', border: '1px solid var(--border)', borderRadius: 8, padding: 14 }}>
+                    {/* Common templates section */}
+                    {tmplTree.common.length > 0 && (
+                      <div style={{ marginBottom: 14 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: '#065f46' }}>🌐 Общие шаблоны</div>
+                        {tmplTree.common.filter((t: any) => matchName(t.name)).map(renderTemplateItem)}
+                      </div>
+                    )}
+
+                    {/* Per-user trees */}
+                    {tmplTree.users.map(u => {
+                      const isOpen = expandedUsers.has(u.userId);
+                      const looseFiltered = u.looseTemplates.filter((t: any) => matchName(t.name));
+                      const folderHasMatch = (f: any): boolean =>
+                        f.items.some((it: any) => matchName(it.name)) || f.children.some(folderHasMatch);
+                      const visibleFolders = tmplSearch ? u.folders.filter(folderHasMatch) : u.folders;
+                      if (tmplSearch && visibleFolders.length === 0 && looseFiltered.length === 0) return null;
+                      return (
+                        <div key={u.userId} style={{ marginBottom: 6, borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                          <div
+                            onClick={() => toggleUser(u.userId)}
+                            style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '4px 0' }}
                           >
-                            <td style={{ fontSize: 12 }}>
-                              {t.userId ? <><strong>{fmtId(t.userId)}</strong> {t.userName || ''}</> : <span style={{ color: 'var(--muted)' }}>—</span>}
-                            </td>
-                            <td style={{ fontSize: 11, whiteSpace: 'nowrap', color: 'var(--muted)' }}>{fmtDate(t.createdAt)}</td>
-                            <td><strong>{t.name}</strong></td>
-                            <td>
-                              <span style={{
-                                padding: '2px 8px', borderRadius: 4, fontSize: 11, whiteSpace: 'nowrap',
-                                background: t.scope === 'common'
-                                  ? (t.is_active ? '#d1fae5' : '#fee2e2')
-                                  : '#fef9c3',
-                                color: t.scope === 'common'
-                                  ? (t.is_active ? '#065f46' : '#991b1b')
-                                  : '#78350f',
-                              }}>
-                                {t.scope === 'common'
-                                  ? (t.is_active ? '🌐 Общий' : '🚫 Скрыт')
-                                  : '🔒 Личный'}
-                              </span>
-                            </td>
-                            <td style={{ textAlign: 'center', fontSize: 12 }}>{(t.rows || []).filter((r: any) => r.name || r.article).length}</td>
-                            <td onClick={e => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
-                              {t.scope !== 'common' && (
-                                <button
-                                  className="btn-primary"
-                                  style={{ fontSize: 10, padding: '3px 8px', marginRight: 4 }}
-                                  onClick={() => handlePublishTemplate(t)}
-                                  title="Создать независимую копию в Общих шаблонах"
-                                >
-                                  → В общие
-                                </button>
+                            <span style={{ fontSize: 14 }}>{isOpen ? '▾' : '▸'}</span>
+                            <span style={{ fontSize: 14 }}>👤</span>
+                            <strong style={{ fontSize: 13 }}>{u.userName || u.userEmail || `User ${u.userId}`}</strong>
+                            <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                              {u.userEmail && u.userName ? u.userEmail : ''}
+                            </span>
+                          </div>
+                          {isOpen && (
+                            <div style={{ marginLeft: 22, marginTop: 4 }}>
+                              {visibleFolders.map((f: any) => renderFolder(f, 0))}
+                              {looseFiltered.map(renderTemplateItem)}
+                              {visibleFolders.length === 0 && looseFiltered.length === 0 && (
+                                <div style={{ fontSize: 12, color: 'var(--muted)', padding: 4 }}>Нет шаблонов</div>
                               )}
-                              {t.scope === 'common' && (
-                                <button
-                                  className="btn-outline"
-                                  style={{ fontSize: 10, padding: '3px 8px', marginRight: 4 }}
-                                  onClick={() => handleToggleTemplateActive(t)}
-                                  title={t.is_active ? 'Скрыть из общих (деактивировать)' : 'Показать в общих (активировать)'}
-                                >
-                                  {t.is_active ? '👁 Скрыть' : '👁 Показать'}
-                                </button>
-                              )}
-                              <button
-                                className="btn-outline"
-                                style={{ fontSize: 10, padding: '3px 8px' }}
-                                onClick={() => handleCopyTemplateRows(t)}
-                                title="Скопировать содержимое в буфер"
-                              >
-                                📋
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                        {filtered.length === 0 && (
-                          <tr><td colSpan={6} style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Нет шаблонов</td></tr>
-                        )}
-                      </tbody>
-                    </table>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {tmplTree.users.length === 0 && tmplTree.common.length === 0 && (
+                      <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Нет шаблонов</div>
+                    )}
                   </div>
 
                   {/* Right: preview panel */}

@@ -10,6 +10,7 @@ import { User, UserPlan, UserStatus } from '../users/user.entity';
 import { Project } from '../projects/project.entity';
 import { Sheet } from '../sheets/sheet.entity';
 import { Template } from '../templates/template.entity';
+import { Folder } from '../folders/folder.entity';
 import {
   PriceList, PriceListStatus, Manufacturer,
   CatalogProduct, CatalogTile, CatalogCategory,
@@ -52,6 +53,7 @@ export class AdminController implements OnModuleInit {
     @InjectRepository(Project) private projectsRepo: Repository<Project>,
     @InjectRepository(Sheet) private sheetsRepo: Repository<Sheet>,
     @InjectRepository(Template) private templatesRepo: Repository<Template>,
+    @InjectRepository(Folder) private foldersRepo: Repository<Folder>,
     @InjectRepository(PriceList) private plRepo: Repository<PriceList>,
     @InjectRepository(Manufacturer) private manufRepo: Repository<Manufacturer>,
     @InjectRepository(CatalogProduct) private prodRepo: Repository<CatalogProduct>,
@@ -305,6 +307,142 @@ export class AdminController implements OnModuleInit {
         rows,
       };
     });
+  }
+
+  @Get('templates-tree')
+  async getTemplatesTree() {
+    // Load all template-type folders + all templates with users
+    const [folders, templates, users] = await Promise.all([
+      this.foldersRepo.find({ where: { type: 'templates' }, order: { sort_order: 'ASC' } }),
+      this.templatesRepo.find({ relations: ['user'], order: { createdAt: 'DESC' } }),
+      this.usersRepo.find({ select: ['id', 'name', 'email'] }),
+    ]);
+
+    const userMap = new Map(users.map(u => [u.id, u]));
+
+    // Build folder lookup by id
+    const folderMap = new Map<number, any>();
+    for (const f of folders) {
+      folderMap.set(f.id, {
+        id: f.id,
+        name: f.name,
+        parent_id: f.parent_id,
+        owner_id: f.owner_id,
+        children: [],
+        items: [] as any[],
+      });
+    }
+
+    // Wire children
+    const rootFoldersByOwner = new Map<number, any[]>();
+    for (const f of folders) {
+      const node = folderMap.get(f.id)!;
+      if (f.parent_id && folderMap.has(f.parent_id)) {
+        folderMap.get(f.parent_id)!.children.push(node);
+      } else {
+        if (!rootFoldersByOwner.has(f.owner_id)) rootFoldersByOwner.set(f.owner_id, []);
+        rootFoldersByOwner.get(f.owner_id)!.push(node);
+      }
+    }
+
+    // Map templates to their folder or to "loose" by owner
+    const looseByOwner = new Map<number | null, any[]>();
+    for (const t of templates) {
+      let rows: any[] = [];
+      try { const p = JSON.parse(t.meta); if (Array.isArray(p)) rows = p; } catch {}
+      const item = {
+        id: t.id,
+        name: t.name,
+        userId: t.userId,
+        userName: t.user?.name || null,
+        userEmail: t.user?.email || null,
+        folder_id: t.folder_id,
+        createdAt: t.createdAt,
+        scope: t.userId == null ? 'common' : 'user',
+        is_active: t.is_active ?? true,
+        rowCount: rows.filter(r => r.name || r.article).length,
+        rows,
+      };
+      if (t.folder_id && folderMap.has(t.folder_id)) {
+        folderMap.get(t.folder_id)!.items.push(item);
+      } else {
+        const ownerKey = t.userId ?? null;
+        if (!looseByOwner.has(ownerKey)) looseByOwner.set(ownerKey, []);
+        looseByOwner.get(ownerKey)!.push(item);
+      }
+    }
+
+    // Build per-user tree
+    const userIds = new Set<number>();
+    folders.forEach(f => userIds.add(f.owner_id));
+    templates.forEach(t => { if (t.userId) userIds.add(t.userId); });
+
+    const result: any[] = [];
+    for (const uid of userIds) {
+      const u = userMap.get(uid);
+      result.push({
+        userId: uid,
+        userName: u?.name || null,
+        userEmail: u?.email || null,
+        folders: rootFoldersByOwner.get(uid) || [],
+        looseTemplates: looseByOwner.get(uid) || [],
+      });
+    }
+
+    // Common templates (userId == null)
+    const commonLoose = looseByOwner.get(null) || [];
+    return {
+      users: result.sort((a, b) => (a.userEmail || '').localeCompare(b.userEmail || '')),
+      common: commonLoose,
+    };
+  }
+
+  @Post('folders/:id/publish-as-common')
+  async publishFolderAsCommon(@Param('id', ParseIntPipe) id: number) {
+    // Recursively duplicate folder + all sub-folders + all templates as common (userId=null)
+    const sourceFolder = await this.foldersRepo.findOne({ where: { id, type: 'templates' } });
+    if (!sourceFolder) return { ok: false, error: 'Folder not found' };
+
+    const cloneFolder = async (srcId: number, newParentId: number | null): Promise<number> => {
+      const src = await this.foldersRepo.findOne({ where: { id: srcId } });
+      if (!src) throw new Error('source missing');
+      // Common folders are owned by the publisher (admin) but we mark by owner_id=0 convention?
+      // Use parent's owner — but for "common" we want them visible to everyone.
+      // Reuse same scheme: store with owner_id = 0 (special "common" owner)
+      const created = await this.foldersRepo.save(this.foldersRepo.create({
+        name: src.name,
+        parent_id: newParentId,
+        owner_id: 0,
+        type: 'templates',
+        sort_order: src.sort_order,
+      }));
+
+      // Clone templates inside
+      const childTemplates = await this.templatesRepo.find({ where: { folder_id: srcId } });
+      for (const t of childTemplates) {
+        await this.templatesRepo.save(this.templatesRepo.create({
+          name: t.name,
+          meta: t.meta,
+          userId: null as any,
+          folder_id: created.id,
+          files: 0,
+          is_favorite: false,
+          is_active: true,
+          views_count: 0,
+          used_count: 0,
+        } as Partial<Template>));
+      }
+
+      // Recurse into sub-folders
+      const subFolders = await this.foldersRepo.find({ where: { parent_id: srcId, type: 'templates' } });
+      for (const sub of subFolders) {
+        await cloneFolder(sub.id, created.id);
+      }
+      return created.id;
+    };
+
+    const newId = await cloneFolder(id, null);
+    return { ok: true, id: newId };
   }
 
   @Post('templates/:id/publish')
