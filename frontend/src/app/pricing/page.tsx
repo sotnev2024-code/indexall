@@ -111,7 +111,7 @@ function PricingContent() {
   const isCurrentFree  = !plan || plan === 'free';
   const isCurrentTrial = plan === 'trial';
   const isCurrentPro   = plan === 'base' || plan === 'pro' || plan === 'admin';
-  const trialAvailable = canActivateTrial(plan, trialUsed);
+  const trialAvailable = canActivateTrial(user as any);
   // Show trial button when: not logged in, OR on free plan and trial not yet used
   const showTrialBtn = !user || trialAvailable;
 

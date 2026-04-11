@@ -1,5 +1,6 @@
 'use client';
 import dynamic from 'next/dynamic';
+import RequireSubscription from '@/components/RequireSubscription';
 
 const SpecPageClient = dynamic(() => import('./SpecPageClient'), {
   ssr: false,
@@ -7,5 +8,9 @@ const SpecPageClient = dynamic(() => import('./SpecPageClient'), {
 });
 
 export default function SpecPage() {
-  return <SpecPageClient />;
+  return (
+    <RequireSubscription>
+      <SpecPageClient />
+    </RequireSubscription>
+  );
 }

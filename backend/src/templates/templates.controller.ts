@@ -18,7 +18,7 @@ import { Template } from './template.entity';
 
 @ApiTags('templates')
 @Controller('templates')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProGuard)
 @ApiBearerAuth()
 export class TemplatesController {
   constructor(private readonly templatesService: TemplatesService) {}

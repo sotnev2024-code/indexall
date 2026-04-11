@@ -8,6 +8,7 @@ import { useAppStore } from '@/store/app.store';
 import { canUseTemplates } from '@/lib/permissions';
 import ProUpgradeModal from '@/components/ProUpgradeModal';
 import ProBadge from '@/components/ProBadge';
+import RequireSubscription from '@/components/RequireSubscription';
 
 type TplFolderNode = {
   id: number;
@@ -49,6 +50,10 @@ type SheetItem = {
 };
 
 export default function ProjectsPage() {
+  return <RequireSubscription><ProjectsPageInner /></RequireSubscription>;
+}
+
+function ProjectsPageInner() {
   const router = useRouter();
   const { setActive, user } = useAppStore();
   const allowTemplates = canUseTemplates(user?.plan);

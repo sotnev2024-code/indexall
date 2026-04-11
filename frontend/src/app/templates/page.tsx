@@ -7,12 +7,17 @@ import { foldersApi, templatesApi, sheetsApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 import { canUseTemplates } from '@/lib/permissions';
 import ProUpgradeModal from '@/components/ProUpgradeModal';
+import RequireSubscription from '@/components/RequireSubscription';
 
 const SHIELD_TYPES = ['ГРЩ', 'ВРУ', 'ВП', 'РП', 'ПЭСПЗ', 'ЩО', 'ЩС'];
 
 type FolderNode = { id: number; name: string; children: FolderNode[]; items: any[] };
 
 export default function TemplatesPage() {
+  return <RequireSubscription><TemplatesPageInner /></RequireSubscription>;
+}
+
+function TemplatesPageInner() {
   const router = useRouter();
   const { activeSheetId, activeProjectId, user } = useAppStore();
   const allowTemplates = canUseTemplates(user?.plan);

@@ -5,8 +5,13 @@ import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import { catalogApi, sheetsApi, storesApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
+import RequireSubscription from '@/components/RequireSubscription';
 
 export default function CatalogPage() {
+  return <RequireSubscription><CatalogPageInner /></RequireSubscription>;
+}
+
+function CatalogPageInner() {
   const router = useRouter();
   const { activeSheetId } = useAppStore();
   const [mode, setMode] = useState<'manuf' | 'filter'>('filter');

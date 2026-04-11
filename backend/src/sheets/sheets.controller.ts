@@ -13,10 +13,11 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { SheetsService } from './sheets.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { ProGuard } from '../auth/guards/pro.guard';
 
 @ApiTags('sheets')
 @Controller('sheets')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProGuard)
 @ApiBearerAuth()
 export class SheetsController {
   constructor(private readonly service: SheetsService) {}

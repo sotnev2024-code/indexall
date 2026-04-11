@@ -1,58 +1,52 @@
 /**
  * Plan-based permission system.
  *
- * Plans: free | trial | pro | admin
+ * Plans: trial | base | pro | admin (free legacy → treated as no subscription)
  *
- * free  — can create projects, sheets and edit rows. Can browse manufacturer catalogs.
- *         CANNOT: save/load templates, use ETM price integration.
- * trial — full access for 7 days (free, one-time, from free plan only)
- * pro   — full access (monthly or annual subscription)
- * admin — full access + admin panel
+ * Active subscription = paid plan AND (admin OR subscriptionExpiresAt in the future).
+ * Without an active subscription a user sees only the paywall screen.
  */
 
 type Plan = string | null | undefined;
 
-const PRO_PLANS = new Set(['trial', 'base', 'pro', 'admin']);
+const PAID_PLANS = new Set(['trial', 'base', 'pro', 'admin']);
 
-/** Whether the user can edit content (always true now — free can edit too) */
-export function canEdit(_plan: Plan): boolean {
-  return true;
+interface UserLike {
+  plan?: string | null;
+  subscriptionExpiresAt?: string | null;
 }
 
-/** Whether the user can use ETM price integration (PRO only) */
-export function canUseStores(plan: Plan): boolean {
-  return PRO_PLANS.has(plan ?? '');
-}
-
-/** Whether the user can create/edit/delete projects (always true now) */
-export function canManageProjects(_plan: Plan): boolean {
-  return true;
-}
-
-/** Whether the user can apply or create templates (PRO only) */
-export function canUseTemplates(plan: Plan): boolean {
-  return PRO_PLANS.has(plan ?? '');
-}
-
-/** Whether the user is on the PRO plan (or trial/admin) */
-export function isPro(plan: Plan): boolean {
-  return PRO_PLANS.has(plan ?? '');
+/** Whether the user has an active paid (or trial) subscription right now */
+export function hasActiveSubscription(user: UserLike | null | undefined): boolean {
+  if (!user) return false;
+  if (user.plan === 'admin') return true;
+  if (!PAID_PLANS.has(user.plan ?? '')) return false;
+  if (!user.subscriptionExpiresAt) return false;
+  return new Date(user.subscriptionExpiresAt).getTime() > Date.now();
 }
 
 /** Whether the user can activate the free trial */
-export function canActivateTrial(plan: Plan, trialUsed: boolean): boolean {
-  return plan === 'free' && !trialUsed;
+export function canActivateTrial(user: UserLike | null | undefined): boolean {
+  if (!user) return false;
+  return !hasActiveSubscription(user) && !(user as any).trialUsed;
 }
+
+// Legacy plan-only checks (kept so old call sites compile)
+export function canEdit(_plan: Plan): boolean { return true; }
+export function canUseStores(plan: Plan): boolean { return PAID_PLANS.has(plan ?? ''); }
+export function canManageProjects(_plan: Plan): boolean { return true; }
+export function canUseTemplates(plan: Plan): boolean { return PAID_PLANS.has(plan ?? ''); }
+export function isPro(plan: Plan): boolean { return PAID_PLANS.has(plan ?? ''); }
 
 /** Display label for a plan */
 export function planDisplayName(plan: Plan): string {
   switch (plan) {
-    case 'free':   return 'Бесплатный';
+    case 'free':   return 'Без подписки';
     case 'trial':  return 'Пробный (Trial)';
     case 'base':
     case 'pro':    return 'Pro';
     case 'admin':  return 'Администратор';
-    default:       return 'Бесплатный';
+    default:       return 'Без подписки';
   }
 }
 

@@ -13,10 +13,11 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ProjectsService } from './projects.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { ProGuard } from '../auth/guards/pro.guard';
 
 @ApiTags('projects')
 @Controller('projects')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProGuard)
 @ApiBearerAuth()
 export class ProjectsController {
   constructor(private readonly service: ProjectsService) {}

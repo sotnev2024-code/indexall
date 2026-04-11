@@ -19,7 +19,7 @@ import { ProGuard } from '../auth/guards/pro.guard';
 
 @ApiTags('folders')
 @Controller('folders')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ProGuard)
 @ApiBearerAuth()
 export class FoldersController {
   constructor(private readonly service: FoldersService) {}

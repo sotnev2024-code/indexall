@@ -26,7 +26,8 @@ export default function RegisterPage() {
       const { data } = await axios.post(`${API_URL}/auth/register`, { name, email, password });
       if (data.accessToken) {
         localStorage.setItem('token', data.accessToken);
-        router.push('/projects');
+        // New user has no active subscription — go straight to pricing/paywall
+        router.push('/pricing');
       } else {
         setSent(true);
       }
