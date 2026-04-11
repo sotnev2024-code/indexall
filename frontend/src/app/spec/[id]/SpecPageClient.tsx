@@ -1583,15 +1583,8 @@ export default function SpecPageClient() {
       const a = document.createElement('a'); a.href = url; a.download = `${baseName}.xlsx`; a.click();
       URL.revokeObjectURL(url);
       setExportModal(false);
-    } catch (err: any) {
-      // blob responseType means errors arrive as Blob — parse to get actual message
-      try {
-        const text = await (err?.response?.data as Blob)?.text?.();
-        const json = text ? JSON.parse(text) : null;
-        toast.error(json?.message || 'Ошибка экспорта');
-      } catch {
-        toast.error(err?.response?.data?.message || err?.message || 'Ошибка экспорта');
-      }
+    } catch {
+      toast.error('Ошибка экспорта');
     }
     finally { setExportLoading(false); }
   }
