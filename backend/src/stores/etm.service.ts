@@ -256,6 +256,8 @@ export class EtmService {
     return new Promise<void>((r) => setTimeout(r, ms));
   }
 
+  private debugLogged = false;
+
   private async fetchPrice(article: string, session: string): Promise<number | null> {
     const url =
       `https://${this.host}/api/v1/goods/${encodeURIComponent(article)}/price` +
@@ -266,6 +268,12 @@ export class EtmService {
       json = await this.curlRequest(url, 'GET');
     } catch {
       return null;
+    }
+
+    // Log full response once to inspect available fields (delivery time etc.)
+    if (!this.debugLogged && json?.status?.code === 200) {
+      this.logger.log(`ETM RAW RESPONSE for ${article}: ${JSON.stringify(json).slice(0, 2000)}`);
+      this.debugLogged = true;
     }
 
     // ETM returns code 401/403 (or message containing "session"/"auth") when session is invalid
