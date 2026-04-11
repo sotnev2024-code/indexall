@@ -3,6 +3,22 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
+
+const SS_KEY = 'catalog_state_v1';
+
+function loadSavedState() {
+  try {
+    const raw = sessionStorage.getItem(SS_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function saveState(patch: Record<string, unknown>) {
+  try {
+    const prev = loadSavedState() || {};
+    sessionStorage.setItem(SS_KEY, JSON.stringify({ ...prev, ...patch }));
+  } catch { /* ignore */ }
+}
 import { catalogApi, sheetsApi, storesApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 import RequireSubscription from '@/components/RequireSubscription';
@@ -14,26 +30,35 @@ export default function CatalogPage() {
 function CatalogPageInner() {
   const router = useRouter();
   const { activeSheetId } = useAppStore();
-  const [mode, setMode] = useState<'manuf' | 'filter'>('filter');
+
+  // ── Restore persisted state (sync, before first render) ───
+  const saved = (() => { try { return loadSavedState(); } catch { return null; } })();
+
+  const [mode, setMode] = useState<'manuf' | 'filter'>(saved?.mode ?? 'filter');
 
   // ── Manufacturers mode ─────────────────────────────────────
   const [manufacturers, setManufacturers] = useState<any[]>([]);
-  const [manufExpanded, setManufExpanded] = useState<Set<number>>(new Set());
+  const [manufExpanded, setManufExpanded] = useState<Set<number>>(
+    new Set<number>(saved?.manufExpanded ?? [])
+  );
   const [manufTrees, setManufTrees] = useState<Record<number, any[]>>({});
   const [manufTreeLoading, setManufTreeLoading] = useState<Set<number>>(new Set());
-  const [catExpanded, setCatExpanded] = useState<Set<number>>(new Set());
-  const [selectedCatId, setSelectedCatId] = useState<number | null>(null);
+  const [catExpanded, setCatExpanded] = useState<Set<number>>(
+    new Set<number>(saved?.catExpanded ?? [])
+  );
+  const [selectedCatId, setSelectedCatId] = useState<number | null>(saved?.selectedCatId ?? null);
   const [products, setProducts] = useState<any[]>([]);
-  const [breadcrumbPath, setBreadcrumbPath] = useState<string[]>([]);
+  const [breadcrumbPath, setBreadcrumbPath] = useState<string[]>(saved?.breadcrumbPath ?? []);
 
   // ── Filter mode ────────────────────────────────────────────
   const [tiles, setTiles] = useState<any[]>([]);
-  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
-  const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(saved?.selectedSlug ?? null);
+  const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>(saved?.activeFilters ?? {});
   const [filterProducts, setFilterProducts] = useState<any[]>([]);
   const [loadingFilter, setLoadingFilter] = useState(false);
-  // Dynamic filter options loaded from bot_database.db per slug
-  const [dynamicFilters, setDynamicFilters] = useState<{ label: string; opts: string[] }[]>([]);
+  const [dynamicFilters, setDynamicFilters] = useState<{ label: string; opts: string[] }[]>(
+    saved?.dynamicFilters ?? []
+  );
   const [loadingFilters, setLoadingFilters] = useState(false);
 
   // ── Shared ─────────────────────────────────────────────────
@@ -41,11 +66,54 @@ function CatalogPageInner() {
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [showSelectSheet, setShowSelectSheet] = useState(false);
   const detailRef = useRef<HTMLDivElement>(null);
+  // Track whether we've done the initial restore fetch
+  const restoredRef = useRef(false);
 
   useEffect(() => {
     catalogApi.getManufacturers().then(r => setManufacturers(r.data)).catch(() => {});
     catalogApi.getTiles().then(r => setTiles(r.data)).catch(() => {});
   }, []);
+
+  // ── On mount: re-fetch products for restored state ─────────
+  const fetchFilterProducts = useCallback(async (slug: string, filters: Record<string, string[]>) => {
+    setLoadingFilter(true);
+    try {
+      const brands = filters['Производитель'] || [];
+      const { data } = await catalogApi.filterProducts(slug, brands.length ? brands : undefined, filters);
+      setFilterProducts(data);
+    } catch { toast.error('Ошибка загрузки товаров'); }
+    finally { setLoadingFilter(false); }
+  }, []);
+
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    if (saved?.selectedSlug) {
+      // Restore filter mode: refetch products with saved filters
+      fetchFilterProducts(saved.selectedSlug, saved.activeFilters ?? {});
+    } else if (saved?.selectedCatId && saved?.mode === 'manuf') {
+      // Restore manuf mode: expand trees and load products
+      const expandedIds: number[] = saved.manufExpanded ?? [];
+      expandedIds.forEach(async (id: number) => {
+        try {
+          const { data } = await catalogApi.getTree(id);
+          setManufTrees(prev => ({ ...prev, [id]: data }));
+        } catch {}
+      });
+      catalogApi.getProducts(saved.selectedCatId).then(r => setProducts(r.data)).catch(() => {});
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Persist state on change ────────────────────────────────
+  useEffect(() => { saveState({ mode }); }, [mode]);
+  useEffect(() => { saveState({ selectedSlug }); }, [selectedSlug]);
+  useEffect(() => { saveState({ activeFilters }); }, [activeFilters]);
+  useEffect(() => { saveState({ dynamicFilters }); }, [dynamicFilters]);
+  useEffect(() => { saveState({ selectedCatId }); }, [selectedCatId]);
+  useEffect(() => { saveState({ breadcrumbPath }); }, [breadcrumbPath]);
+  useEffect(() => { saveState({ manufExpanded: [...manufExpanded] }); }, [manufExpanded]);
+  useEffect(() => { saveState({ catExpanded: [...catExpanded] }); }, [catExpanded]);
 
   // ── Manufacturer tree ──────────────────────────────────────
   async function toggleManuf(m: any) {
@@ -113,21 +181,6 @@ function CatalogPageInner() {
         ? renderTree(node.children, manufId, manufName, depth + 1) : []),
     ]);
   }
-
-  // ── Filter mode ────────────────────────────────────────────
-  const fetchFilterProducts = useCallback(async (slug: string, filters: Record<string, string[]>) => {
-    setLoadingFilter(true);
-    try {
-      const brands = filters['Производитель'] || [];
-      const { data } = await catalogApi.filterProducts(
-        slug,
-        brands.length ? brands : undefined,
-        filters,
-      );
-      setFilterProducts(data);
-    } catch { toast.error('Ошибка загрузки товаров'); }
-    finally { setLoadingFilter(false); }
-  }, []);
 
   async function selectCategorySlug(slug: string) {
     setSelectedSlug(slug); setActiveFilters({}); setFilterProducts([]);
