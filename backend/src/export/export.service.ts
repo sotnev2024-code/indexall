@@ -95,7 +95,13 @@ export class ExportService {
       // Autofilter on header row
       ws['!autofilter'] = { ref: `A3:K3` };
 
-      XLSX.utils.book_append_sheet(workbook, ws, sheet.name.slice(0, 31));
+      // Excel sheet names: max 31 chars, must be unique, cannot be empty
+      const usedNames = new Set(workbook.SheetNames);
+      let sheetName = (sheet.name || `Лист${data.sheets.indexOf(sheet) + 1}`).slice(0, 28);
+      let attempt = sheetName;
+      let n = 2;
+      while (usedNames.has(attempt)) { attempt = `${sheetName.slice(0, 25)} (${n++})`; }
+      XLSX.utils.book_append_sheet(workbook, ws, attempt);
     }
 
     return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
