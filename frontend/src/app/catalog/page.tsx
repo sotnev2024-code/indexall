@@ -194,11 +194,22 @@ export default function CatalogPage() {
     try {
       const { data: sh } = await sheetsApi.getOne(activeSheetId);
       const existing = (sh.rows || []).filter((r: any) => r.name || r.article);
+      const article = product.article || '';
+
+      // Dedup: if same article already exists → +1 to qty
+      const dupIdx = existing.findIndex((r: any) => r.article === article && article);
+      if (dupIdx >= 0) {
+        const cur = existing[dupIdx];
+        const newQty = String((parseFloat(String(cur.qty || '0').replace(',', '.')) || 0) + 1);
+        existing[dupIdx] = { ...cur, qty: newQty };
+        await sheetsApi.saveRows(activeSheetId, existing);
+        toast.success(`«${product.name.slice(0, 40)}» — количество увеличено`);
+        return;
+      }
 
       // Try to fetch live ETM price + delivery term
       let etmPrice: number | null = null;
       let etmTerm = 'нет';
-      const article = product.article || '';
       if (article) {
         try {
           const { data: etm } = await storesApi.getEtmPricesWithTerms([article]);

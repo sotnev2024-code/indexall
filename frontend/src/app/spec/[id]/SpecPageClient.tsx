@@ -46,6 +46,7 @@ interface RowProps {
   onStoreClick: (rowIdx: number, el: HTMLSelectElement) => void;
   pricelists: string[];
   onStoreChange: (rowIdx: number, store: string) => void;
+  onArticleBlur: (rowIdx: number, article: string) => void;
   inputRef: (el: HTMLElement | null, key: string) => void;
   onFocus: () => void;
   onBlur: () => void;
@@ -62,7 +63,7 @@ interface RowProps {
 }
 
 const SpecRow = memo(function SpecRow({
-  row, idx, isFirst, onUpdate, onSearch, onInputKeyDown, onStoreClick, pricelists, onStoreChange, inputRef, onFocus, onBlur,
+  row, idx, isFirst, onUpdate, onSearch, onInputKeyDown, onStoreClick, pricelists, onStoreChange, onArticleBlur, inputRef, onFocus, onBlur,
   onNonEditableMouseDown,
   activeCellRow, activeCellCol, isEditing, selR1, selC1, selR2, selC2,
   onCellMouseDown, onCellMouseEnter, onCellDoubleClick, onRowContextMenu,
@@ -122,6 +123,7 @@ const SpecRow = memo(function SpecRow({
           {...inputAttrs(2, 'article')}
           value={row.article || ''}
           onChange={e => { onUpdate(idx, 'article', e.target.value); onSearch(e.target.value, idx, 'article', e.target as HTMLInputElement); }}
+          onBlur={(e) => { onBlur(); if (e.target.value.trim()) onArticleBlur(idx, e.target.value.trim()); }}
         />
       </td>
 
@@ -575,6 +577,49 @@ export default function SpecPageClient() {
     }
   }, [allowStores]);
 
+  /**
+   * Called when user blurs the article field after typing manually.
+   * If row name/brand are empty → look up product by article in catalog and auto-fill.
+   * Then trigger ETM fetch for live price + term.
+   */
+  const handleArticleBlur = useCallback(async (rowIdx: number, article: string) => {
+    const row = rowsRef.current[rowIdx];
+    if (!row) return;
+    const needsFill = !row.name?.trim() && !row.brand?.trim();
+    if (needsFill) {
+      try {
+        const { data } = await catalogApi.search(article);
+        const results = (data as any[]) || [];
+        const exact = results.find(p => (p.article || '').toLowerCase() === article.toLowerCase()) || results[0];
+        if (exact) {
+          setRows(prev => {
+            const next = [...prev];
+            const r = next[rowIdx];
+            if (!r || r.article !== article) return prev;
+            const q = r.qty || '1';
+            const c = r.coef || '1';
+            const priceStr = r.price || (exact.price ? String(exact.price) : '');
+            next[rowIdx] = {
+              ...r,
+              name: r.name || exact.name || '',
+              brand: r.brand || exact.manufacturer?.name || exact.brand || '',
+              unit: r.unit || exact.unit || 'шт',
+              price: priceStr,
+              qty: q,
+              coef: c,
+              store: r.store || 'ЭТМ',
+              total: calcTotal(priceStr, q, c),
+            };
+            return next;
+          });
+          setUnsaved(true);
+        }
+      } catch { /* silent */ }
+    }
+    // Always try to fetch live ETM price/term for the article
+    fetchEtmForArticle(article);
+  }, [fetchEtmForArticle, setUnsaved]);
+
   const applyProduct = useCallback((i: number, p: any) => {
     const snap = focusSnapshotRef.current ?? JSON.parse(JSON.stringify(rowsRef.current));
     pushHistorySnapshot(snap);
@@ -591,7 +636,7 @@ export default function SpecPageClient() {
         name: p.name,
         brand: mfr,
         article,
-        unit: p.unit || '',
+        unit: p.unit || next[i].unit || 'шт',
         price: p.price ? String(p.price) : '',
         store: matchedPl || 'ЭТМ',
         auto_price: !matchedPl,
@@ -612,6 +657,19 @@ export default function SpecPageClient() {
     const article = p.article || '';
     setRows((prev) => {
       const next = [...prev];
+      // Dedup: if a row with same article already exists → +1 to qty
+      if (article) {
+        const dupIdx = next.findIndex(r => r.article === article);
+        if (dupIdx >= 0) {
+          const newQty = String(parseNum(next[dupIdx].qty, 0) + 1);
+          next[dupIdx] = {
+            ...next[dupIdx],
+            qty: newQty,
+            total: calcTotal(next[dupIdx].price, newQty, next[dupIdx].coef || '1'),
+          };
+          return next;
+        }
+      }
       const emptyIdx = next.findIndex(r => !r.name && !r.article);
       const targetIdx = emptyIdx >= 0 ? emptyIdx : next.length - 1;
       const q = next[targetIdx].qty || '1';
@@ -621,7 +679,7 @@ export default function SpecPageClient() {
         name: p.name,
         brand: p.manufacturer?.name || p.brand || '',
         article,
-        unit: p.unit || '',
+        unit: p.unit || next[targetIdx].unit || 'шт',
         price: p.price ? String(p.price) : '',
         store: 'ЭТМ',
         auto_price: true,
@@ -1507,17 +1565,6 @@ export default function SpecPageClient() {
 
   async function handleRefreshPrices() {
     if (!requirePro('Актуализация цен из ЭТМ', allowStores)) return;
-    // Check ETM credentials first
-    try {
-      const { data: creds } = await storesApi.getEtmCredentials();
-      if (!creds?.configured) {
-        setEtmUnconfigured(true);
-        return;
-      }
-    } catch {
-      setEtmUnconfigured(true);
-      return;
-    }
 
     const targets = rowsRef.current
       .map((r, i) => ({ r, i }))
@@ -1542,7 +1589,11 @@ export default function SpecPageClient() {
           if (!r.article) continue;
           if (r.store && r.store !== 'ЭТМ' && r.store.toUpperCase() !== 'ETM') continue;
           const entry = data[r.article];
-          if (!entry) continue;
+          // No entry from backend for this article — set deadline to "нет" but keep price empty
+          if (!entry) {
+            next[i] = { ...r, store: 'ЭТМ', deadline: 'нет' };
+            continue;
+          }
           const price = entry.price;
           const term = entry.term || 'нет';
           const priceStr = price != null && price > 0 ? String(price) : '';
@@ -1563,7 +1614,16 @@ export default function SpecPageClient() {
       if (updated > 0) toast.success(`ЭТМ: обновлено ${updated} из ${targets.length}`);
       else toast('ЭТМ: цены не найдены. Проверьте артикулы.');
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Ошибка запроса к ЭТМ');
+      const status = err?.response?.status;
+      const msg = err?.response?.data?.message || '';
+      // 503 — credentials missing, open settings prompt
+      if (status === 503 || /credentials/i.test(msg) || /not configured/i.test(msg)) {
+        setEtmUnconfigured(true);
+      } else if (status === 403) {
+        setProModal({ open: true, feature: 'Актуализация цен из ЭТМ' });
+      } else {
+        toast.error(msg || 'Ошибка запроса к ЭТМ');
+      }
     } finally {
       setRefreshing(false);
       setRefreshProgress(null);
@@ -1838,6 +1898,7 @@ export default function SpecPageClient() {
                   onStoreClick={openStoreDropdown}
                   pricelists={pricelists}
                   onStoreChange={handleStoreChange}
+                  onArticleBlur={handleArticleBlur}
                   inputRef={setInputRef}
                   onFocus={handleCellFocus}
                   onBlur={handleCellBlur}

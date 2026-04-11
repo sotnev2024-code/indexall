@@ -242,13 +242,45 @@ export class EtmService {
   }
 
   /**
+   * Fetch single article price.
+   * Returns price (number) or null. Throws SESSION_EXPIRED on auth failure.
+   */
+  private async fetchSinglePrice(article: string, session: string): Promise<number | null> {
+    const url =
+      `https://${this.host}/api/v1/goods/${encodeURIComponent(article)}/price` +
+      `?type=mnf&sessionid=${encodeURIComponent(session)}`;
+    let json: any;
+    try {
+      json = await this.enqueue(() => this.curlRequest(url, 'GET'));
+    } catch {
+      return null;
+    }
+    const code = json?.status?.code;
+    const msg = String(json?.status?.message || '').toLowerCase();
+    if (code === 401 || code === 403 || msg.includes('session') || msg.includes('auth') || msg.includes('unauthor')) {
+      throw new Error('SESSION_EXPIRED');
+    }
+    if (code !== 200 || !json.data) return null;
+    const row = Array.isArray(json.data.rows) ? json.data.rows[0] : json.data;
+    const p = row?.pricewnds ?? row?.price ?? 0;
+    return Number(p) > 0 ? Number(p) : null;
+  }
+
+  /**
    * Batch fetch prices — up to 50 articles in one request.
    * Returns map: article → price | null.
    * Throws 'SESSION_EXPIRED' if session is invalid.
+   * If batch response row count doesn't match input → fallback to per-article fetch.
    */
   private async fetchPricesBatch(articles: string[], session: string): Promise<Record<string, number | null>> {
     const result: Record<string, number | null> = {};
     if (articles.length === 0) return result;
+
+    // Single article — use direct endpoint
+    if (articles.length === 1) {
+      result[articles[0]] = await this.fetchSinglePrice(articles[0], session);
+      return result;
+    }
 
     // Use ETM batch syntax: comma-separated articles, type=mnf
     const ids = articles.map(a => encodeURIComponent(a)).join('%2C');
@@ -261,7 +293,11 @@ export class EtmService {
       json = await this.enqueue(() => this.curlRequest(url, 'GET'));
     } catch (e: any) {
       this.logger.warn(`ETM batch price error: ${e?.message}`);
-      for (const a of articles) result[a] = null;
+      // Fallback: fetch each article individually
+      for (const a of articles) {
+        try { result[a] = await this.fetchSinglePrice(a, session); }
+        catch (ex: any) { if (ex?.message === 'SESSION_EXPIRED') throw ex; result[a] = null; }
+      }
       return result;
     }
 
@@ -276,16 +312,24 @@ export class EtmService {
       return result;
     }
 
-    // ETM may return data.rows[] for batch — each row has gdscode + price fields.
-    // We need to map back by article — but ETM only returns gdscode (numeric ETM id), not the original article.
-    // For batch with type=mnf the response is per-article in rows but ETM groups by article in rows[].
-    // Since the order may differ, we need a per-article lookup. ETM API spec says one row per requested code.
-    // We map by index: assume order matches input order.
     const rows = Array.isArray(json.data.rows) ? json.data.rows : (json.data ? [json.data] : []);
-    for (let i = 0; i < articles.length; i++) {
-      const row = rows[i];
-      const p = row ? (row.pricewnds ?? row.price ?? 0) : 0;
-      result[articles[i]] = Number(p) > 0 ? Number(p) : null;
+
+    // If row count matches input — assume order preserved (most likely case)
+    if (rows.length === articles.length) {
+      for (let i = 0; i < articles.length; i++) {
+        const row = rows[i];
+        const p = row ? (row.pricewnds ?? row.price ?? 0) : 0;
+        result[articles[i]] = Number(p) > 0 ? Number(p) : null;
+      }
+      return result;
+    }
+
+    // Row count mismatch — ETM may have skipped not-found articles or returned in different order.
+    // Fall back to single-fetch for each article so we get reliable per-article results.
+    this.logger.warn(`ETM batch row count mismatch: requested ${articles.length}, got ${rows.length}. Falling back to single fetches.`);
+    for (const a of articles) {
+      try { result[a] = await this.fetchSinglePrice(a, session); }
+      catch (ex: any) { if (ex?.message === 'SESSION_EXPIRED') throw ex; result[a] = null; }
     }
     return result;
   }
