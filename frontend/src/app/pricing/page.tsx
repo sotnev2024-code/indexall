@@ -16,12 +16,6 @@ interface TariffConfig {
   description: string;
 }
 
-const FREE_FEATURES = [
-  'Просмотр шаблонов и проектов',
-  'Работа с листом спецификации',
-  'Доступны каталоги производителей',
-];
-
 const PAID_FEATURES = [
   'Работа с листом спецификации',
   'Доступны каталоги производителей',
@@ -108,77 +102,47 @@ function PricingContent() {
   const plan = user?.plan;
   const trialUsed = (user as any)?.trialUsed ?? false;
   const expiresAt = (user as any)?.subscriptionExpiresAt;
-  const isCurrentFree  = !plan || plan === 'free';
   const isCurrentTrial = plan === 'trial';
   const isCurrentPro   = plan === 'base' || plan === 'pro' || plan === 'admin';
   const trialAvailable = canActivateTrial(user as any);
-  // Show trial button when: not logged in, OR on free plan and trial not yet used
   const showTrialBtn = !user || trialAvailable;
+
+  const proPlan = plans.pro || plans.base;
+  const monthlyPrice = proPlan?.price ?? 7990;
+  const annualPrice  = proPlan?.price_annual ?? 79900;
 
   return (
     <div style={{ minHeight: '100vh', background: '#f4f4f4' }}>
       <Header breadcrumb="Тарифы" />
 
-      {/* Main content */}
-      <main style={{ padding: '72px 24px 48px', maxWidth: 1100, margin: '0 auto', width: '100%' }}>
-        <h1 style={{ textAlign: 'center', fontSize: 28, fontWeight: 800, marginBottom: 48, letterSpacing: -0.5 }}>
-          Выберите лучший тариф для Вас
+      <main style={{ padding: '72px 24px 48px', maxWidth: 880, margin: '0 auto', width: '100%' }}>
+        <h1 style={{ textAlign: 'center', fontSize: 28, fontWeight: 800, marginBottom: 16, letterSpacing: -0.5 }}>
+          Выберите тариф
         </h1>
+        <p style={{ textAlign: 'center', fontSize: 14, color: '#6b7280', maxWidth: 580, margin: '0 auto 40px' }}>
+          Активируйте бесплатный пробный период на 7 дней или оформите тариф «Базовый».
+        </p>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: showTrialBtn || isCurrentTrial ? '1fr 1fr' : '1fr', gap: 20, maxWidth: showTrialBtn || isCurrentTrial ? 760 : 380, margin: '0 auto' }}>
 
-          {/* ── Card 1: Бесплатный ── */}
+          {/* ── Card 1: Базовый (PRO) ── */}
           <div style={{
-            background: '#fff', borderRadius: 12, padding: 28,
-            border: isCurrentFree ? '2px solid #1a1a1a' : '1px solid #d0d0d0',
+            background: '#fff', borderRadius: 14, padding: 28,
+            border: isCurrentPro ? '2px solid #1a1a1a' : '1px solid #d0d0d0',
             display: 'flex', flexDirection: 'column',
-            boxShadow: isCurrentFree ? '0 2px 16px rgba(0,0,0,0.08)' : 'none',
-          }}>
-            <div style={{ marginBottom: 8 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 800 }}>{plans.free?.name ?? 'Бесплатный'}</h2>
-            </div>
-            <p style={{ fontSize: 12, color: '#666', marginBottom: 20, lineHeight: 1.5 }}>
-              {plans.free?.description ?? 'Просмотр шаблонов и проектов, работа с листом спецификации, доступны каталоги производителей.'}
-            </p>
-            <div style={{ flex: 1, marginBottom: 28 }}>
-              {FREE_FEATURES.map(f => (
-                <div key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 10, fontSize: 12 }}>
-                  <span style={{ color: '#1a1a1a', marginTop: 1, flexShrink: 0 }}>•</span>
-                  <span>{f}</span>
-                </div>
-              ))}
-            </div>
-            <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 16, textAlign: 'center' }}>0 ₽</div>
-            <button
-              disabled
-              style={{
-                background: '#f4f4f4', border: '1px solid #d0d0d0', borderRadius: 8,
-                padding: '10px 0', fontWeight: 700, fontSize: 13, cursor: 'default',
-                width: '100%', color: '#1a1a1a',
-              }}
-            >
-              {isCurrentFree ? 'Используется' : 'Бесплатный тариф'}
-            </button>
-          </div>
-
-          {/* ── Card 2: PRO ── */}
-          <div style={{
-            background: '#fff', borderRadius: 12, padding: 28,
-            border: isCurrentPro ? '2px solid #f5c800' : '1px solid #d0d0d0',
-            display: 'flex', flexDirection: 'column',
-            boxShadow: '0 2px 16px rgba(0,0,0,0.06)',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.06)',
           }}>
             <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 800 }}>{plans.pro?.name ?? 'PRO'}</h2>
-              <span style={{ background: '#f5c800', borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>Все функции</span>
+              <h2 style={{ fontSize: 19, fontWeight: 800 }}>Базовый</h2>
+              <span style={{ background: '#f5c800', borderRadius: 4, padding: '3px 10px', fontSize: 10, fontWeight: 700 }}>Все функции</span>
             </div>
-            <p style={{ fontSize: 12, color: '#666', marginBottom: 20, lineHeight: 1.5 }}>
-              {plans.pro?.description ?? 'Полный доступ ко всем функциям: спецификации, каталог, интеграции, шаблоны, аналоги, аксессуары.'}
+            <p style={{ fontSize: 12, color: '#666', marginBottom: 14, lineHeight: 1.5 }}>
+              Полный доступ ко всем возможностям сервиса.
             </p>
-            <div style={{ flex: 1, marginBottom: 20 }}>
+            <div style={{ flex: 1, marginBottom: 18 }}>
               {PAID_FEATURES.map(f => (
-                <div key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 10, fontSize: 12 }}>
-                  <span style={{ color: '#1a1a1a', marginTop: 1, flexShrink: 0 }}>•</span>
+                <div key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8, fontSize: 13 }}>
+                  <span style={{ color: '#10b981', marginTop: 1, flexShrink: 0 }}>•</span>
                   <span>{f}</span>
                 </div>
               ))}
@@ -190,14 +154,12 @@ function PricingContent() {
               </div>
             )}
 
-            {/* Monthly */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              <div style={{ fontSize: 18, fontWeight: 700 }}>
-                {plans.pro ? fmt(plans.pro.price) : '7 990'} <span style={{ fontWeight: 400, fontSize: 13 }}>₽/месяц</span>
+              <div style={{ fontSize: 20, fontWeight: 800 }}>
+                {fmt(monthlyPrice)} ₽<span style={{ fontWeight: 400, fontSize: 12, color: '#6b7280' }}>/месяц</span>
               </div>
               <button
-                className="btn-primary"
-                style={{ minWidth: 90, justifyContent: 'center' }}
+                style={{ padding: '10px 22px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
                 onClick={() => handleBuy('monthly')}
                 disabled={loading === 'monthly'}
               >
@@ -205,101 +167,87 @@ function PricingContent() {
               </button>
             </div>
 
-            {/* Annual */}
-            {(plans.pro?.price_annual != null || !plans.pro) && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #eee', paddingTop: 10 }}>
-                <div>
-                  <div style={{ fontSize: 18, fontWeight: 700 }}>
-                    {plans.pro ? fmt(plans.pro.price_annual!) : '79 900'} <span style={{ fontWeight: 400, fontSize: 13 }}>₽/год</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #f0f0f0', paddingTop: 12 }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 800 }}>
+                  {fmt(annualPrice)} ₽<span style={{ fontWeight: 400, fontSize: 11, color: '#6b7280' }}>/год</span>
+                </div>
+                <div style={{ fontSize: 10, color: '#10b981', fontWeight: 600 }}>
+                  Экономия {fmt(monthlyPrice * 12 - annualPrice)} ₽
+                </div>
+              </div>
+              <button
+                style={{ padding: '10px 22px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+                onClick={() => handleBuy('annual')}
+                disabled={loading === 'annual'}
+              >
+                {loading === 'annual' ? '...' : isCurrentPro ? 'Продлить' : 'Купить'}
+              </button>
+            </div>
+          </div>
+
+          {/* ── Card 2: Trial — only when available ── */}
+          {(showTrialBtn || isCurrentTrial) && (
+            <div style={{
+              background: '#fff', borderRadius: 14, padding: 28,
+              border: isCurrentTrial ? '2px solid #f5c800' : '1px solid #e5e7eb',
+              display: 'flex', flexDirection: 'column',
+            }}>
+              <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <h2 style={{ fontSize: 19, fontWeight: 800 }}>Пробный</h2>
+                <span style={{ background: '#f5c800', borderRadius: 4, padding: '3px 10px', fontSize: 10, fontWeight: 700 }}>7 дней</span>
+              </div>
+              <p style={{ fontSize: 12, color: '#666', marginBottom: 14, lineHeight: 1.5 }}>
+                7 дней полного доступа ко всем возможностям, бесплатно.
+              </p>
+              <div style={{ flex: 1, marginBottom: 18 }}>
+                {PAID_FEATURES.map(f => (
+                  <div key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 8, fontSize: 13 }}>
+                    <span style={{ color: '#10b981', marginTop: 1, flexShrink: 0 }}>•</span>
+                    <span>{f}</span>
                   </div>
-                  {plans.pro?.price_annual != null && plans.pro?.price && (
-                    <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
-                      Экономия {fmt(plans.pro.price * 12 - plans.pro.price_annual)} ₽
+                ))}
+              </div>
+
+              {isCurrentTrial ? (
+                <div style={{ textAlign: 'center', padding: '10px 0' }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: '#059669' }}>✓ Trial активен</span>
+                  {expiresAt && (
+                    <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>
+                      До {new Date(expiresAt).toLocaleDateString('ru-RU')}
                     </div>
                   )}
                 </div>
-                <button
-                  className="btn-primary"
-                  style={{ minWidth: 90, justifyContent: 'center' }}
-                  onClick={() => handleBuy('annual')}
-                  disabled={loading === 'annual'}
-                >
-                  {loading === 'annual' ? '...' : isCurrentPro ? 'Продлить' : 'Купить'}
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* ── Card 3: Trial ── */}
-          <div style={{
-            background: '#fff', borderRadius: 12, padding: 28,
-            border: isCurrentTrial ? '2px solid #f5c800' : '1px solid #d0d0d0',
-            display: 'flex', flexDirection: 'column',
-            boxShadow: isCurrentTrial ? '0 2px 16px rgba(245,200,0,0.2)' : 'none',
-          }}>
-            <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 800 }}>{plans.trial?.name ?? 'Trial'}</h2>
-              <span style={{ background: '#f5c800', borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>7 дней</span>
-            </div>
-            <p style={{ fontSize: 12, color: '#666', marginBottom: 20, lineHeight: 1.5 }}>
-              {plans.trial?.description ?? '7 дней полного доступа ко всем функциям PRO. Бесплатно, только один раз.'}
-            </p>
-            <div style={{ flex: 1, marginBottom: 28 }}>
-              {PAID_FEATURES.map(f => (
-                <div key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 10, fontSize: 12 }}>
-                  <span style={{ color: '#1a1a1a', marginTop: 1, flexShrink: 0 }}>•</span>
-                  <span>{f}</span>
-                </div>
-              ))}
-            </div>
-
-            {isCurrentTrial ? (
-              <div style={{ textAlign: 'center', padding: '10px 0' }}>
-                <span style={{ fontWeight: 700, fontSize: 13, color: '#059669' }}>✓ Trial активен</span>
-                {expiresAt && (
-                  <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>
-                    До {new Date(expiresAt).toLocaleDateString('ru-RU')}
+              ) : (
+                <>
+                  <div style={{ fontSize: 26, fontWeight: 800, textAlign: 'center', marginBottom: 12 }}>0 ₽</div>
+                  <button
+                    style={{ width: '100%', padding: '12px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}
+                    onClick={handleActivateTrial}
+                    disabled={loading === 'trial'}
+                  >
+                    {loading === 'trial' ? 'Активация…' : 'Оформить'}
+                  </button>
+                  <div style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>
+                    Только один раз, бесплатно
                   </div>
-                )}
-              </div>
-            ) : isCurrentPro ? (
-              <div style={{ textAlign: 'center', padding: '10px 0' }}>
-                <span style={{ fontSize: 12, color: '#888' }}>У вас уже активен PRO тариф</span>
-              </div>
-            ) : trialUsed ? (
-              <div style={{ textAlign: 'center', padding: '10px 0' }}>
-                <span style={{ fontSize: 12, color: '#888' }}>Пробный период уже использован</span>
-              </div>
-            ) : showTrialBtn ? (
-              <div>
-                <div style={{ fontSize: 22, fontWeight: 800, textAlign: 'center', marginBottom: 12 }}>0 ₽</div>
-                <button
-                  className="btn-primary"
-                  style={{ width: '100%', justifyContent: 'center' }}
-                  onClick={handleActivateTrial}
-                  disabled={loading === 'trial'}
-                >
-                  {loading === 'trial' ? 'Активация…' : 'Оформить'}
-                </button>
-                <div style={{ fontSize: 11, color: '#888', textAlign: 'center', marginTop: 8 }}>
-                  Только один раз, бесплатно
-                </div>
-              </div>
-            ) : null}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {(isCurrentPro || isCurrentTrial) && (
+          <div style={{ textAlign: 'center', marginTop: 40 }}>
+            <button
+              className="btn-outline"
+              onClick={() => router.push('/projects')}
+              style={{ fontSize: 13 }}
+            >
+              ← Вернуться к проектам
+            </button>
           </div>
-
-        </div>
-
-        {/* Back link */}
-        <div style={{ textAlign: 'center', marginTop: 40 }}>
-          <button
-            className="btn-outline"
-            onClick={() => router.push('/projects')}
-            style={{ fontSize: 13 }}
-          >
-            ← Вернуться к проектам
-          </button>
-        </div>
+        )}
       </main>
     </div>
   );

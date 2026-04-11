@@ -107,9 +107,6 @@ export default function Header({ breadcrumb = 'Проекты', projectCost, sho
               )}
               <div className="user-menu-item" onClick={() => router.push('/pricing')}>
                 <span>Тарифы</span>
-                {user?.plan === 'free' && (
-                  <span style={{ fontSize: 10, color: '#f5c800', marginLeft: 6, fontWeight: 700 }}>UPGRADE</span>
-                )}
               </div>
               <div className="user-menu-item" onClick={() => router.push('/profile')}>Профиль</div>
               <div className="user-menu-item" onClick={logout}>Выход</div>

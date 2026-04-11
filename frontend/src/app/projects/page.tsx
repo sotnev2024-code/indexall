@@ -5,9 +5,6 @@ import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import { foldersApi, sheetsApi, trashApi, templatesApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
-import { canUseTemplates } from '@/lib/permissions';
-import ProUpgradeModal from '@/components/ProUpgradeModal';
-import ProBadge from '@/components/ProBadge';
 import RequireSubscription from '@/components/RequireSubscription';
 
 type TplFolderNode = {
@@ -55,14 +52,7 @@ export default function ProjectsPage() {
 
 function ProjectsPageInner() {
   const router = useRouter();
-  const { setActive, user } = useAppStore();
-  const allowTemplates = canUseTemplates(user?.plan);
-  const [proModal, setProModal] = useState<{ open: boolean; feature?: string }>({ open: false });
-  const requirePro = (feature: string) => {
-    if (allowTemplates) return true;
-    setProModal({ open: true, feature });
-    return false;
-  };
+  const { setActive } = useAppStore();
 
   const [tree, setTree] = useState<{ children: FolderNode[]; items: SheetItem[] }>({ children: [], items: [] });
   const [loading, setLoading] = useState(true);
@@ -334,7 +324,6 @@ function ProjectsPageInner() {
   // ── Save as template ──────────────────────────────────────────
   async function doSaveAsTemplate() {
     if (!saveAsTpl || !saveAsTplName.trim()) return;
-    if (!requirePro('Сохранение в шаблоны')) return;
     try {
       if (saveAsTpl.type === 'folder') {
         await foldersApi.saveFolderAsTemplate(saveAsTpl.id, saveAsTplName.trim());
@@ -349,7 +338,6 @@ function ProjectsPageInner() {
 
   // ── Load from template ────────────────────────────────────────
   async function openLoadTplModal() {
-    if (!requirePro('Применение шаблонов')) return;
     setShowLoadTpl(true);
     setLoadTplSel(null);
     setLoadTplMode(null);
@@ -636,9 +624,7 @@ function ProjectsPageInner() {
             <button className="btn-create" onClick={() => { setNewFolderParent(null); setNewFolderName(''); setShowNewFolder(true); }}>
               + Создать папку
             </button>
-            <button className="btn-outline" onClick={openLoadTplModal} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              Загрузить шаблон {!allowTemplates && <ProBadge />}
-            </button>
+            <button className="btn-outline" onClick={openLoadTplModal}>Загрузить шаблон</button>
             <button className="btn-outline" onClick={async () => {
               setShowTrash(true); setTrashLoading(true);
               try { const { data } = await trashApi.getAll(); setTrashItems(data); }
@@ -691,11 +677,10 @@ function ProjectsPageInner() {
               </div>
               <div className="context-item" onClick={() => {
                 setCtx(null);
-                if (!requirePro('Сохранение в шаблоны')) return;
                 setSaveAsTpl({ type: 'folder', id: ctx.id, name: ctx.name });
                 setSaveAsTplName(ctx.name);
               }}>
-                Сохранить как шаблон <ProBadge />
+                Сохранить как шаблон
               </div>
               <div className="context-item danger" onClick={() => { deleteFolder(ctx.id, ctx.name); setCtx(null); }}>
                 Удалить
@@ -717,11 +702,10 @@ function ProjectsPageInner() {
               </div>
               <div className="context-item" onClick={() => {
                 setCtx(null);
-                if (!requirePro('Сохранение в шаблоны')) return;
                 setSaveAsTpl({ type: 'sheet', id: ctx.id, name: ctx.name });
                 setSaveAsTplName(ctx.name);
               }}>
-                Сохранить как шаблон <ProBadge />
+                Сохранить как шаблон
               </div>
               <div className="context-item danger" onClick={() => { deleteSheet(ctx.id, ctx.name); setCtx(null); }}>
                 Удалить
@@ -1031,12 +1015,6 @@ function ProjectsPageInner() {
           </div>
         </div>
       )}
-
-      <ProUpgradeModal
-        open={proModal.open}
-        feature={proModal.feature}
-        onClose={() => setProModal({ open: false })}
-      />
     </>
   );
 }

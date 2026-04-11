@@ -5,8 +5,6 @@ import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import { foldersApi, templatesApi, sheetsApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
-import { canUseTemplates } from '@/lib/permissions';
-import ProUpgradeModal from '@/components/ProUpgradeModal';
 import RequireSubscription from '@/components/RequireSubscription';
 
 const SHIELD_TYPES = ['ГРЩ', 'ВРУ', 'ВП', 'РП', 'ПЭСПЗ', 'ЩО', 'ЩС'];
@@ -19,14 +17,7 @@ export default function TemplatesPage() {
 
 function TemplatesPageInner() {
   const router = useRouter();
-  const { activeSheetId, activeProjectId, user } = useAppStore();
-  const allowTemplates = canUseTemplates(user?.plan);
-  const [proModal, setProModal] = useState<{ open: boolean; feature?: string }>({ open: false });
-  const requirePro = (feature: string) => {
-    if (allowTemplates) return true;
-    setProModal({ open: true, feature });
-    return false;
-  };
+  const { activeSheetId, activeProjectId } = useAppStore();
   const [templates, setTemplates] = useState<any[]>([]);
   const [folderTree, setFolderTree] = useState<{ children: FolderNode[]; items: any[] }>({ children: [], items: [] });
   const [selected, setSelected] = useState<any | null>(null);
@@ -70,7 +61,6 @@ function TemplatesPageInner() {
 
   // ── Template actions ──────────────────────────────────────────
   async function applyTemplate(mode: 'new' | 'replace' | 'append') {
-    if (!requirePro('Применение шаблонов')) return;
     if (!selected) { toast.error('Выберите шаблон'); return; }
     const rows = (selected.rows || []).map((r: any, i: number) => ({ ...r, row_number: i + 1 }));
     try {
@@ -352,10 +342,10 @@ function TemplatesPageInner() {
                 <div className="template-actions">
                   <button
                     className="btn-primary"
-                    style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                    onClick={() => { if (requirePro('Применение шаблонов')) setApplyModalOpen(true); }}
+                    style={{ fontSize: 12 }}
+                    onClick={() => setApplyModalOpen(true)}
                   >
-                    + Добавить в лист {!allowTemplates && <span style={{ background: '#f5c800', color: '#1a1a1a', padding: '1px 5px', borderRadius: 3, fontSize: 9, fontWeight: 700 }}>PRO</span>}
+                    + Добавить в лист
                   </button>
                   <button className="btn-outline" style={{ fontSize: 12 }} onClick={() => toggleFavorite()}>
                     {selected.is_favorite ? 'Убрать из избранного' : 'В избранное'}
@@ -467,11 +457,6 @@ function TemplatesPageInner() {
         </div>
       )}
 
-      <ProUpgradeModal
-        open={proModal.open}
-        feature={proModal.feature}
-        onClose={() => setProModal({ open: false })}
-      />
     </>
   );
 }

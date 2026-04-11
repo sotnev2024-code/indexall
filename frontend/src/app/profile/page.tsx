@@ -5,8 +5,6 @@ import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import { authApi, profileApi, paymentsApi, storesApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
-import { canUseStores } from '@/lib/permissions';
-import ProBadge from '@/components/ProBadge';
 
 // ── helpers ──────────────────────────────────────────────────
 
@@ -18,12 +16,12 @@ function daysRemaining(dateStr: string | null | undefined): number | null {
 
 function planLabel(plan: string): string {
   switch (plan) {
-    case 'free':   return 'Бесплатный';
+    case 'free':   return 'Без подписки';
     case 'trial':  return 'Пробный (7 дней)';
     case 'base':
-    case 'pro':    return 'Pro';
+    case 'pro':    return 'Базовый';
     case 'admin':  return 'Администратор';
-    default:       return plan;
+    default:       return 'Без подписки';
   }
 }
 
@@ -100,7 +98,6 @@ function SuccessBanner({ onRefresh }: { onRefresh: () => void }) {
 export default function ProfilePage() {
   const router = useRouter();
   const { user, setAuth } = useAppStore();
-  const allowStores = canUseStores(user?.plan);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -236,9 +233,10 @@ export default function ProfilePage() {
   const plan = user?.plan || 'free';
   const expiresAt = user?.subscriptionExpiresAt;
   const days = daysRemaining(expiresAt);
-  const isBase  = plan === 'base' || plan === 'pro';
-  const isTrial = plan === 'trial';
-  const isFree  = plan === 'free';
+  const subscriptionActive = !!expiresAt && new Date(expiresAt).getTime() > Date.now();
+  const isBase  = (plan === 'base' || plan === 'pro') && subscriptionActive;
+  const isTrial = plan === 'trial' && subscriptionActive;
+  const isFree  = !subscriptionActive && plan !== 'admin';
 
   // ── Subscription block ──────────────────────────────────────
   const subscriptionBlock = (
@@ -286,7 +284,7 @@ export default function ProfilePage() {
       {isTrial && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <p style={{ fontSize: 13, color: '#6b7280', margin: 0 }}>
-            После окончания пробного периода вы перейдёте на бесплатный тариф.
+            После окончания пробного периода доступ к функциям прекратится. Оформите подписку, чтобы продолжить работу.
           </p>
           <button
             onClick={() => router.push('/pricing')}
@@ -419,25 +417,11 @@ export default function ProfilePage() {
         {passwordForm}
 
         {/* ETM integration */}
-        <div style={{ background: '#fff', borderRadius: 12, padding: 24, marginTop: 20, border: '1px solid #e5e7eb', position: 'relative' }}>
-          <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
-            Интеграция с ЭТМ {!allowStores && <ProBadge size="md" />}
-          </h2>
+        <div style={{ background: '#fff', borderRadius: 12, padding: 24, marginTop: 20, border: '1px solid #e5e7eb' }}>
+          <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Интеграция с ЭТМ</h2>
           <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>
             Логин и пароль от личного кабинета ЭТМ iPRO. Используются для получения цен в спецификации.
           </p>
-          {!allowStores && (
-            <div style={{ marginBottom: 14, padding: '10px 14px', background: '#fffbe6', border: '1px solid #f5c800', borderRadius: 8, fontSize: 13, color: '#78350f' }}>
-              Эта настройка доступна только в платном тарифе PRO.
-              <button
-                onClick={() => router.push('/pricing')}
-                style={{ marginLeft: 10, padding: '3px 10px', background: '#1a1a1a', color: '#f5c800', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
-              >
-                Перейти к тарифам
-              </button>
-            </div>
-          )}
-          <fieldset disabled={!allowStores} style={{ border: 'none', padding: 0, margin: 0, opacity: allowStores ? 1 : 0.5 }}>
           {etmSaved && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, padding: '8px 12px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, fontSize: 13 }}>
               <span style={{ color: '#166534', fontWeight: 600 }}>Подключено: {etmLogin}</span>
@@ -461,7 +445,6 @@ export default function ProfilePage() {
               {etmLoading ? 'Сохранение…' : 'Сохранить'}
             </button>
           </form>
-          </fieldset>
         </div>
       </div>
     </>

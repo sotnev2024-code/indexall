@@ -6,9 +6,6 @@ import Header from '@/components/layout/Header';
 import ImportModal from '@/components/ImportModal';
 import { sheetsApi, projectsApi, foldersApi, catalogApi, exportApi, storesApi, templatesApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
-import { canUseStores, canUseTemplates } from '@/lib/permissions';
-import ProUpgradeModal from '@/components/ProUpgradeModal';
-import ProBadge from '@/components/ProBadge';
 
 const MAX_UNDO = 30;
 const STATIC_BRANDS = ['IEK', 'EKF', 'Chint', 'КЗАЗ', 'DEKraft', 'DKC', 'TDM'];
@@ -196,14 +193,10 @@ export default function SpecPageClient() {
   const { id: _routeId } = useParams();
   const router = useRouter();
   const { activeProjectId, setUnsaved: _setUnsaved, setActive, user } = useAppStore();
-  const allowStores = canUseStores(user?.plan);
-  const allowTemplates = canUseTemplates(user?.plan);
-  const [proModal, setProModal] = useState<{ open: boolean; feature?: string }>({ open: false });
-  const requirePro = (feature: string, allowed: boolean) => {
-    if (allowed) return true;
-    setProModal({ open: true, feature });
-    return false;
-  };
+  // RequireSubscription wrapper guarantees an active subscription on this page.
+  const allowStores = true;
+  const allowTemplates = true;
+  const requirePro = (_feature: string, _allowed: boolean) => true;
 
   const [currentId, setCurrentId] = useState(() => Number(_routeId));
   const currentIdRef = useRef(Number(_routeId));
@@ -1620,7 +1613,8 @@ export default function SpecPageClient() {
       if (status === 503 || /credentials/i.test(msg) || /not configured/i.test(msg)) {
         setEtmUnconfigured(true);
       } else if (status === 403) {
-        setProModal({ open: true, feature: 'Актуализация цен из ЭТМ' });
+        toast.error('Подписка не активна. Перейдите к тарифам.');
+        router.push('/pricing');
       } else {
         toast.error(msg || 'Ошибка запроса к ЭТМ');
       }
@@ -1730,15 +1724,14 @@ export default function SpecPageClient() {
             </button>
             <button
               className="btn-outline"
-              style={{ marginLeft: 6, padding: '5px 10px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              style={{ marginLeft: 6, padding: '5px 10px', fontSize: 12 }}
               onClick={handleRefreshPrices}
               disabled={refreshing}
-              title={allowStores ? 'Обновить цены из ЭТМ' : 'Доступно в тарифе PRO'}
+              title="Обновить цены из ЭТМ"
             >
               {refreshing
                 ? (refreshProgress ? `↻ ~${refreshProgress.total} арт…` : '↻ …')
                 : '↻ Обновить цены'}
-              {!allowStores && <ProBadge />}
             </button>
           </div>
         </div>
@@ -2010,14 +2003,13 @@ export default function SpecPageClient() {
             className="sheet-tab-ctx-item"
             onClick={() => {
               setTabMenu(null);
-              if (!requirePro('Сохранение в шаблоны', allowTemplates)) return;
               const s = projectSheets.find((x: any) => x.id === tabMenu.id);
               setTplName(s?.name || '');
               setTplModal({ sheetId: tabMenu.id });
             }}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8, flexShrink: 0 }}><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v14a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-            Сохранить как шаблон {!allowTemplates && <ProBadge />}
+            Сохранить как шаблон
           </div>
           <div
             className="sheet-tab-ctx-item"
@@ -2150,11 +2142,6 @@ export default function SpecPageClient() {
         </div>
       )}
 
-      <ProUpgradeModal
-        open={proModal.open}
-        feature={proModal.feature}
-        onClose={() => setProModal({ open: false })}
-      />
     </div>
   );
 }

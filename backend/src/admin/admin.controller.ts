@@ -20,16 +20,8 @@ import { TariffConfig } from './tariff-config.entity';
 
 const DEFAULT_TARIFF_CONFIGS = [
   {
-    plan_key: 'free',
-    name: 'Бесплатный',
-    price: 0,
-    price_annual: null,
-    description: 'Просмотр шаблонов и проектов, работа с листом спецификации, доступны каталоги производителей.',
-    is_active: true,
-  },
-  {
     plan_key: 'pro',
-    name: 'PRO',
+    name: 'Базовый',
     price: 7990,
     price_annual: 79900,
     description: 'Полный доступ ко всем функциям: спецификации, каталог, интеграции, шаблоны, аналоги, аксессуары.',
@@ -37,10 +29,10 @@ const DEFAULT_TARIFF_CONFIGS = [
   },
   {
     plan_key: 'trial',
-    name: 'Trial',
+    name: 'Пробный',
     price: 0,
     price_annual: null,
-    description: '7 дней полного доступа ко всем функциям PRO. Бесплатно, только один раз.',
+    description: '7 дней полного доступа ко всем функциям. Бесплатно, только один раз.',
     is_active: true,
   },
 ];
