@@ -6,7 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull } from 'typeorm';
+import { Repository, IsNull, In } from 'typeorm';
 import { Folder } from './folder.entity';
 import { Sheet } from '../sheets/sheet.entity';
 import { Template } from '../templates/template.entity';
@@ -173,6 +173,33 @@ export class FoldersService implements OnModuleInit {
     );
     const { rows, ...rest } = s;
     return { ...rest, total };
+  }
+
+  /**
+   * Recursively collect all sheets (with rows) from a folder and all its subfolders.
+   * Used for Excel export — does NOT strip rows.
+   */
+  async getSheetsForExport(folderId: number, userId: number): Promise<{ name: string; sheets: any[] }> {
+    await this.checkOwner(folderId, userId);
+
+    // Collect all folder IDs in the subtree rooted at folderId
+    const allFolders = await this.foldersRepo.find({ where: { owner_id: userId } });
+    const subtreeIds: number[] = [];
+    const collect = (id: number) => {
+      subtreeIds.push(id);
+      allFolders.filter(f => f.parent_id === id).forEach(f => collect(f.id));
+    };
+    collect(folderId);
+
+    // Load all sheets in these folders with rows
+    const sheets = await this.sheetsRepo.find({
+      where: { folder_id: In(subtreeIds) },
+      relations: ['rows'],
+      order: { sort_order: 'ASC', createdAt: 'ASC' },
+    });
+
+    const rootFolder = allFolders.find(f => f.id === folderId);
+    return { name: rootFolder?.name || 'Проект', sheets };
   }
 
   // ── Single folder with sheets (for spec page tabs) ────────────

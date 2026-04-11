@@ -26,16 +26,13 @@ export class ExportController {
     let projectName = 'Спецификация';
     let sheets: any[] = [];
 
-    if (body.folderId) {
-      // Folder-based export
-      const folder = await this.foldersService.getFolderWithSheets(body.folderId, userId);
-      projectName = folder.name || projectName;
-      sheets = folder.sheets || [];
-      if (body.sheetId) {
-        sheets = sheets.filter((s: any) => s.id === body.sheetId);
-      }
-    } else if (body.sheetId && !body.projectId) {
-      // Single sheet export (no project context)
+    if (body.folderId && !body.sheetId) {
+      // Whole folder export — recursive, includes all subfolders
+      const result = await this.foldersService.getSheetsForExport(body.folderId, userId);
+      projectName = result.name;
+      sheets = result.sheets;
+    } else if (body.sheetId) {
+      // Single sheet export
       const sheet = await this.sheetsService.getSheetWithRowsOwned(body.sheetId, userId);
       projectName = sheet.name || projectName;
       sheets = [sheet];
