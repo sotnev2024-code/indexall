@@ -3,11 +3,13 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
+import { useAppStore } from '@/store/app.store';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
 export default function LoginPage() {
   const router = useRouter();
+  const { setAuth } = useAppStore();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -39,7 +41,15 @@ export default function LoginPage() {
         return;
       }
 
-      localStorage.setItem('token', response.data.accessToken);
+      const token = response.data.accessToken;
+      localStorage.setItem('token', token);
+      // Fetch user profile immediately so store is populated before redirect
+      try {
+        const { data: me } = await axios.get(`${API_URL}/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setAuth(me, token);
+      } catch { /* store will be hydrated by AuthHydrator on next render */ }
       router.push('/');
     } catch (err: any) {
       setError(err.response?.data?.message || 'Ошибка входа');

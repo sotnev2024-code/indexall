@@ -3,11 +3,13 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
+import { useAppStore } from '@/store/app.store';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { setAuth } = useAppStore();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -25,7 +27,14 @@ export default function RegisterPage() {
     try {
       const { data } = await axios.post(`${API_URL}/auth/register`, { name, email, password });
       if (data.accessToken) {
-        localStorage.setItem('token', data.accessToken);
+        const token = data.accessToken;
+        localStorage.setItem('token', token);
+        try {
+          const { data: me } = await axios.get(`${API_URL}/auth/me`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          setAuth(me, token);
+        } catch { /* AuthHydrator will hydrate on next render */ }
         // New user has no active subscription — go straight to pricing/paywall
         router.push('/pricing');
       } else {
