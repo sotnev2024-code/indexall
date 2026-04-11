@@ -264,6 +264,11 @@ export default function SpecPageClient() {
 
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [pasteText, setPasteText] = useState('');
+
+  // ── Export modal ──────────────────────────────────────────────
+  const [exportModal, setExportModal] = useState(false);
+  const [exportScope, setExportScope] = useState<'sheet' | 'project'>('sheet');
+  const [exportLoading, setExportLoading] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
 
   const undoKey = `undo_${currentId}`;
@@ -1552,15 +1557,21 @@ export default function SpecPageClient() {
     applyPasteAt(text, activeCellRef.current.row, activeCellRef.current.col);
   }
 
-  async function handleExport() {
+  async function doExport(scope: 'sheet' | 'project') {
     if (!activeProjectId) return;
-    const choice = confirm('Экспортировать весь проект?\nОК — весь проект, Отмена — только этот лист');
+    setExportLoading(true);
     try {
-      const { data } = await exportApi.xlsx(activeProjectId, choice ? undefined : currentIdRef.current);
+      const sheetId = scope === 'sheet' ? currentIdRef.current : undefined;
+      const { data } = await exportApi.xlsx(activeProjectId, sheetId);
+      const fileName = scope === 'project'
+        ? `${project?.name || 'проект'}.xlsx`
+        : `${project?.name || 'проект'}_${sheet?.name || 'лист'}.xlsx`;
       const url = URL.createObjectURL(new Blob([data]));
-      const a = document.createElement('a'); a.href = url; a.download = 'спецификация.xlsx'; a.click();
+      const a = document.createElement('a'); a.href = url; a.download = fileName; a.click();
       URL.revokeObjectURL(url);
+      setExportModal(false);
     } catch { toast.error('Ошибка экспорта'); }
+    finally { setExportLoading(false); }
   }
 
   async function handleRefreshPrices() {
@@ -1726,7 +1737,7 @@ export default function SpecPageClient() {
               <span className="spec-summary-label">Срок:</span>
               <span className="spec-summary-value">0 дн.</span>
             </span>
-            <button className="btn-outline" style={{ marginLeft: 8, padding: '5px 10px', fontSize: 12 }} onClick={handleExport}>
+            <button className="btn-outline" style={{ marginLeft: 8, padding: '5px 10px', fontSize: 12 }} onClick={() => setExportModal(true)}>
               ↓ Excel
             </button>
             <button
@@ -2081,6 +2092,56 @@ export default function SpecPageClient() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Export Excel modal ── */}
+      {exportModal && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => !exportLoading && setExportModal(false)}
+        >
+          <div
+            style={{ background: '#fff', borderRadius: 14, padding: 28, width: 380, boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 style={{ fontSize: 17, fontWeight: 700, marginBottom: 20 }}>Выгрузка Excel</h3>
+
+            {/* Sheet option */}
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 14px', borderRadius: 10, border: exportScope === 'sheet' ? '2px solid #1a1a1a' : '1.5px solid #e0e0e0', marginBottom: 10, cursor: 'pointer', background: exportScope === 'sheet' ? '#fafafa' : '#fff' }}>
+              <input type="radio" name="exportScope" value="sheet" checked={exportScope === 'sheet'} onChange={() => setExportScope('sheet')} style={{ marginTop: 2, accentColor: '#1a1a1a' }} />
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>Текущий лист</div>
+                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{sheet?.name || 'Лист'} — только одна вкладка</div>
+              </div>
+            </label>
+
+            {/* Project option */}
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 14px', borderRadius: 10, border: exportScope === 'project' ? '2px solid #1a1a1a' : '1.5px solid #e0e0e0', marginBottom: 24, cursor: 'pointer', background: exportScope === 'project' ? '#fafafa' : '#fff' }}>
+              <input type="radio" name="exportScope" value="project" checked={exportScope === 'project'} onChange={() => setExportScope('project')} style={{ marginTop: 2, accentColor: '#1a1a1a' }} />
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>Весь проект</div>
+                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{project?.name || 'Проект'} — все листы в одном файле</div>
+              </div>
+            </label>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                style={{ flex: 1, padding: '10px 0', background: '#1a1a1a', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: exportLoading ? 'not-allowed' : 'pointer', opacity: exportLoading ? 0.6 : 1 }}
+                disabled={exportLoading}
+                onClick={() => doExport(exportScope)}
+              >
+                {exportLoading ? 'Загрузка…' : '↓ Скачать'}
+              </button>
+              <button
+                style={{ padding: '10px 20px', background: '#f4f4f4', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 14, cursor: 'pointer' }}
+                disabled={exportLoading}
+                onClick={() => setExportModal(false)}
+              >
+                Отмена
+              </button>
+            </div>
           </div>
         </div>
       )}
