@@ -1558,16 +1558,29 @@ export default function SpecPageClient() {
   }
 
   async function doExport(scope: 'sheet' | 'project') {
-    if (!activeProjectId) return;
     setExportLoading(true);
     try {
-      const sheetId = scope === 'sheet' ? currentIdRef.current : undefined;
-      const { data } = await exportApi.xlsx(activeProjectId, sheetId);
-      const fileName = scope === 'project'
-        ? `${project?.name || 'проект'}.xlsx`
-        : `${project?.name || 'проект'}_${sheet?.name || 'лист'}.xlsx`;
+      const isFolderBased = !!(sheet as any)?.folder_id;
+      const params: { projectId?: number; folderId?: number; sheetId?: number } = {};
+
+      if (scope === 'sheet') {
+        // Single sheet — always works regardless of project type
+        params.sheetId = currentIdRef.current;
+      } else if (isFolderBased) {
+        params.folderId = (sheet as any).folder_id;
+      } else if (activeProjectId) {
+        params.projectId = activeProjectId;
+      } else {
+        // Fallback: export current sheet only
+        params.sheetId = currentIdRef.current;
+      }
+
+      const { data } = await exportApi.xlsx(params);
+      const baseName = scope === 'project'
+        ? (project?.name || 'проект')
+        : `${project?.name || 'проект'}_${sheet?.name || 'лист'}`;
       const url = URL.createObjectURL(new Blob([data]));
-      const a = document.createElement('a'); a.href = url; a.download = fileName; a.click();
+      const a = document.createElement('a'); a.href = url; a.download = `${baseName}.xlsx`; a.click();
       URL.revokeObjectURL(url);
       setExportModal(false);
     } catch { toast.error('Ошибка экспорта'); }
@@ -1738,7 +1751,7 @@ export default function SpecPageClient() {
               <span className="spec-summary-value">0 дн.</span>
             </span>
             <button className="btn-outline" style={{ marginLeft: 8, padding: '5px 10px', fontSize: 12 }} onClick={() => setExportModal(true)}>
-              ↓ Excel
+              Excel
             </button>
             <button
               className="btn-outline"
@@ -2128,11 +2141,11 @@ export default function SpecPageClient() {
 
             <div style={{ display: 'flex', gap: 10 }}>
               <button
-                style={{ flex: 1, padding: '10px 0', background: '#1a1a1a', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: exportLoading ? 'not-allowed' : 'pointer', opacity: exportLoading ? 0.6 : 1 }}
+                style={{ flex: 1, padding: '10px 0', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: exportLoading ? 'not-allowed' : 'pointer', opacity: exportLoading ? 0.6 : 1 }}
                 disabled={exportLoading}
                 onClick={() => doExport(exportScope)}
               >
-                {exportLoading ? 'Загрузка…' : '↓ Скачать'}
+                {exportLoading ? 'Загрузка...' : 'Скачать'}
               </button>
               <button
                 style={{ padding: '10px 20px', background: '#f4f4f4', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 14, cursor: 'pointer' }}

@@ -142,8 +142,8 @@ export const templatesApi = {
 
 // ── Export ────────────────────────────────────────────────────
 export const exportApi = {
-  xlsx: (projectId: number, sheetId?: number) =>
-    api.post('/export/xlsx', { projectId, sheetId }, { responseType: 'blob' }),
+  xlsx: (params: { projectId?: number; folderId?: number; sheetId?: number }) =>
+    api.post('/export/xlsx', params, { responseType: 'blob' }),
 };
 
 // ── Stores ────────────────────────────────────────────────────
