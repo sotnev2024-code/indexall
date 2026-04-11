@@ -13,6 +13,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { TemplatesService } from './templates.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { ProGuard } from '../auth/guards/pro.guard';
 import { Template } from './template.entity';
 
 @ApiTags('templates')
@@ -23,7 +24,8 @@ export class TemplatesController {
   constructor(private readonly templatesService: TemplatesService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Создать новый шаблон' })
+  @UseGuards(ProGuard)
+  @ApiOperation({ summary: 'Создать новый шаблон (PRO only)' })
   create(@Request() req, @Body() createDto: Partial<Template>) {
     return this.templatesService.create({ ...createDto, userId: req.user.userId });
   }

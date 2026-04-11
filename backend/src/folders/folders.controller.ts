@@ -15,6 +15,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FoldersService } from './folders.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { ProGuard } from '../auth/guards/pro.guard';
 
 @ApiTags('folders')
 @Controller('folders')
@@ -133,7 +134,8 @@ export class FoldersController {
 
   /** POST /folders/:id/save-as-template — save project folder as template folder */
   @Post(':id/save-as-template')
-  @ApiOperation({ summary: 'Сохранить папку как шаблон' })
+  @UseGuards(ProGuard)
+  @ApiOperation({ summary: 'Сохранить папку как шаблон (PRO only)' })
   saveFolderAsTemplate(
     @Param('id', ParseIntPipe) id: number,
     @Body('name') name: string,
@@ -145,7 +147,8 @@ export class FoldersController {
 
   /** POST /folders/sheets/:id/save-as-template — save sheet as template */
   @Post('sheets/:id/save-as-template')
-  @ApiOperation({ summary: 'Сохранить лист как шаблон' })
+  @UseGuards(ProGuard)
+  @ApiOperation({ summary: 'Сохранить лист как шаблон (PRO only)' })
   saveSheetAsTemplate(
     @Param('id', ParseIntPipe) id: number,
     @Body('name') name: string,
@@ -159,7 +162,8 @@ export class FoldersController {
 
   /** POST /folders/load-template-folder — load template folder into projects */
   @Post('load-template-folder')
-  @ApiOperation({ summary: 'Загрузить шаблонную папку в проект' })
+  @UseGuards(ProGuard)
+  @ApiOperation({ summary: 'Загрузить шаблонную папку в проект (PRO only)' })
   loadTemplateFolder(
     @Body('template_folder_id') templateFolderId: number,
     @Body('mode') mode: 'new' | 'into',
@@ -173,7 +177,8 @@ export class FoldersController {
 
   /** POST /folders/load-template-sheet — load single template as sheet */
   @Post('load-template-sheet')
-  @ApiOperation({ summary: 'Загрузить шаблон-лист в проект' })
+  @UseGuards(ProGuard)
+  @ApiOperation({ summary: 'Загрузить шаблон-лист в проект (PRO only)' })
   loadTemplateSheet(
     @Body('template_id') templateId: number,
     @Body('mode') mode: 'new' | 'into',

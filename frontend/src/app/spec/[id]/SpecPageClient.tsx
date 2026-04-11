@@ -6,6 +6,9 @@ import Header from '@/components/layout/Header';
 import ImportModal from '@/components/ImportModal';
 import { sheetsApi, projectsApi, foldersApi, catalogApi, exportApi, storesApi, templatesApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
+import { canUseStores, canUseTemplates } from '@/lib/permissions';
+import ProUpgradeModal from '@/components/ProUpgradeModal';
+import ProBadge from '@/components/ProBadge';
 
 const MAX_UNDO = 30;
 const STATIC_BRANDS = ['IEK', 'EKF', 'Chint', 'КЗАЗ', 'DEKraft', 'DKC', 'TDM'];
@@ -190,7 +193,15 @@ const SpecRow = memo(function SpecRow({
 export default function SpecPageClient() {
   const { id: _routeId } = useParams();
   const router = useRouter();
-  const { activeProjectId, setUnsaved: _setUnsaved, setActive } = useAppStore();
+  const { activeProjectId, setUnsaved: _setUnsaved, setActive, user } = useAppStore();
+  const allowStores = canUseStores(user?.plan);
+  const allowTemplates = canUseTemplates(user?.plan);
+  const [proModal, setProModal] = useState<{ open: boolean; feature?: string }>({ open: false });
+  const requirePro = (feature: string, allowed: boolean) => {
+    if (allowed) return true;
+    setProModal({ open: true, feature });
+    return false;
+  };
 
   const [currentId, setCurrentId] = useState(() => Number(_routeId));
   const currentIdRef = useRef(Number(_routeId));
@@ -525,6 +536,7 @@ export default function SpecPageClient() {
    */
   const fetchEtmForArticle = useCallback(async (article: string) => {
     if (!article) return;
+    if (!allowStores) return; // Free plan: no live ETM lookups
     try {
       const { data } = await storesApi.getEtmPricesWithTerms([article]);
       const entry = data[article];
@@ -561,7 +573,7 @@ export default function SpecPageClient() {
         return next;
       });
     }
-  }, []);
+  }, [allowStores]);
 
   const applyProduct = useCallback((i: number, p: any) => {
     const snap = focusSnapshotRef.current ?? JSON.parse(JSON.stringify(rowsRef.current));
@@ -800,6 +812,7 @@ export default function SpecPageClient() {
 
   // ── Save as template ─────────────────────────────────────────
   async function saveAsTemplate() {
+    if (!requirePro('Сохранение в шаблоны', allowTemplates)) { setTplModal(null); return; }
     if (!tplName.trim() || !tplModal || !tplSaveMode) return;
     try {
       if (tplSaveMode === 'sheet') {
@@ -1493,6 +1506,7 @@ export default function SpecPageClient() {
   }
 
   async function handleRefreshPrices() {
+    if (!requirePro('Актуализация цен из ЭТМ', allowStores)) return;
     // Check ETM credentials first
     try {
       const { data: creds } = await storesApi.getEtmCredentials();
@@ -1656,14 +1670,15 @@ export default function SpecPageClient() {
             </button>
             <button
               className="btn-outline"
-              style={{ marginLeft: 6, padding: '5px 10px', fontSize: 12 }}
+              style={{ marginLeft: 6, padding: '5px 10px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}
               onClick={handleRefreshPrices}
               disabled={refreshing}
-              title="Обновить цены из ЭТМ или прайса"
+              title={allowStores ? 'Обновить цены из ЭТМ' : 'Доступно в тарифе PRO'}
             >
               {refreshing
                 ? (refreshProgress ? `↻ ~${refreshProgress.total} арт…` : '↻ …')
                 : '↻ Обновить цены'}
+              {!allowStores && <ProBadge />}
             </button>
           </div>
         </div>
@@ -1933,14 +1948,15 @@ export default function SpecPageClient() {
           <div
             className="sheet-tab-ctx-item"
             onClick={() => {
+              setTabMenu(null);
+              if (!requirePro('Сохранение в шаблоны', allowTemplates)) return;
               const s = projectSheets.find((x: any) => x.id === tabMenu.id);
               setTplName(s?.name || '');
               setTplModal({ sheetId: tabMenu.id });
-              setTabMenu(null);
             }}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 8, flexShrink: 0 }}><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v14a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-            Сохранить как шаблон
+            Сохранить как шаблон {!allowTemplates && <ProBadge />}
           </div>
           <div
             className="sheet-tab-ctx-item"
@@ -2072,6 +2088,12 @@ export default function SpecPageClient() {
           </div>
         </div>
       )}
+
+      <ProUpgradeModal
+        open={proModal.open}
+        feature={proModal.feature}
+        onClose={() => setProModal({ open: false })}
+      />
     </div>
   );
 }

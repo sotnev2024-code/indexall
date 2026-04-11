@@ -5,6 +5,8 @@ import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import { authApi, profileApi, paymentsApi, storesApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
+import { canUseStores } from '@/lib/permissions';
+import ProBadge from '@/components/ProBadge';
 
 // ── helpers ──────────────────────────────────────────────────
 
@@ -98,6 +100,7 @@ function SuccessBanner({ onRefresh }: { onRefresh: () => void }) {
 export default function ProfilePage() {
   const router = useRouter();
   const { user, setAuth } = useAppStore();
+  const allowStores = canUseStores(user?.plan);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -416,11 +419,25 @@ export default function ProfilePage() {
         {passwordForm}
 
         {/* ETM integration */}
-        <div style={{ background: '#fff', borderRadius: 12, padding: 24, marginTop: 20, border: '1px solid #e5e7eb' }}>
-          <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Интеграция с ЭТМ</h2>
+        <div style={{ background: '#fff', borderRadius: 12, padding: 24, marginTop: 20, border: '1px solid #e5e7eb', position: 'relative' }}>
+          <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+            Интеграция с ЭТМ {!allowStores && <ProBadge size="md" />}
+          </h2>
           <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>
             Логин и пароль от личного кабинета ЭТМ iPRO. Используются для получения цен в спецификации.
           </p>
+          {!allowStores && (
+            <div style={{ marginBottom: 14, padding: '10px 14px', background: '#fffbe6', border: '1px solid #f5c800', borderRadius: 8, fontSize: 13, color: '#78350f' }}>
+              Эта настройка доступна только в платном тарифе PRO.
+              <button
+                onClick={() => router.push('/pricing')}
+                style={{ marginLeft: 10, padding: '3px 10px', background: '#1a1a1a', color: '#f5c800', border: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+              >
+                Перейти к тарифам
+              </button>
+            </div>
+          )}
+          <fieldset disabled={!allowStores} style={{ border: 'none', padding: 0, margin: 0, opacity: allowStores ? 1 : 0.5 }}>
           {etmSaved && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, padding: '8px 12px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, fontSize: 13 }}>
               <span style={{ color: '#166534', fontWeight: 600 }}>Подключено: {etmLogin}</span>
@@ -444,6 +461,7 @@ export default function ProfilePage() {
               {etmLoading ? 'Сохранение…' : 'Сохранить'}
             </button>
           </form>
+          </fieldset>
         </div>
       </div>
     </>

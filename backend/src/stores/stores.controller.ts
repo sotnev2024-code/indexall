@@ -2,6 +2,7 @@ import { Controller, Get, Post, Delete, Query, Body, Req, Request, UseGuards, Ht
 import { StoresService } from './stores.service';
 import { EtmService } from './etm.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { ProGuard } from '../auth/guards/pro.guard';
 
 @Controller('stores')
 @UseGuards(JwtAuthGuard)
@@ -29,6 +30,7 @@ export class StoresController {
   }
 
   @Post('etm/prices')
+  @UseGuards(ProGuard)
   async getEtmPrices(@Body('articles') articles: string[], @Req() req: any) {
     if (!Array.isArray(articles) || articles.length === 0) {
       throw new HttpException('articles must be a non-empty array', HttpStatus.BAD_REQUEST);
@@ -44,6 +46,7 @@ export class StoresController {
    * Response: { [article]: { price: number | null, term: string } }
    */
   @Post('etm/prices-with-terms')
+  @UseGuards(ProGuard)
   async getEtmPricesWithTerms(
     @Body('articles') articles: string[],
     @Body('skipCache') skipCache: boolean,
@@ -64,6 +67,7 @@ export class StoresController {
   }
 
   @Post('etm/credentials')
+  @UseGuards(ProGuard)
   async saveEtmCredentials(
     @Req() req: any,
     @Body('login') login: string,

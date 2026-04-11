@@ -3,37 +3,40 @@
  *
  * Plans: free | trial | pro | admin
  *
- * free  — view-only. Can browse specs and manufacturer catalogs.
- *          No editing, inserting, deleting. No store integration.
+ * free  — can create projects, sheets and edit rows. Can browse manufacturer catalogs.
+ *         CANNOT: save/load templates, use ETM price integration.
  * trial — full access for 7 days (free, one-time, from free plan only)
  * pro   — full access (monthly or annual subscription)
  * admin — full access + admin panel
- *
- * 'base' kept for backward compat — treated same as 'pro'
  */
 
 type Plan = string | null | undefined;
 
-const PAID_PLANS = new Set(['trial', 'base', 'pro', 'admin']);
+const PRO_PLANS = new Set(['trial', 'base', 'pro', 'admin']);
 
-/** Whether the user can edit content (insert, delete, modify rows) */
-export function canEdit(plan: Plan): boolean {
-  return PAID_PLANS.has(plan ?? '');
+/** Whether the user can edit content (always true now — free can edit too) */
+export function canEdit(_plan: Plan): boolean {
+  return true;
 }
 
-/** Whether the user can use store price integration */
+/** Whether the user can use ETM price integration (PRO only) */
 export function canUseStores(plan: Plan): boolean {
-  return PAID_PLANS.has(plan ?? '');
+  return PRO_PLANS.has(plan ?? '');
 }
 
-/** Whether the user can create/edit/delete projects */
-export function canManageProjects(plan: Plan): boolean {
-  return PAID_PLANS.has(plan ?? '');
+/** Whether the user can create/edit/delete projects (always true now) */
+export function canManageProjects(_plan: Plan): boolean {
+  return true;
 }
 
-/** Whether the user can apply or create templates */
+/** Whether the user can apply or create templates (PRO only) */
 export function canUseTemplates(plan: Plan): boolean {
-  return PAID_PLANS.has(plan ?? '');
+  return PRO_PLANS.has(plan ?? '');
+}
+
+/** Whether the user is on the PRO plan (or trial/admin) */
+export function isPro(plan: Plan): boolean {
+  return PRO_PLANS.has(plan ?? '');
 }
 
 /** Whether the user can activate the free trial */
