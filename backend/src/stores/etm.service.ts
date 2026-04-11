@@ -325,15 +325,17 @@ export class EtmService {
     }
 
     const dlv = data?.InforDeliveryTime || {};
-    if (hasStock && dlv.DeliveryTimeInPres) {
-      return `${dlv.DeliveryTimeInPres} дн.`;
-    }
-    if (dlv.DeliveryProductionTerm) {
-      return String(dlv.DeliveryProductionTerm).trim();
-    }
-    if (dlv.DeliveryTimeInPres) {
-      return `${dlv.DeliveryTimeInPres} дн.`;
-    }
+    const fmt = (v: any): string => {
+      const s = String(v ?? '').trim();
+      if (!s) return '';
+      // If already contains a unit (дн / дней / day), return as-is
+      if (/дн|day/i.test(s)) return s.replace(/\s+/g, ' ').trim();
+      return `${s} дн`;
+    };
+
+    if (hasStock && dlv.DeliveryTimeInPres) return fmt(dlv.DeliveryTimeInPres);
+    if (dlv.DeliveryProductionTerm) return fmt(dlv.DeliveryProductionTerm);
+    if (dlv.DeliveryTimeInPres) return fmt(dlv.DeliveryTimeInPres);
     return null;
   }
 
