@@ -31,10 +31,9 @@ export default function ProUpgradeModal({ open, onClose, feature }: Props) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <span style={{ fontSize: 28 }}>🔒</span>
           <span style={{
-            background: '#f5c800', color: '#1a1a1a', padding: '3px 10px',
-            borderRadius: 4, fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
+            background: '#f5c800', color: '#1a1a1a', padding: '4px 12px',
+            borderRadius: 4, fontSize: 13, fontWeight: 700, letterSpacing: 0.5,
           }}>PRO</span>
         </div>
 

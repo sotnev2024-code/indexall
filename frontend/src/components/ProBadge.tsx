@@ -17,7 +17,7 @@ export default function ProBadge({ size = 'sm' }: Props) {
         verticalAlign: 'middle',
       }}
     >
-      🔒 PRO
+      PRO
     </span>
   );
 }

@@ -350,7 +350,7 @@ export default function TemplatesPage() {
                     style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}
                     onClick={() => { if (requirePro('Применение шаблонов')) setApplyModalOpen(true); }}
                   >
-                    + Добавить в лист {!allowTemplates && <span style={{ background: '#f5c800', color: '#1a1a1a', padding: '1px 5px', borderRadius: 3, fontSize: 9, fontWeight: 700 }}>🔒 PRO</span>}
+                    + Добавить в лист {!allowTemplates && <span style={{ background: '#f5c800', color: '#1a1a1a', padding: '1px 5px', borderRadius: 3, fontSize: 9, fontWeight: 700 }}>PRO</span>}
                   </button>
                   <button className="btn-outline" style={{ fontSize: 12 }} onClick={() => toggleFavorite()}>
                     {selected.is_favorite ? 'Убрать из избранного' : 'В избранное'}
