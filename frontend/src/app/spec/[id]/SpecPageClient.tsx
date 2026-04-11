@@ -535,11 +535,15 @@ export default function SpecPageClient() {
         for (let j = 0; j < next.length; j++) {
           if (next[j].article === article && next[j].store === 'ЭТМ') {
             const priceStr = price != null ? String(price) : '';
+            const q = next[j].qty || '1';
+            const c = next[j].coef || '1';
             next[j] = {
               ...next[j],
               price: priceStr,
               deadline: term,
-              total: calcTotal(priceStr, next[j].qty, next[j].coef),
+              qty: q,
+              coef: c,
+              total: calcTotal(priceStr, q, c),
             };
           }
         }
@@ -568,8 +572,8 @@ export default function SpecPageClient() {
     const matchedPl = pricelistsRef.current.find(pl => pl === mfr);
     setRows((prev) => {
       const next = [...prev];
-      const q = next[i].qty;
-      const c = next[i].coef;
+      const q = next[i].qty || '1';
+      const c = next[i].coef || '1';
       next[i] = {
         ...next[i],
         name: p.name,
@@ -579,6 +583,8 @@ export default function SpecPageClient() {
         price: p.price ? String(p.price) : '',
         store: matchedPl || 'ЭТМ',
         auto_price: !matchedPl,
+        qty: q,
+        coef: c,
         total: calcTotal(p.price ? String(p.price) : '', q, c),
       };
       return next;
@@ -596,6 +602,8 @@ export default function SpecPageClient() {
       const next = [...prev];
       const emptyIdx = next.findIndex(r => !r.name && !r.article);
       const targetIdx = emptyIdx >= 0 ? emptyIdx : next.length - 1;
+      const q = next[targetIdx].qty || '1';
+      const c = next[targetIdx].coef || '1';
       next[targetIdx] = {
         ...next[targetIdx],
         name: p.name,
@@ -605,7 +613,9 @@ export default function SpecPageClient() {
         price: p.price ? String(p.price) : '',
         store: 'ЭТМ',
         auto_price: true,
-        total: calcTotal(p.price ? String(p.price) : '', next[targetIdx].qty || '', next[targetIdx].coef || '1'),
+        qty: q,
+        coef: c,
+        total: calcTotal(p.price ? String(p.price) : '', q, c),
       };
       return next;
     });
