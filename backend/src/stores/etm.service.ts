@@ -1,7 +1,8 @@
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { EtmCredential } from './etm-credential.entity';
+import { EtmCache } from './etm-cache.entity';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as crypto from 'crypto';
@@ -29,9 +30,16 @@ export class EtmService {
   private readonly ENCRYPTION_KEY: Buffer;
   private readonly userSessions = new Map<number, { key: string; expiry: number }>();
 
+  // Global rate-limited request queue (1 req/sec — ETM limit per IP)
+  private requestQueue: Promise<any> = Promise.resolve();
+  private lastRequestAt = 0;
+  private readonly MIN_INTERVAL_MS = 1100;
+
   constructor(
     @InjectRepository(EtmCredential)
     private readonly credRepo: Repository<EtmCredential>,
+    @InjectRepository(EtmCache)
+    private readonly cacheRepo: Repository<EtmCache>,
   ) {
     const rawKey = (process.env.ETM_ENCRYPTION_KEY || 'default-secret-key-indexall-2024').padEnd(32, '!').slice(0, 32);
     try {
@@ -118,60 +126,19 @@ export class EtmService {
     return sessionKey;
   }
 
+  /**
+   * Legacy: prices only (no terms). Batches up to 50 per request.
+   * Used by code paths that don't need delivery terms.
+   */
   async getPricesForUser(articles: string[], userId?: number): Promise<Record<string, number | null>> {
     if (userId) {
-      let userSession = await this.getUserSession(userId);
-      if (userSession) {
-        try {
-          return await this.getPricesWithSession(articles, userSession, userId);
-        } catch (e: any) {
-          if (e?.message === 'SESSION_EXPIRED') {
-            // Force refresh session and retry once
-            this.logger.warn(`ETM session expired for user ${userId}, forcing refresh`);
-            userSession = await this.getUserSession(userId, true);
-            if (userSession) return this.getPricesWithSession(articles, userSession, userId);
-          }
-          throw e;
-        }
-      }
-      // Fall through to global session if user session unavailable
+      // Reuse the new path that includes cache + batching, then strip terms
+      const full = await this.getPricesAndTermsForUser(articles, userId);
+      const out: Record<string, number | null> = {};
+      for (const a of Object.keys(full)) out[a] = full[a].price;
+      return out;
     }
     return this.getPrices(articles);
-  }
-
-  private async getPricesWithSession(
-    articles: string[],
-    session: string,
-    userId?: number,
-  ): Promise<Record<string, number | null>> {
-    const unique = [...new Set(articles.filter((a) => a && a.trim()))];
-    const results: Record<string, number | null> = {};
-    if (unique.length === 0) return results;
-
-    let currentSession = session;
-    let refreshed = false;
-
-    for (let i = 0; i < unique.length; i++) {
-      const article = unique[i];
-      try {
-        results[article] = await this.fetchPrice(article, currentSession);
-      } catch (e: any) {
-        if (e?.message === 'SESSION_EXPIRED' && !refreshed && userId) {
-          // Try refreshing session once and retry this article
-          this.logger.warn(`ETM session expired mid-request for user ${userId}, refreshing`);
-          const newSession = await this.getUserSession(userId, true);
-          if (newSession) {
-            currentSession = newSession;
-            refreshed = true;
-            i--; // Retry current article
-            continue;
-          }
-        }
-        results[article] = null;
-      }
-      if (i < unique.length - 1) await this.sleep(1100);
-    }
-    return results;
   }
 
   private async curlRequest(url: string, method: 'GET' | 'POST' = 'GET', saveCookies = false): Promise<any> {
@@ -256,39 +223,255 @@ export class EtmService {
     return new Promise<void>((r) => setTimeout(r, ms));
   }
 
-  private debugLogged = false;
+  /**
+   * Schedules an ETM request with global rate limiting (1 req / 1.1 sec).
+   * All ETM HTTP requests must go through this so we never exceed the per-IP limit
+   * even when multiple users hit the API concurrently.
+   */
+  private enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.requestQueue.then(async () => {
+      const now = Date.now();
+      const wait = Math.max(0, this.lastRequestAt + this.MIN_INTERVAL_MS - now);
+      if (wait > 0) await this.sleep(wait);
+      this.lastRequestAt = Date.now();
+      return fn();
+    });
+    // Don't break the chain on errors
+    this.requestQueue = next.catch(() => undefined);
+    return next;
+  }
 
-  private async fetchPrice(article: string, session: string): Promise<number | null> {
+  /**
+   * Batch fetch prices — up to 50 articles in one request.
+   * Returns map: article → price | null.
+   * Throws 'SESSION_EXPIRED' if session is invalid.
+   */
+  private async fetchPricesBatch(articles: string[], session: string): Promise<Record<string, number | null>> {
+    const result: Record<string, number | null> = {};
+    if (articles.length === 0) return result;
+
+    // Use ETM batch syntax: comma-separated articles, type=mnf
+    const ids = articles.map(a => encodeURIComponent(a)).join('%2C');
     const url =
-      `https://${this.host}/api/v1/goods/${encodeURIComponent(article)}/price` +
+      `https://${this.host}/api/v1/goods/${ids}/price` +
       `?type=mnf&sessionid=${encodeURIComponent(session)}`;
 
     let json: any;
     try {
-      json = await this.curlRequest(url, 'GET');
-    } catch {
-      return null;
+      json = await this.enqueue(() => this.curlRequest(url, 'GET'));
+    } catch (e: any) {
+      this.logger.warn(`ETM batch price error: ${e?.message}`);
+      for (const a of articles) result[a] = null;
+      return result;
     }
 
-    // Log full response once to inspect available fields (delivery time etc.)
-    if (!this.debugLogged && json?.status?.code === 200) {
-      this.logger.log(`ETM RAW RESPONSE for ${article}: ${JSON.stringify(json).slice(0, 2000)}`);
-      this.debugLogged = true;
-    }
-
-    // ETM returns code 401/403 (or message containing "session"/"auth") when session is invalid
     const code = json?.status?.code;
     const msg = String(json?.status?.message || '').toLowerCase();
     if (code === 401 || code === 403 || msg.includes('session') || msg.includes('auth') || msg.includes('unauthor')) {
       throw new Error('SESSION_EXPIRED');
     }
 
+    if (code !== 200 || !json.data) {
+      for (const a of articles) result[a] = null;
+      return result;
+    }
+
+    // ETM may return data.rows[] for batch — each row has gdscode + price fields.
+    // We need to map back by article — but ETM only returns gdscode (numeric ETM id), not the original article.
+    // For batch with type=mnf the response is per-article in rows but ETM groups by article in rows[].
+    // Since the order may differ, we need a per-article lookup. ETM API spec says one row per requested code.
+    // We map by index: assume order matches input order.
+    const rows = Array.isArray(json.data.rows) ? json.data.rows : (json.data ? [json.data] : []);
+    for (let i = 0; i < articles.length; i++) {
+      const row = rows[i];
+      const p = row ? (row.pricewnds ?? row.price ?? 0) : 0;
+      result[articles[i]] = Number(p) > 0 ? Number(p) : null;
+    }
+    return result;
+  }
+
+  /**
+   * Fetch delivery term for a single article from /remains.
+   * Returns: { term: string | null }.
+   * Throws 'SESSION_EXPIRED' if invalid session.
+   */
+  private async fetchRemains(article: string, session: string): Promise<string | null> {
+    const url =
+      `https://${this.host}/api/v1/goods/${encodeURIComponent(article)}/remains` +
+      `?type=mnf&sessionid=${encodeURIComponent(session)}`;
+
+    let json: any;
+    try {
+      json = await this.enqueue(() => this.curlRequest(url, 'GET'));
+    } catch (e: any) {
+      this.logger.warn(`ETM remains error for ${article}: ${e?.message}`);
+      return null;
+    }
+
+    const code = json?.status?.code;
+    const msg = String(json?.status?.message || '').toLowerCase();
+    if (code === 401 || code === 403 || msg.includes('session') || msg.includes('auth') || msg.includes('unauthor')) {
+      throw new Error('SESSION_EXPIRED');
+    }
     if (code !== 200 || !json.data) return null;
 
-    // API returns data.rows[] array
-    const row = Array.isArray(json.data.rows) ? json.data.rows[0] : json.data;
-    const p = row?.pricewnds ?? row?.price ?? 0;
-    return Number(p) > 0 ? Number(p) : null;
+    const data = json.data;
+    // Stock available somewhere?
+    let hasStock = false;
+    if (Array.isArray(data.InfoStores)) {
+      for (const s of data.InfoStores) {
+        if (Number(s?.StoreQuantRem) > 0) { hasStock = true; break; }
+      }
+    }
+
+    const dlv = data?.InforDeliveryTime || {};
+    if (hasStock && dlv.DeliveryTimeInPres) {
+      return `${dlv.DeliveryTimeInPres} дн.`;
+    }
+    if (dlv.DeliveryProductionTerm) {
+      return String(dlv.DeliveryProductionTerm).trim();
+    }
+    if (dlv.DeliveryTimeInPres) {
+      return `${dlv.DeliveryTimeInPres} дн.`;
+    }
+    return null;
+  }
+
+  /**
+   * Public: get price + delivery term for a list of articles for a specific user.
+   * Uses cache (7 days) to avoid hitting ETM API repeatedly.
+   * Falls back to "нет" for term if not found.
+   */
+  async getPricesAndTermsForUser(
+    articles: string[],
+    userId: number,
+    options: { skipCache?: boolean } = {},
+  ): Promise<Record<string, { price: number | null; term: string }>> {
+    const unique = [...new Set(articles.filter(a => a && a.trim()))];
+    const result: Record<string, { price: number | null; term: string }> = {};
+    if (unique.length === 0) return result;
+
+    // Check cache first (7-day TTL)
+    const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+    const cached: Record<string, EtmCache> = {};
+    if (!options.skipCache) {
+      try {
+        const cacheRows = await this.cacheRepo.find({ where: { article: In(unique) } });
+        const now = Date.now();
+        for (const c of cacheRows) {
+          if (c.updated_at && now - new Date(c.updated_at).getTime() < CACHE_TTL_MS) {
+            cached[c.article] = c;
+          }
+        }
+      } catch (e: any) {
+        this.logger.warn(`ETM cache read error: ${e?.message}`);
+      }
+    }
+
+    const toFetch = unique.filter(a => !cached[a]);
+
+    // Fill from cache
+    for (const a of unique) {
+      if (cached[a]) {
+        result[a] = {
+          price: cached[a].price != null ? Number(cached[a].price) : null,
+          term: cached[a].term || 'нет',
+        };
+      }
+    }
+
+    if (toFetch.length === 0) {
+      this.logger.log(`ETM lookup: ${unique.length} articles, all from cache`);
+      return result;
+    }
+
+    // Need session
+    let session = await this.getUserSession(userId);
+    if (!session) {
+      // No user session — return null prices and "нет" terms for fetched articles
+      for (const a of toFetch) result[a] = { price: null, term: 'нет' };
+      return result;
+    }
+
+    // Step 1: batch prices (up to 50 per request)
+    const priceMap: Record<string, number | null> = {};
+    let sessionRefreshed = false;
+    for (let i = 0; i < toFetch.length; i += 50) {
+      const slice = toFetch.slice(i, i + 50);
+      try {
+        const prices = await this.fetchPricesBatch(slice, session);
+        Object.assign(priceMap, prices);
+      } catch (e: any) {
+        if (e?.message === 'SESSION_EXPIRED' && !sessionRefreshed) {
+          this.logger.warn(`ETM session expired for user ${userId}, refreshing`);
+          const newSession = await this.getUserSession(userId, true);
+          if (newSession) {
+            session = newSession;
+            sessionRefreshed = true;
+            i -= 50; // retry this slice
+            continue;
+          }
+        }
+        for (const a of slice) priceMap[a] = null;
+      }
+    }
+
+    // Step 2: remains (1 article per request) — only for articles with valid prices
+    // to save time. Articles without price get term "нет".
+    const termMap: Record<string, string> = {};
+    sessionRefreshed = false;
+    for (const a of toFetch) {
+      if (priceMap[a] == null) {
+        termMap[a] = 'нет';
+        continue;
+      }
+      try {
+        const term = await this.fetchRemains(a, session);
+        termMap[a] = term || 'нет';
+      } catch (e: any) {
+        if (e?.message === 'SESSION_EXPIRED' && !sessionRefreshed) {
+          this.logger.warn(`ETM session expired during remains, refreshing`);
+          const newSession = await this.getUserSession(userId, true);
+          if (newSession) {
+            session = newSession;
+            sessionRefreshed = true;
+            try {
+              const term = await this.fetchRemains(a, session);
+              termMap[a] = term || 'нет';
+              continue;
+            } catch { /* fallthrough */ }
+          }
+        }
+        termMap[a] = 'нет';
+      }
+    }
+
+    // Save to cache + build result
+    const toUpsert: EtmCache[] = [];
+    for (const a of toFetch) {
+      const price = priceMap[a] ?? null;
+      const term = termMap[a] || 'нет';
+      result[a] = { price, term };
+      toUpsert.push({ article: a, price, term, updated_at: new Date() });
+    }
+    try {
+      await this.cacheRepo.save(toUpsert);
+    } catch (e: any) {
+      this.logger.warn(`ETM cache save error: ${e?.message}`);
+    }
+
+    this.logger.log(
+      `ETM lookup: ${unique.length} articles (${unique.length - toFetch.length} from cache, ${toFetch.length} fetched), ` +
+        `${Object.values(result).filter(r => r.price != null).length} prices found`
+    );
+
+    return result;
+  }
+
+  // ── Legacy single-fetch methods (kept for backward compat) ────
+  private async fetchPrice(article: string, session: string): Promise<number | null> {
+    const batch = await this.fetchPricesBatch([article], session);
+    return batch[article];
   }
 
   async getPrices(
@@ -297,31 +480,26 @@ export class EtmService {
   ): Promise<Record<string, number | null>> {
     const unique = [...new Set(articles.filter((a) => a && a.trim()))];
     const results: Record<string, number | null> = {};
-
     if (unique.length === 0) return results;
 
     const session = await this.getSession();
 
-    for (let i = 0; i < unique.length; i++) {
-      const article = unique[i];
+    // Batch in groups of 50
+    for (let i = 0; i < unique.length; i += 50) {
+      const slice = unique.slice(i, i + 50);
       try {
-        results[article] = await this.fetchPrice(article, session);
+        const batch = await this.fetchPricesBatch(slice, session);
+        Object.assign(results, batch);
       } catch {
-        results[article] = null;
+        for (const a of slice) results[a] = null;
       }
-
-      onProgress?.(i + 1, unique.length);
-
-      if (i < unique.length - 1) {
-        await this.sleep(1100);
-      }
+      onProgress?.(Math.min(i + 50, unique.length), unique.length);
     }
 
     this.logger.log(
       `ETM prices fetched: ${unique.length} articles, ` +
         `${Object.values(results).filter((v) => v !== null).length} found`,
     );
-
     return results;
   }
 }

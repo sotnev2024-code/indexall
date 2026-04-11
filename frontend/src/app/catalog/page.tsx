@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
-import { catalogApi, sheetsApi } from '@/lib/api';
+import { catalogApi, sheetsApi, storesApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 
 export default function CatalogPage() {
@@ -194,12 +194,33 @@ export default function CatalogPage() {
     try {
       const { data: sh } = await sheetsApi.getOne(activeSheetId);
       const existing = (sh.rows || []).filter((r: any) => r.name || r.article);
+
+      // Try to fetch live ETM price + delivery term
+      let etmPrice: number | null = null;
+      let etmTerm = 'нет';
+      const article = product.article || '';
+      if (article) {
+        try {
+          const { data: etm } = await storesApi.getEtmPricesWithTerms([article]);
+          const entry = etm[article];
+          if (entry) {
+            etmPrice = entry.price;
+            etmTerm = entry.term || 'нет';
+          }
+        } catch { /* silent — leave defaults */ }
+      }
+
+      const finalPrice = etmPrice != null && etmPrice > 0
+        ? String(etmPrice)
+        : (product.price ? String(product.price) : '');
+
       await sheetsApi.saveRows(activeSheetId, [...existing, {
         row_number: existing.length + 1,
         name: product.name, brand: product.manufacturer?.name || '',
-        article: product.article || '', unit: product.unit || 'шт',
-        price: product.price ? String(product.price) : '',
+        article, unit: product.unit || 'шт',
+        price: finalPrice,
         store: 'ЭТМ', qty: '1', coef: '1',
+        deadline: etmTerm,
       }]);
       toast.success(`«${product.name.slice(0, 40)}» добавлен в лист`);
     } catch { toast.error('Ошибка добавления в лист'); }

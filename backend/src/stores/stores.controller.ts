@@ -38,6 +38,25 @@ export class StoresController {
     return this.etmService.getPricesForUser(articles, userId);
   }
 
+  /**
+   * Returns price + delivery term for each article.
+   * Uses 7-day cache, batches prices (50 per request), respects ETM rate limit.
+   * Response: { [article]: { price: number | null, term: string } }
+   */
+  @Post('etm/prices-with-terms')
+  async getEtmPricesWithTerms(
+    @Body('articles') articles: string[],
+    @Body('skipCache') skipCache: boolean,
+    @Req() req: any,
+  ) {
+    if (!Array.isArray(articles) || articles.length === 0) {
+      throw new HttpException('articles must be a non-empty array', HttpStatus.BAD_REQUEST);
+    }
+    const userId = req.user?.userId;
+    if (!userId) throw new HttpException('Auth required', HttpStatus.UNAUTHORIZED);
+    return this.etmService.getPricesAndTermsForUser(articles, userId, { skipCache: !!skipCache });
+  }
+
   // ── ETM per-user credentials ──────────────────────────────────
   @Get('etm/credentials')
   async getEtmCredentials(@Req() req: any) {

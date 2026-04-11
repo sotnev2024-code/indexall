@@ -518,21 +518,63 @@ export default function SpecPageClient() {
     setUnsaved(true);
   }, [setUnsaved]);
 
+  /**
+   * Fetch ETM price + delivery term for a single article and patch a row by article match.
+   * Used after adding a product from autocomplete or catalog so user gets live data immediately.
+   * Silent: if not configured / not found → leaves price empty and sets deadline to "нет".
+   */
+  const fetchEtmForArticle = useCallback(async (article: string) => {
+    if (!article) return;
+    try {
+      const { data } = await storesApi.getEtmPricesWithTerms([article]);
+      const entry = data[article];
+      const price = entry?.price ?? null;
+      const term = entry?.term || 'нет';
+      setRows(prev => {
+        const next = [...prev];
+        for (let j = 0; j < next.length; j++) {
+          if (next[j].article === article && next[j].store === 'ЭТМ') {
+            const priceStr = price != null ? String(price) : '';
+            next[j] = {
+              ...next[j],
+              price: priceStr,
+              deadline: term,
+              total: calcTotal(priceStr, next[j].qty, next[j].coef),
+            };
+          }
+        }
+        return next;
+      });
+    } catch {
+      // Silent fail — leave price empty, set deadline to "нет"
+      setRows(prev => {
+        const next = [...prev];
+        for (let j = 0; j < next.length; j++) {
+          if (next[j].article === article && next[j].store === 'ЭТМ' && !next[j].price) {
+            next[j] = { ...next[j], deadline: 'нет' };
+          }
+        }
+        return next;
+      });
+    }
+  }, []);
+
   const applyProduct = useCallback((i: number, p: any) => {
     const snap = focusSnapshotRef.current ?? JSON.parse(JSON.stringify(rowsRef.current));
     pushHistorySnapshot(snap);
     focusSnapshotRef.current = null;
+    const article = p.article || '';
+    const mfr = p.manufacturer?.name || p.brand || '';
+    const matchedPl = pricelistsRef.current.find(pl => pl === mfr);
     setRows((prev) => {
       const next = [...prev];
       const q = next[i].qty;
       const c = next[i].coef;
-      const mfr = p.manufacturer?.name || p.brand || '';
-      const matchedPl = pricelistsRef.current.find(pl => pl === mfr);
       next[i] = {
         ...next[i],
         name: p.name,
         brand: mfr,
-        article: p.article || '',
+        article,
         unit: p.unit || '',
         price: p.price ? String(p.price) : '',
         store: matchedPl || 'ЭТМ',
@@ -543,10 +585,13 @@ export default function SpecPageClient() {
     });
     setAcDrops(null);
     setUnsaved(true);
-  }, [pushHistorySnapshot, setUnsaved]);
+    // Fetch live ETM data if store is ЭТМ
+    if (!matchedPl && article) fetchEtmForArticle(article);
+  }, [pushHistorySnapshot, setUnsaved, fetchEtmForArticle]);
 
   const addProductFromSearch = useCallback((p: any) => {
     pushHistorySnapshot(rowsRef.current);
+    const article = p.article || '';
     setRows((prev) => {
       const next = [...prev];
       const emptyIdx = next.findIndex(r => !r.name && !r.article);
@@ -555,7 +600,7 @@ export default function SpecPageClient() {
         ...next[targetIdx],
         name: p.name,
         brand: p.manufacturer?.name || p.brand || '',
-        article: p.article || '',
+        article,
         unit: p.unit || '',
         price: p.price ? String(p.price) : '',
         store: 'ЭТМ',
@@ -567,7 +612,8 @@ export default function SpecPageClient() {
     setGlobalSearch('');
     setGlobalResults([]);
     setUnsaved(true);
-  }, [pushHistorySnapshot, setUnsaved]);
+    if (article) fetchEtmForArticle(article);
+  }, [pushHistorySnapshot, setUnsaved, fetchEtmForArticle]);
 
   // ── Import from price-list file ──────────────────────────────
   function handleImport(importedRows: any[], importMode: 'append' | 'replace') {
@@ -1457,26 +1503,40 @@ export default function SpecPageClient() {
     setRefreshing(true);
     setRefreshProgress({ done: 0, total: targets.length });
     const snap = JSON.parse(JSON.stringify(rowsRef.current));
-    const articles = targets.map(({ r }) => r.article as string);
+    // Unique articles only — backend handles batching of 50/request
+    const uniqueArticles = Array.from(new Set(targets.map(({ r }) => r.article as string)));
 
     try {
-      const { data: prices } = await storesApi.getEtmPrices(articles);
+      // Force refresh — skip cache so user always gets fresh prices
+      const { data } = await storesApi.getEtmPricesWithTerms(uniqueArticles, true);
       let updated = 0;
-      for (const { r } of targets) { if ((prices[r.article] ?? 0) > 0) updated++; }
 
       setRows(prev => {
         const next = [...prev];
-        for (const { r, i } of targets) {
-          const price = prices[r.article];
-          if (price != null && price > 0) {
-            const priceStr = String(price);
-            next[i] = { ...next[i], price: priceStr, store: 'ЭТМ', total: calcTotal(priceStr, next[i].qty, next[i].coef) };
-          }
+        for (let i = 0; i < next.length; i++) {
+          const r = next[i];
+          if (!r.article) continue;
+          if (r.store && r.store !== 'ЭТМ' && r.store.toUpperCase() !== 'ETM') continue;
+          const entry = data[r.article];
+          if (!entry) continue;
+          const price = entry.price;
+          const term = entry.term || 'нет';
+          const priceStr = price != null && price > 0 ? String(price) : '';
+          if (priceStr) updated++;
+          next[i] = {
+            ...r,
+            price: priceStr,
+            store: 'ЭТМ',
+            deadline: term,
+            total: calcTotal(priceStr, r.qty, r.coef),
+          };
         }
         return next;
       });
 
-      if (updated > 0) { pushHistorySnapshot(snap); setUnsaved(true); toast.success(`ЭТМ: обновлено ${updated} из ${targets.length} цен`); }
+      pushHistorySnapshot(snap);
+      setUnsaved(true);
+      if (updated > 0) toast.success(`ЭТМ: обновлено ${updated} из ${targets.length}`);
       else toast('ЭТМ: цены не найдены. Проверьте артикулы.');
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Ошибка запроса к ЭТМ');
