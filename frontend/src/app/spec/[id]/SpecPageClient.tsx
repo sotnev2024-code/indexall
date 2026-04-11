@@ -585,23 +585,30 @@ export default function SpecPageClient() {
         const results = (data as any[]) || [];
         const exact = results.find(p => (p.article || '').toLowerCase() === article.toLowerCase()) || results[0];
         if (exact) {
+          const mfr = exact.manufacturer?.name || exact.brand || '';
+          const matchedPl = pricelistsRef.current.find(pl => pl === mfr);
           setRows(prev => {
             const next = [...prev];
             const r = next[rowIdx];
             if (!r || r.article !== article) return prev;
             const q = r.qty || '1';
             const c = r.coef || '1';
-            const priceStr = r.price || (exact.price ? String(exact.price) : '');
+            // Use price list price if product is from a price list, otherwise keep empty for ETM
+            const priceStr = matchedPl
+              ? (r.price || (exact.price ? String(exact.price) : ''))
+              : (r.price || '');
             next[rowIdx] = {
               ...r,
               name: r.name || exact.name || '',
-              brand: r.brand || exact.manufacturer?.name || exact.brand || '',
+              brand: r.brand || mfr,
               unit: r.unit || exact.unit || 'шт',
               price: priceStr,
-              qty: q,
+              qty: q || '1',
               coef: c,
-              store: r.store || 'ЭТМ',
-              total: calcTotal(priceStr, q, c),
+              // Set store to price list name if from price list, otherwise ЭТМ
+              store: r.store || matchedPl || 'ЭТМ',
+              auto_price: !matchedPl,
+              total: calcTotal(priceStr, q || '1', c),
             };
             return next;
           });
@@ -1787,7 +1794,7 @@ export default function SpecPageClient() {
           <div className="sheet-tabs">
             {projectSheets.map((s: any) => {
               const isDraggingThis = tabDrag === s.id;
-              const dropClass = tabDropSide?.id === s.id ? ` drop-${tabDropSide.side}` : '';
+              const dropClass = tabDropSide && tabDropSide.id === s.id ? ` drop-${tabDropSide.side}` : '';
               return (
                 <div
                   key={s.id}

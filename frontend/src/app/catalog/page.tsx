@@ -65,6 +65,7 @@ function CatalogPageInner() {
   const [search, setSearch] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [showSelectSheet, setShowSelectSheet] = useState(false);
+  const addingRef = useRef(false); // prevent double-click race
   const detailRef = useRef<HTMLDivElement>(null);
   // Track whether we've done the initial restore fetch
   const restoredRef = useRef(false);
@@ -249,6 +250,8 @@ function CatalogPageInner() {
 
   async function addToSheet(product: any) {
     if (!activeSheetId) { setShowSelectSheet(true); return; }
+    if (addingRef.current) return; // block concurrent calls
+    addingRef.current = true;
     try {
       const { data: sh } = await sheetsApi.getOne(activeSheetId);
       const existing = (sh.rows || []).filter((r: any) => r.name || r.article);
@@ -293,6 +296,7 @@ function CatalogPageInner() {
       }]);
       toast.success(`«${product.name.slice(0, 40)}» добавлен в лист`);
     } catch { toast.error('Ошибка добавления в лист'); }
+    finally { addingRef.current = false; }
   }
 
   const filteredManufProducts = search

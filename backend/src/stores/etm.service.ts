@@ -431,8 +431,9 @@ export class EtmService {
       return result;
     }
 
-    // Need session
-    let session = await this.getUserSession(userId);
+    // Need session — if caller forced cache skip, also force session refresh
+    // so re-saved credentials are used immediately without waiting for old session to expire
+    let session = await this.getUserSession(userId, !!options.skipCache);
     if (!session) {
       // No user session — return null prices and "нет" terms for fetched articles
       for (const a of toFetch) result[a] = { price: null, term: 'нет' };
