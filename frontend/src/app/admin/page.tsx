@@ -93,7 +93,9 @@ export default function AdminPage() {
   // Tiles (Каталог: База)
   const [tiles, setTiles] = useState<any[]>([]);
   const [editTile, setEditTile] = useState<any | null>(null);
-  const [newTile, setNewTile] = useState({ slug: '', name: '', icon: '⚡', is_large: false, sort_order: 0 });
+  const [tilesManagerOpen, setTilesManagerOpen] = useState(false);
+  const [managedTiles, setManagedTiles] = useState<any[]>([]);
+  const [newTileName, setNewTileName] = useState('');
 
   // Tile data upload
   const [tileDataModal, setTileDataModal] = useState<any | null>(null); // tile being configured
@@ -332,14 +334,92 @@ export default function AdminPage() {
   }
 
   // ── Tiles (Каталог: База) ────────────────────────────────────
-  async function handleCreateTile() {
-    if (!newTile.slug || !newTile.name) { toast.error('Заполните slug и название'); return; }
+  function slugify(name: string): string {
+    const map: Record<string, string> = {
+      'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ё':'yo','ж':'zh','з':'z','и':'i',
+      'й':'y','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r','с':'s','т':'t',
+      'у':'u','ф':'f','х':'kh','ц':'ts','ч':'ch','ш':'sh','щ':'shch','ъ':'','ы':'y',
+      'ь':'','э':'e','ю':'yu','я':'ya',
+    };
+    return name.toLowerCase().split('').map(c => map[c] ?? c).join('')
+      .replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30);
+  }
+
+  function openTilesManager() {
+    setManagedTiles(tiles.map(t => ({ ...t })));
+    setNewTileName('');
+    setTilesManagerOpen(true);
+  }
+
+  function addManagedTile() {
+    if (!newTileName.trim()) return;
+    const name = newTileName.trim();
+    const slug = slugify(name);
+    setManagedTiles(prev => [...prev, {
+      _isNew: true, _tempId: Date.now(),
+      slug, name, icon: '', is_large: false, is_active: true,
+      sort_order: prev.length, products_count: 0,
+    }]);
+    setNewTileName('');
+  }
+
+  function moveTile(idx: number, dir: -1 | 1) {
+    const target = idx + dir;
+    if (target < 0 || target >= managedTiles.length) return;
+    const arr = [...managedTiles];
+    [arr[idx], arr[target]] = [arr[target], arr[idx]];
+    setManagedTiles(arr);
+  }
+
+  function removeManagedTile(idx: number) {
+    setManagedTiles(prev => prev.filter((_, i) => i !== idx));
+  }
+
+  function toggleManagedSize(idx: number) {
+    setManagedTiles(prev => prev.map((t, i) => i === idx ? { ...t, is_large: !t.is_large } : t));
+  }
+
+  function toggleManagedActive(idx: number) {
+    setManagedTiles(prev => prev.map((t, i) => i === idx ? { ...t, is_active: !t.is_active } : t));
+  }
+
+  function updateManagedName(idx: number, name: string) {
+    setManagedTiles(prev => prev.map((t, i) => i === idx ? { ...t, name } : t));
+  }
+
+  async function saveTilesManager() {
     try {
-      await catalogApi.createTile({ ...newTile, filters: [] });
-      toast.success('Категория создана');
-      setNewTile({ slug: '', name: '', icon: '⚡', is_large: false, sort_order: 0 });
+      // Create new tiles
+      for (const t of managedTiles.filter(t => t._isNew)) {
+        await catalogApi.createTile({
+          slug: t.slug, name: t.name, icon: t.icon || '',
+          is_large: t.is_large, is_active: t.is_active,
+          sort_order: managedTiles.indexOf(t), filters: [],
+        });
+      }
+      // Delete removed tiles
+      const managedIds = new Set(managedTiles.filter(t => !t._isNew).map(t => t.id));
+      for (const t of tiles) {
+        if (!managedIds.has(t.id)) {
+          await catalogApi.deleteTile(t.id);
+        }
+      }
+      // Update existing tiles (order, size, active, name)
+      for (let i = 0; i < managedTiles.length; i++) {
+        const t = managedTiles[i];
+        if (t._isNew) continue;
+        const orig = tiles.find(o => o.id === t.id);
+        if (!orig || orig.name !== t.name || orig.is_large !== t.is_large || orig.is_active !== t.is_active || orig.sort_order !== i) {
+          await catalogApi.updateTile(t.id, {
+            name: t.name, is_large: t.is_large, is_active: t.is_active, sort_order: i,
+            slug: t.slug, icon: t.icon,
+          });
+        }
+      }
+      toast.success('Сохранено');
+      setTilesManagerOpen(false);
       loadTiles();
-    } catch { toast.error('Ошибка создания'); }
+    } catch { toast.error('Ошибка сохранения'); }
   }
 
   async function handleDeleteTile(id: number) {
@@ -1244,96 +1324,71 @@ export default function AdminPage() {
           {/* ── Каталог: База (tiles) ── */}
           {tab === 'base' && (
             <>
-              <div className="admin-section-title">Каталог: База</div>
-
-              <div className="admin-form-row" style={{ flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-                <input className="admin-input" placeholder="slug (auto, mold…)" value={newTile.slug}
-                  onChange={e => setNewTile(p => ({ ...p, slug: e.target.value }))} style={{ width: 130 }} />
-                <input className="admin-input" placeholder="Название категории" value={newTile.name}
-                  onChange={e => setNewTile(p => ({ ...p, name: e.target.value }))} style={{ flex: 1, minWidth: 200 }} />
-                <input className="admin-input" placeholder="Иконка" value={newTile.icon}
-                  onChange={e => setNewTile(p => ({ ...p, icon: e.target.value }))} style={{ width: 70 }} />
-                <input className="admin-input" type="number" placeholder="Порядок" value={newTile.sort_order}
-                  onChange={e => setNewTile(p => ({ ...p, sort_order: Number(e.target.value) }))} style={{ width: 80 }} />
-                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 }}>
-                  <input type="checkbox" checked={newTile.is_large} onChange={e => setNewTile(p => ({ ...p, is_large: e.target.checked }))} />
-                  Большая
-                </label>
-                <button className="btn-primary" onClick={handleCreateTile}>+ Добавить</button>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div className="admin-section-title" style={{ margin: 0 }}>Каталог: База</div>
+                <button className="btn-secondary" style={{ fontSize: 13, padding: '6px 14px' }}
+                  onClick={openTilesManager}>Управление плитками</button>
               </div>
 
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Название</th>
-                    <th>Товаров</th>
-                    <th>Файл</th>
-                    <th>Статус</th>
-                    <th>Посещения</th>
-                    <th>Действия</th>
-                  </tr>
-                </thead>
-                <tbody>
+              {tiles.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>
+                  Нет категорий. Нажмите "Управление плитками" чтобы добавить.
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
                   {tiles.map(tile => (
-                    <tr key={tile.id}>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          {tile.image_path
-                            ? <img src={`${process.env.NEXT_PUBLIC_API_URL}/uploads/${tile.image_path.split(/[\\/]/).pop()}`} alt="" style={{ width: 28, height: 28, objectFit: 'cover', borderRadius: 4 }} />
-                            : <span style={{ fontSize: 20 }}>{tile.icon}</span>
-                          }
-                          <div>
-                            <strong>{tile.name}</strong>
-                            <div style={{ fontSize: 11, color: 'var(--muted)' }}>{tile.slug}</div>
+                    <div key={tile.id} style={{
+                      gridColumn: tile.is_large ? '1 / -1' : undefined,
+                      border: '1px solid var(--border)', borderRadius: 8, padding: 16,
+                      background: tile.is_active ? 'var(--card-bg, #fff)' : '#f9f9f9',
+                      opacity: tile.is_active ? 1 : 0.6,
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                        {tile.image_path
+                          ? <img src={`${process.env.NEXT_PUBLIC_API_URL}/uploads/${tile.image_path.split(/[\\/]/).pop()}`}
+                              alt="" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 6 }} />
+                          : tile.icon
+                            ? <div style={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, background: '#f5f5f5', borderRadius: 6 }}>{tile.icon}</div>
+                            : <div style={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, background: '#f5c800', color: '#fff', borderRadius: 6 }}>{tile.name[0]}</div>
+                        }
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: 14 }}>{tile.name}</div>
+                          <div style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', gap: 12 }}>
+                            <span>{tile.products_count || 0} товаров</span>
+                            {tile.data_file_name && <span>{tile.data_file_name}</span>}
+                            {!tile.is_active && <span style={{ color: 'var(--danger)' }}>скрыта</span>}
+                            {tile.is_large && <span>широкая</span>}
                           </div>
                         </div>
-                      </td>
-                      <td style={{ textAlign: 'center', fontWeight: 600 }}>
-                        {tile.products_count || 0}
-                      </td>
-                      <td style={{ fontSize: 12 }}>
-                        {tile.data_file_name || <span style={{ color: 'var(--muted)' }}>--</span>}
-                      </td>
-                      <td>
-                        <span className={tile.is_active ? 'badge badge-green' : 'badge badge-gray'}>
-                          {tile.is_active ? 'виден' : 'скрыт'}
+                        <span className={tile.is_active ? 'badge badge-green' : 'badge badge-gray'} style={{ fontSize: 11 }}>
+                          {tile.is_active ? 'видна' : 'скрыта'}
                         </span>
-                      </td>
-                      <td style={{ textAlign: 'center' }}>{tile.visit_count ?? 0}</td>
-                      <td>
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                          <button className="btn-primary" style={{ fontSize: 12, padding: '4px 10px' }}
-                            onClick={() => openTileDataModal(tile)}>
-                            {tile.products_count > 0 ? 'Обновить данные' : 'Загрузить Excel'}
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        <button className="btn-primary" style={{ fontSize: 12, padding: '5px 12px' }}
+                          onClick={() => openTileDataModal(tile)}>
+                          {tile.products_count > 0 ? 'Обновить данные' : 'Загрузить Excel'}
+                        </button>
+                        <label className="btn-outline" style={{ fontSize: 12, padding: '5px 12px', cursor: 'pointer' }}>
+                          Обложка
+                          <input type="file" accept="image/*" style={{ display: 'none' }}
+                            onChange={e => e.target.files?.[0] && handleUploadTileImage(tile.id, e.target.files[0])} />
+                        </label>
+                        <button className="btn-secondary" style={{ fontSize: 12, padding: '5px 12px' }}
+                          onClick={() => setEditTile({ ...tile })}>
+                          Настройки
+                        </button>
+                        {tile.products_count > 0 && (
+                          <button className="btn-outline" style={{ fontSize: 12, padding: '5px 12px', color: 'var(--danger)' }}
+                            onClick={() => handleDeleteTileData(tile.id)}>
+                            Очистить
                           </button>
-                          <label className="btn-outline" style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer' }}>
-                            Обложка
-                            <input type="file" accept="image/*" style={{ display: 'none' }}
-                              onChange={e => e.target.files?.[0] && handleUploadTileImage(tile.id, e.target.files[0])} />
-                          </label>
-                          <button className="btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}
-                            onClick={() => setEditTile({ ...tile })}>
-                            Настройки
-                          </button>
-                          {tile.products_count > 0 && (
-                            <button className="btn-outline" style={{ fontSize: 12, padding: '4px 10px', color: 'var(--danger)' }}
-                              onClick={() => handleDeleteTileData(tile.id)}>
-                              Очистить
-                            </button>
-                          )}
-                          <button className="btn-danger" style={{ fontSize: 12, padding: '4px 10px' }}
-                            onClick={() => handleDeleteTile(tile.id)}>
-                              Удалить
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                        )}
+                      </div>
+                    </div>
                   ))}
-                  {tiles.length === 0 && (
-                    <tr><td colSpan={6} style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Нет категорий</td></tr>
-                  )}
-                </tbody>
-              </table>
+                </div>
+              )}
             </>
           )}
 
@@ -1433,6 +1488,94 @@ export default function AdminPage() {
               <button className="btn-primary" onClick={() => handleReplace(replaceTarget!)} disabled={!replaceFile || uploading}>
                 {uploading ? 'Загружается…' : 'Заменить'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Tiles manager ── */}
+      {tilesManagerOpen && (
+        <div className="modal-overlay" onClick={() => setTilesManagerOpen(false)}>
+          <div className="modal-box" style={{ maxWidth: 600, width: '90vw', maxHeight: '85vh', overflowY: 'auto' }}
+            onClick={e => e.stopPropagation()}>
+            <div className="modal-title">Управление плитками</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
+              Добавляйте, удаляйте, меняйте порядок и размер плиток каталога.
+            </div>
+
+            {/* Tile list */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
+              {managedTiles.map((t, idx) => (
+                <div key={t.id || t._tempId} style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px',
+                  background: t.is_active ? '#fff' : '#f9f9f9',
+                  opacity: t.is_active ? 1 : 0.5,
+                }}>
+                  {/* Arrows */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <button onClick={() => moveTile(idx, -1)} disabled={idx === 0}
+                      style={{ background: 'none', border: 'none', cursor: idx === 0 ? 'default' : 'pointer', fontSize: 14, color: idx === 0 ? '#ddd' : '#666', padding: 0, lineHeight: 1 }}>
+                      ▲
+                    </button>
+                    <button onClick={() => moveTile(idx, 1)} disabled={idx === managedTiles.length - 1}
+                      style={{ background: 'none', border: 'none', cursor: idx === managedTiles.length - 1 ? 'default' : 'pointer', fontSize: 14, color: idx === managedTiles.length - 1 ? '#ddd' : '#666', padding: 0, lineHeight: 1 }}>
+                      ▼
+                    </button>
+                  </div>
+
+                  {/* Name (editable) */}
+                  <input className="admin-input" value={t.name} style={{ flex: 1, fontSize: 13, fontWeight: 600 }}
+                    onChange={e => updateManagedName(idx, e.target.value)} />
+
+                  {/* Size toggle */}
+                  <button onClick={() => toggleManagedSize(idx)}
+                    title={t.is_large ? 'Широкая плитка' : 'Обычная плитка'}
+                    style={{
+                      background: t.is_large ? '#f5c800' : '#eee', color: t.is_large ? '#fff' : '#999',
+                      border: 'none', borderRadius: 4, padding: '4px 8px', fontSize: 11,
+                      cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap',
+                    }}>
+                    {t.is_large ? 'Широкая' : 'Обычная'}
+                  </button>
+
+                  {/* Active toggle */}
+                  <button onClick={() => toggleManagedActive(idx)}
+                    style={{
+                      background: t.is_active ? '#22c55e' : '#ccc', color: '#fff',
+                      border: 'none', borderRadius: 4, padding: '4px 8px', fontSize: 11,
+                      cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap',
+                    }}>
+                    {t.is_active ? 'Видна' : 'Скрыта'}
+                  </button>
+
+                  {/* Delete */}
+                  <button onClick={() => removeManagedTile(idx)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: '#e55', padding: '0 4px' }}>
+                    ✕
+                  </button>
+                </div>
+              ))}
+              {managedTiles.length === 0 && (
+                <div style={{ textAlign: 'center', padding: 20, color: 'var(--muted)', fontSize: 13 }}>Нет плиток</div>
+              )}
+            </div>
+
+            {/* Add new */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              <input className="admin-input" placeholder="Название новой плитки" value={newTileName}
+                onChange={e => setNewTileName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addManagedTile()}
+                style={{ flex: 1 }} />
+              <button className="btn-primary" style={{ padding: '6px 16px', whiteSpace: 'nowrap' }}
+                onClick={addManagedTile} disabled={!newTileName.trim()}>
+                + Добавить
+              </button>
+            </div>
+
+            <div className="modal-actions">
+              <button className="btn-cancel" onClick={() => setTilesManagerOpen(false)}>Отмена</button>
+              <button className="btn-primary" onClick={saveTilesManager}>Сохранить</button>
             </div>
           </div>
         </div>
