@@ -418,7 +418,7 @@ function CatalogPageInner() {
                     >
                       {tile.image_path
                         ? <img
-                            src={`/uploads/${tile.image_path.split(/[\\/]/).pop()}`}
+                            src={`${process.env.NEXT_PUBLIC_API_URL}/uploads/${tile.image_path.split(/[\\/]/).pop()}`}
                             alt={tile.name}
                             className="category-tile-img"
                           />

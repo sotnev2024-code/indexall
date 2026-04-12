@@ -1279,7 +1279,7 @@ export default function AdminPage() {
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           {tile.image_path
-                            ? <img src={`${getBackendOrigin()}/uploads/${tile.image_path.split(/[\\/]/).pop()}`} alt="" style={{ width: 28, height: 28, objectFit: 'cover', borderRadius: 4 }} />
+                            ? <img src={`${process.env.NEXT_PUBLIC_API_URL}/uploads/${tile.image_path.split(/[\\/]/).pop()}`} alt="" style={{ width: 28, height: 28, objectFit: 'cover', borderRadius: 4 }} />
                             : <span style={{ fontSize: 20 }}>{tile.icon}</span>
                           }
                           <div>
