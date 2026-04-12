@@ -40,7 +40,7 @@ export class CatalogController {
   @Get('filter-options')
   getFilterOptions(@Query('slug') slug: string) {
     if (!slug) return [];
-    return this.botDb.getFilterOptions(slug);
+    return this.service.getTileFilterOptions(slug);
   }
 
   // ── Tiles (public) ────────────────────────────────────────
@@ -72,6 +72,45 @@ export class CatalogController {
     return this.service.uploadTileImage(id, file);
   }
 
+  // ── Tile Data (Excel upload per tile) ─────────────────────
+
+  /** Preview uploaded Excel — returns column headers + first N rows */
+  @Post('tiles/preview-excel')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @UseInterceptors(FileInterceptor('file', { storage: uploadStorage }))
+  previewTileExcel(@UploadedFile() file: Express.Multer.File) {
+    return this.service.previewTileExcel(file.path);
+  }
+
+  /** Upload and parse Excel data for a tile */
+  @Post('tiles/:id/data')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @UseInterceptors(FileInterceptor('file', { storage: uploadStorage }))
+  uploadTileData(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: any,
+  ) {
+    const filters = body.filters ? (typeof body.filters === 'string' ? JSON.parse(body.filters) : body.filters) : [];
+    const mapping = {
+      firstRow: Number(body.firstRow) || 2,
+      nameCol: body.nameCol || '',
+      articleCol: body.articleCol || '',
+      priceCol: body.priceCol || undefined,
+      unitCol: body.unitCol || undefined,
+      brandCol: body.brandCol || undefined,
+      filters,
+    };
+    return this.service.uploadTileData(id, file, mapping);
+  }
+
+  /** Delete tile data (products + file) */
+  @Delete('tiles/:id/data')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  deleteTileData(@Param('id', ParseIntPipe) id: number) {
+    return this.service.deleteTileData(id);
+  }
+
   // ── Public / user endpoints ────────────────────────────────
   @Get('manufacturers')
   getManufacturers() { return this.service.getManufacturers(); }
@@ -101,7 +140,7 @@ export class CatalogController {
     if (filtersRaw) {
       try { extraFilters = JSON.parse(filtersRaw); } catch {}
     }
-    return this.service.getProductsByCategorySlug(slug, brands, extraFilters);
+    return this.service.getProductsBySlug(slug, brands, extraFilters);
   }
 
   @Get('products/:id/analogs')

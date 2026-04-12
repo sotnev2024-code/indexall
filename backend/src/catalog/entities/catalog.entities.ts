@@ -105,4 +105,39 @@ export class CatalogTile {
   @Column({ type: 'jsonb', default: '[]' }) filters: any[];
   @Column({ default: 0 }) visit_count: number;
   @CreateDateColumn() created_at: Date;
+
+  // Data upload fields
+  @Column({ nullable: true }) data_file_name: string;
+  @Column({ nullable: true }) data_file_path: string;
+  @Column({ nullable: true, type: 'jsonb' }) column_mapping: {
+    firstRow: number;
+    nameCol: string;
+    articleCol: string;
+    priceCol: string;
+    unitCol: string;
+    brandCol: string;
+    filters: { col: string; label: string }[];
+  };
+  @Column({ default: 0 }) products_count: number;
+
+  @OneToMany(() => TileProduct, tp => tp.tile)
+  products: TileProduct[];
+}
+
+@Entity('tile_products')
+@Index('idx_tile_products_tile_brand', ['tile_id', 'brand'])
+export class TileProduct {
+  @PrimaryGeneratedColumn() id: number;
+
+  @Column() tile_id: number;
+  @ManyToOne(() => CatalogTile, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'tile_id' })
+  tile: CatalogTile;
+
+  @Column() name: string;
+  @Column({ nullable: true }) article: string;
+  @Column({ nullable: true, type: 'decimal', precision: 12, scale: 2 }) price: number;
+  @Column({ nullable: true }) unit: string;
+  @Column({ nullable: true }) brand: string;
+  @Column({ type: 'jsonb', default: '{}' }) attributes: Record<string, string>;
 }

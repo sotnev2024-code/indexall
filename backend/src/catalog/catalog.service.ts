@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Not, In } from 'typeorm';
-import { Manufacturer, PriceList, PriceListStatus, CatalogCategory, CatalogProduct, ProductAnalog, ProductAccessory, CatalogTile } from './entities/catalog.entities';
+import { Manufacturer, PriceList, PriceListStatus, CatalogCategory, CatalogProduct, ProductAnalog, ProductAccessory, CatalogTile, TileProduct } from './entities/catalog.entities';
 import * as XLSX from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -65,28 +65,25 @@ export class CatalogService implements OnModuleInit {
     @InjectRepository(ProductAnalog) private analogRepo: Repository<ProductAnalog>,
     @InjectRepository(ProductAccessory) private accessoryRepo: Repository<ProductAccessory>,
     @InjectRepository(CatalogTile) private tileRepo: Repository<CatalogTile>,
+    @InjectRepository(TileProduct) private tileProductRepo: Repository<TileProduct>,
     private readonly botDb: BotDbService,
   ) {}
 
   async onModuleInit() {
-    // Upsert default tiles
+    // Seed default tiles only if they don't exist yet (don't overwrite admin-uploaded data)
     for (const t of DEFAULT_TILES) {
       const existing = await this.tileRepo.findOne({ where: { slug: t.slug } });
       if (!existing) {
         await this.tileRepo.save({ ...t, is_active: true });
-      } else {
-        // Keep filters/name in sync when TZ changes
-        await this.tileRepo.update(existing.id, {
-          name: t.name,
-          filters: t.filters as any[],
-          sort_order: t.sort_order,
-          is_active: true,
-        });
       }
     }
-    // Deactivate any tiles that are no longer in TZ (old slugs like uzo, klemmy, etc.)
-    const activeSlugs = DEFAULT_TILES.map(t => t.slug);
-    await this.tileRepo.update({ slug: Not(In(activeSlugs)) }, { is_active: false });
+
+    // Create GIN index on tile_products.attributes for fast JSONB filtering
+    try {
+      await this.tileProductRepo.query(
+        `CREATE INDEX IF NOT EXISTS idx_tile_products_attrs_gin ON tile_products USING GIN (attributes)`,
+      );
+    } catch { /* index may already exist or table not yet synced */ }
   }
 
   // ── Catalog Tiles ─────────────────────────────────────────
@@ -496,5 +493,241 @@ export class CatalogService implements OnModuleInit {
     name = name.replace(/-\d{1,2}[.\-]\d{1,2}[.\-]\d{2,4}$/, '');
     name = name.replace(/-\d{4}-\d{2}-\d{2}$/, '');
     return name.replace(/_/g, ' ').trim();
+  }
+
+  // ── Tile Data (Excel upload per tile) ─────────────────────
+
+  /** Preview first N rows of uploaded Excel file */
+  previewTileExcel(filePath: string, maxRows = 7): { headers: string[]; rows: any[][] } {
+    const workbook = XLSX.readFile(filePath);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const allRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+    // Build column headers: A, B, C, ...
+    const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+    const colCount = range.e.c + 1;
+    const headers = Array.from({ length: colCount }, (_, i) => XLSX.utils.encode_col(i));
+
+    return { headers, rows: allRows.slice(0, maxRows) };
+  }
+
+  /** Upload and parse Excel data into tile_products for a tile */
+  async uploadTileData(
+    tileId: number,
+    file: Express.Multer.File,
+    mapping: {
+      firstRow: number;
+      nameCol: string;
+      articleCol: string;
+      priceCol?: string;
+      unitCol?: string;
+      brandCol?: string;
+      filters: { col: string; label: string }[];
+    },
+  ) {
+    const tile = await this.tileRepo.findOne({ where: { id: tileId } });
+    if (!tile) throw new NotFoundException('Tile not found');
+
+    // Remove old data file
+    if (tile.data_file_path) {
+      try { fs.unlinkSync(tile.data_file_path); } catch {}
+    }
+
+    // Delete old products for this tile
+    await this.tileProductRepo.delete({ tile_id: tileId });
+
+    // Parse Excel
+    const workbook = XLSX.readFile(file.path);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const allRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+    const firstRow = Number(mapping.firstRow) - 1; // 1-based → 0-based
+    const nameIdx = XLSX.utils.decode_col(mapping.nameCol.toUpperCase());
+    const artIdx = mapping.articleCol ? XLSX.utils.decode_col(mapping.articleCol.toUpperCase()) : -1;
+    const priceIdx = mapping.priceCol ? XLSX.utils.decode_col(mapping.priceCol.toUpperCase()) : -1;
+    const unitIdx = mapping.unitCol ? XLSX.utils.decode_col(mapping.unitCol.toUpperCase()) : -1;
+    const brandIdx = mapping.brandCol ? XLSX.utils.decode_col(mapping.brandCol.toUpperCase()) : -1;
+    const filterCols = (mapping.filters || []).map(f => ({
+      idx: XLSX.utils.decode_col(f.col.toUpperCase()),
+      label: f.label,
+    }));
+
+    // Collect filter distinct values
+    const filterDistinct: Record<string, Set<string>> = {};
+    for (const f of filterCols) {
+      filterDistinct[f.label] = new Set();
+    }
+
+    // Batch insert for performance
+    const batch: Partial<TileProduct>[] = [];
+
+    for (let i = firstRow; i < allRows.length; i++) {
+      const row = allRows[i];
+      const name = String(row[nameIdx] || '').trim();
+      if (!name) continue;
+
+      const article = artIdx >= 0 ? String(row[artIdx] || '').trim() : '';
+      const rawPrice = priceIdx >= 0 ? String(row[priceIdx] || '').replace(/\s/g, '').replace(',', '.') : '';
+      const price = rawPrice ? parseFloat(rawPrice) : null;
+      const unit = unitIdx >= 0 ? String(row[unitIdx] || '').trim() : '';
+      const brand = brandIdx >= 0 ? String(row[brandIdx] || '').trim() : '';
+
+      const attributes: Record<string, string> = {};
+      for (const fc of filterCols) {
+        const val = String(row[fc.idx] || '').trim();
+        if (val) {
+          attributes[fc.label] = val;
+          filterDistinct[fc.label].add(val);
+        }
+      }
+
+      batch.push({
+        tile_id: tileId,
+        name,
+        article: article || null,
+        price: price && !isNaN(price) && price > 0 ? price : null,
+        unit: unit || null,
+        brand: brand || null,
+        attributes,
+      });
+    }
+
+    // Insert in chunks of 500 for efficiency
+    for (let i = 0; i < batch.length; i += 500) {
+      await this.tileProductRepo.insert(batch.slice(i, i + 500));
+    }
+
+    // Build auto-computed filters with sorted distinct values
+    const computedFilters: { label: string; opts: string[] }[] = [];
+
+    // Add brand filter if brand column is mapped and has values
+    if (brandIdx >= 0) {
+      const brandValues = new Set<string>();
+      for (const p of batch) { if (p.brand) brandValues.add(p.brand); }
+      if (brandValues.size > 0) {
+        computedFilters.push({
+          label: 'Производитель',
+          opts: [...brandValues].sort((a, b) => a.localeCompare(b, 'ru')),
+        });
+      }
+    }
+
+    // Add attribute-based filters
+    for (const fc of filterCols) {
+      const vals = filterDistinct[fc.label];
+      if (vals.size === 0) continue;
+      const sorted = [...vals].sort((a, b) => {
+        const na = parseFloat(a), nb = parseFloat(b);
+        if (!isNaN(na) && !isNaN(nb)) return na - nb;
+        return a.localeCompare(b, 'ru');
+      });
+      computedFilters.push({ label: fc.label, opts: sorted });
+    }
+
+    // Update tile with metadata
+    const fixedName = this.fixFilenameEncoding(file.originalname);
+    await this.tileRepo.update(tileId, {
+      data_file_name: fixedName,
+      data_file_path: file.path,
+      column_mapping: mapping as any,
+      products_count: batch.length,
+      filters: computedFilters as any,
+    });
+
+    return { productsCount: batch.length, filters: computedFilters };
+  }
+
+  /** Get tile products with filtering (for user-facing catalog) */
+  async getTileProducts(
+    tileId: number,
+    brands?: string[],
+    extraFilters?: Record<string, string[]>,
+    limit = 2000,
+  ): Promise<any[]> {
+    const qb = this.tileProductRepo.createQueryBuilder('tp')
+      .where('tp.tile_id = :tileId', { tileId });
+
+    if (brands?.length) {
+      qb.andWhere('tp.brand IN (:...brands)', { brands });
+    }
+
+    if (extraFilters) {
+      let paramIdx = 0;
+      for (const [label, values] of Object.entries(extraFilters)) {
+        if (!values?.length) continue;
+        paramIdx++;
+        qb.andWhere(`tp.attributes->>:lbl${paramIdx} IN (:...vls${paramIdx})`, {
+          [`lbl${paramIdx}`]: label,
+          [`vls${paramIdx}`]: values,
+        });
+      }
+    }
+
+    const rows = await qb.orderBy('tp.name').limit(limit).getMany();
+
+    // Normalize to same shape as catalog_products (manufacturer object)
+    return rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      article: r.article,
+      price: r.price,
+      unit: r.unit,
+      attributes: r.attributes,
+      manufacturer: r.brand ? { name: r.brand } : null,
+    }));
+  }
+
+  /** Get filter options for a tile (from pre-computed tile.filters or botDb fallback) */
+  async getTileFilterOptions(slug: string): Promise<{ label: string; opts: string[] }[]> {
+    const tile = await this.tileRepo.findOne({ where: { slug } });
+    if (!tile) return [];
+
+    // If tile has uploaded data, return pre-computed filters
+    if (tile.products_count > 0 && tile.filters?.length) {
+      return tile.filters;
+    }
+
+    // Fallback to bot DB for legacy tiles without uploaded data
+    if (this.botDb.isAvailable) {
+      return this.botDb.getFilterOptions(slug);
+    }
+
+    return tile.filters || [];
+  }
+
+  /** Get products for user-facing catalog by slug (tile_products or botDb fallback) */
+  async getProductsBySlug(slug: string, brands?: string[], extraFilters?: Record<string, string[]>): Promise<any[]> {
+    const tile = await this.tileRepo.findOne({ where: { slug } });
+    if (!tile) return [];
+
+    // If tile has uploaded data, use tile_products
+    if (tile.products_count > 0) {
+      return this.getTileProducts(tile.id, brands, extraFilters);
+    }
+
+    // Fallback to existing logic (botDb or keyword-matching)
+    return this.getProductsByCategorySlug(slug, brands, extraFilters);
+  }
+
+  /** Delete tile data (products + file) */
+  async deleteTileData(tileId: number) {
+    const tile = await this.tileRepo.findOne({ where: { id: tileId } });
+    if (!tile) throw new NotFoundException('Tile not found');
+
+    await this.tileProductRepo.delete({ tile_id: tileId });
+
+    if (tile.data_file_path) {
+      try { fs.unlinkSync(tile.data_file_path); } catch {}
+    }
+
+    await this.tileRepo.update(tileId, {
+      data_file_name: null,
+      data_file_path: null,
+      column_mapping: null,
+      products_count: 0,
+      filters: [] as any,
+    });
+
+    return { success: true };
   }
 }

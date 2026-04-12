@@ -118,7 +118,11 @@ export const catalogApi = {
   updateTile: (id: number, data: any) => api.put(`/catalog/tiles/${id}`, data),
   deleteTile: (id: number) => api.delete(`/catalog/tiles/${id}`),
   uploadTileImage: (id: number, fd: FormData) => api.post(`/catalog/tiles/${id}/image`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }),
-  /** Returns dynamic filter options from bot_database.db for a given category slug */
+  // Tile data (Excel upload per tile)
+  previewTileExcel: (fd: FormData) => api.post<{ headers: string[]; rows: any[][] }>('/catalog/tiles/preview-excel', fd, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  uploadTileData: (id: number, fd: FormData) => api.post('/catalog/tiles/' + id + '/data', fd, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  deleteTileData: (id: number) => api.delete(`/catalog/tiles/${id}/data`),
+  /** Returns dynamic filter options for a given category slug */
   getFilterOptions: (slug: string) => api.get<{ label: string; opts: string[] }[]>('/catalog/filter-options', { params: { slug } }),
   getPricesByArticles: (articles: string[]) => api.post<Record<string, { price: number; manufacturer: string } | null>>('/catalog/prices-by-articles', { articles }),
 };

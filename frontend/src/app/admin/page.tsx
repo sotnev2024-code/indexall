@@ -95,6 +95,14 @@ export default function AdminPage() {
   const [editTile, setEditTile] = useState<any | null>(null);
   const [newTile, setNewTile] = useState({ slug: '', name: '', icon: '⚡', is_large: false, sort_order: 0 });
 
+  // Tile data upload
+  const [tileDataModal, setTileDataModal] = useState<any | null>(null); // tile being configured
+  const [tileFile, setTileFile] = useState<File | null>(null);
+  const [tilePreview, setTilePreview] = useState<{ headers: string[]; rows: any[][] } | null>(null);
+  const [tileMapping, setTileMapping] = useState({ firstRow: '2', nameCol: '', articleCol: '', priceCol: '', unitCol: '', brandCol: '' });
+  const [tileFilterCols, setTileFilterCols] = useState<{ col: string; label: string }[]>([]);
+  const [tileUploading, setTileUploading] = useState(false);
+
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
@@ -335,7 +343,7 @@ export default function AdminPage() {
   }
 
   async function handleDeleteTile(id: number) {
-    if (!confirm('Удалить категорию?')) return;
+    if (!confirm('Удалить категорию и все её товары?')) return;
     try { await catalogApi.deleteTile(id); toast.success('Удалено'); loadTiles(); }
     catch { toast.error('Ошибка удаления'); }
   }
@@ -346,7 +354,7 @@ export default function AdminPage() {
       await catalogApi.updateTile(editTile.id, {
         slug: editTile.slug, name: editTile.name, icon: editTile.icon,
         is_large: editTile.is_large, sort_order: editTile.sort_order,
-        is_active: editTile.is_active, filters: editTile.filters,
+        is_active: editTile.is_active,
       });
       toast.success('Сохранено');
       setEditTile(null);
@@ -360,36 +368,72 @@ export default function AdminPage() {
     catch { toast.error('Ошибка загрузки обложки'); }
   }
 
-  // ── Filter group helpers ─────────────────────────────────────
-  function addFilterGroup() {
-    if (!editTile) return;
-    setEditTile({ ...editTile, filters: [...(editTile.filters || []), { label: '', opts: [] }] });
+  // ── Tile data upload ────────────────────────────────────────
+  function openTileDataModal(tile: any) {
+    setTileDataModal(tile);
+    setTileFile(null);
+    setTilePreview(null);
+    setTileFilterCols(tile.column_mapping?.filters || []);
+    setTileMapping({
+      firstRow: String(tile.column_mapping?.firstRow || 2),
+      nameCol: tile.column_mapping?.nameCol || '',
+      articleCol: tile.column_mapping?.articleCol || '',
+      priceCol: tile.column_mapping?.priceCol || '',
+      unitCol: tile.column_mapping?.unitCol || '',
+      brandCol: tile.column_mapping?.brandCol || '',
+    });
   }
-  function removeFilterGroup(gi: number) {
-    if (!editTile) return;
-    setEditTile({ ...editTile, filters: editTile.filters.filter((_: any, i: number) => i !== gi) });
+
+  function handleTileFileChange(f: File | null) {
+    setTileFile(f);
+    setTilePreview(null);
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target?.result, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const raw: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        const ref = ws['!ref'];
+        const range = ref ? XLSX.utils.decode_range(ref) : null;
+        const maxCol = range ? range.e.c : 30;
+        const headers = Array.from({ length: maxCol + 1 }, (_, i) => XLSX.utils.encode_col(i));
+        const rows = raw.slice(0, 7).map(r => headers.map((_, ci) => String(r[ci] ?? '')));
+        setTilePreview({ headers, rows });
+      } catch { toast.error('Не удалось прочитать файл'); }
+    };
+    reader.readAsArrayBuffer(f);
   }
-  function updateFilterGroupLabel(gi: number, label: string) {
-    if (!editTile) return;
-    const f = [...editTile.filters]; f[gi] = { ...f[gi], label };
-    setEditTile({ ...editTile, filters: f });
+
+  async function handleUploadTileData() {
+    if (!tileDataModal || !tileFile) return;
+    if (!tileMapping.nameCol) { toast.error('Укажите столбец названия'); return; }
+    setTileUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', tileFile);
+      fd.append('firstRow', tileMapping.firstRow);
+      fd.append('nameCol', tileMapping.nameCol);
+      fd.append('articleCol', tileMapping.articleCol);
+      if (tileMapping.priceCol) fd.append('priceCol', tileMapping.priceCol);
+      if (tileMapping.unitCol) fd.append('unitCol', tileMapping.unitCol);
+      if (tileMapping.brandCol) fd.append('brandCol', tileMapping.brandCol);
+      fd.append('filters', JSON.stringify(tileFilterCols.filter(f => f.col && f.label)));
+      const { data } = await catalogApi.uploadTileData(tileDataModal.id, fd);
+      toast.success(`Загружено ${data.productsCount} товаров`);
+      setTileDataModal(null);
+      loadTiles();
+    } catch { toast.error('Ошибка загрузки данных'); }
+    finally { setTileUploading(false); }
   }
-  function addFilterOption(gi: number) {
-    if (!editTile) return;
-    const f = [...editTile.filters];
-    f[gi] = { ...f[gi], opts: [...(f[gi].opts || []), ''] };
-    setEditTile({ ...editTile, filters: f });
-  }
-  function updateFilterOption(gi: number, oi: number, val: string) {
-    if (!editTile) return;
-    const f = [...editTile.filters]; const opts = [...f[gi].opts]; opts[oi] = val;
-    f[gi] = { ...f[gi], opts }; setEditTile({ ...editTile, filters: f });
-  }
-  function removeFilterOption(gi: number, oi: number) {
-    if (!editTile) return;
-    const f = [...editTile.filters];
-    f[gi] = { ...f[gi], opts: f[gi].opts.filter((_: any, i: number) => i !== oi) };
-    setEditTile({ ...editTile, filters: f });
+
+  async function handleDeleteTileData(id: number) {
+    if (!confirm('Удалить все товары этой категории?')) return;
+    try {
+      await catalogApi.deleteTileData(id);
+      toast.success('Данные удалены');
+      loadTiles();
+    } catch { toast.error('Ошибка удаления данных'); }
   }
 
   // ── Pricelist upload / replace ───────────────────────────────
@@ -1222,10 +1266,10 @@ export default function AdminPage() {
                 <thead>
                   <tr>
                     <th>Название</th>
-                    <th>Дата загрузки</th>
+                    <th>Товаров</th>
+                    <th>Файл</th>
                     <th>Статус</th>
                     <th>Посещения</th>
-                    <th>Вставлено</th>
                     <th>Действия</th>
                   </tr>
                 </thead>
@@ -1238,31 +1282,48 @@ export default function AdminPage() {
                             ? <img src={`${getBackendOrigin()}/uploads/${tile.image_path.split(/[\\/]/).pop()}`} alt="" style={{ width: 28, height: 28, objectFit: 'cover', borderRadius: 4 }} />
                             : <span style={{ fontSize: 20 }}>{tile.icon}</span>
                           }
-                          <strong>{tile.name}</strong>
+                          <div>
+                            <strong>{tile.name}</strong>
+                            <div style={{ fontSize: 11, color: 'var(--muted)' }}>{tile.slug}</div>
+                          </div>
                         </div>
                       </td>
-                      <td style={{ fontSize: 12 }}>{fmtDate(tile.created_at)}</td>
+                      <td style={{ textAlign: 'center', fontWeight: 600 }}>
+                        {tile.products_count || 0}
+                      </td>
+                      <td style={{ fontSize: 12 }}>
+                        {tile.data_file_name || <span style={{ color: 'var(--muted)' }}>--</span>}
+                      </td>
                       <td>
                         <span className={tile.is_active ? 'badge badge-green' : 'badge badge-gray'}>
                           {tile.is_active ? 'виден' : 'скрыт'}
                         </span>
                       </td>
                       <td style={{ textAlign: 'center' }}>{tile.visit_count ?? 0}</td>
-                      <td style={{ textAlign: 'center' }}>—</td>
                       <td>
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          <button className="btn-primary" style={{ fontSize: 12, padding: '4px 10px' }}
+                            onClick={() => openTileDataModal(tile)}>
+                            {tile.products_count > 0 ? 'Обновить данные' : 'Загрузить Excel'}
+                          </button>
                           <label className="btn-outline" style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer' }}>
-                            заменить
+                            Обложка
                             <input type="file" accept="image/*" style={{ display: 'none' }}
                               onChange={e => e.target.files?.[0] && handleUploadTileImage(tile.id, e.target.files[0])} />
                           </label>
                           <button className="btn-secondary" style={{ fontSize: 12, padding: '4px 10px' }}
-                            onClick={() => setEditTile({ ...tile, filters: tile.filters || [] })}>
-                            Редактировать
+                            onClick={() => setEditTile({ ...tile })}>
+                            Настройки
                           </button>
+                          {tile.products_count > 0 && (
+                            <button className="btn-outline" style={{ fontSize: 12, padding: '4px 10px', color: 'var(--danger)' }}
+                              onClick={() => handleDeleteTileData(tile.id)}>
+                              Очистить
+                            </button>
+                          )}
                           <button className="btn-danger" style={{ fontSize: 12, padding: '4px 10px' }}
                             onClick={() => handleDeleteTile(tile.id)}>
-                            Удалить
+                              Удалить
                           </button>
                         </div>
                       </td>
@@ -1377,19 +1438,18 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* ── Modal: Edit tile ── */}
+      {/* ── Modal: Edit tile settings ── */}
       {editTile && (
         <div className="modal-overlay" onClick={() => setEditTile(null)}>
-          <div className="modal-box" style={{ maxWidth: 640, width: '90vw', maxHeight: '85vh', overflowY: 'auto' }}
-            onClick={e => e.stopPropagation()}>
-            <div className="modal-title">Редактировать категорию</div>
+          <div className="modal-box" style={{ maxWidth: 520, width: '90vw' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-title">Настройки категории</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
               <div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>Slug</div>
                 <input className="admin-input" value={editTile.slug} onChange={e => setEditTile((p: any) => ({ ...p, slug: e.target.value }))} />
               </div>
               <div>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>Иконка (emoji)</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>Иконка</div>
                 <input className="admin-input" value={editTile.icon} onChange={e => setEditTile((p: any) => ({ ...p, icon: e.target.value }))} />
               </div>
               <div style={{ gridColumn: '1 / -1' }}>
@@ -1411,37 +1471,152 @@ export default function AdminPage() {
                 </label>
               </div>
             </div>
-            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginBottom: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>Группы фильтров</div>
-                <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: 11 }} onClick={addFilterGroup}>+ Группу</button>
-              </div>
-              {(editTile.filters || []).map((fg: any, gi: number) => (
-                <div key={gi} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 10, marginBottom: 10 }}>
-                  <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-                    <input className="admin-input" style={{ flex: 1 }} placeholder="Название группы фильтра"
-                      value={fg.label} onChange={e => updateFilterGroupLabel(gi, e.target.value)} />
-                    <button style={{ fontSize: 11, color: 'var(--danger)', cursor: 'pointer', background: 'none', border: 'none' }}
-                      onClick={() => removeFilterGroup(gi)}>✕ удалить</button>
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {(fg.opts || []).map((opt: string, oi: number) => (
-                      <div key={oi} style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 6px' }}>
-                        <input style={{ border: 'none', background: 'transparent', outline: 'none', fontSize: 12, width: 60 }}
-                          value={opt} onChange={e => updateFilterOption(gi, oi, e.target.value)} />
-                        <button style={{ fontSize: 11, color: 'var(--muted)', cursor: 'pointer', background: 'none', border: 'none' }}
-                          onClick={() => removeFilterOption(gi, oi)}>✕</button>
-                      </div>
-                    ))}
-                    <button className="btn-secondary" style={{ padding: '2px 8px', fontSize: 11 }}
-                      onClick={() => addFilterOption(gi)}>+ значение</button>
-                  </div>
+            {editTile.filters?.length > 0 && (
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginBottom: 12 }}>
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Текущие фильтры (автоматические из Excel)</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {editTile.filters.map((fg: any, i: number) => (
+                    <span key={i} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, padding: '3px 8px', fontSize: 12 }}>
+                      {fg.label} ({fg.opts?.length || 0})
+                    </span>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
             <div className="modal-actions">
               <button className="btn-cancel" onClick={() => setEditTile(null)}>Отмена</button>
               <button className="btn-primary" onClick={handleSaveTile}>Сохранить</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Tile data upload ── */}
+      {tileDataModal && (
+        <div className="modal-overlay" onClick={() => setTileDataModal(null)}>
+          <div className="modal-box" style={{ maxWidth: 900, width: '95vw', maxHeight: '90vh', overflowY: 'auto' }}
+            onClick={e => e.stopPropagation()}>
+            <div className="modal-title">
+              {tileDataModal.products_count > 0 ? 'Обновить данные' : 'Загрузить данные'}: {tileDataModal.name}
+            </div>
+            {tileDataModal.products_count > 0 && (
+              <div style={{ background: '#fff8e1', border: '1px solid #f5c800', borderRadius: 6, padding: '8px 12px', marginBottom: 16, fontSize: 13 }}>
+                Сейчас загружено {tileDataModal.products_count} товаров. При загрузке нового файла старые данные будут полностью заменены.
+              </div>
+            )}
+
+            {/* File upload */}
+            <label style={{ display: 'block', border: '2px dashed var(--border)', borderRadius: 8, padding: 20, textAlign: 'center', cursor: 'pointer', marginBottom: 16, background: tileFile ? '#f0fdf4' : undefined }}>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>
+                {tileFile ? tileFile.name : 'Выберите .xlsx файл'}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>Нажмите для выбора файла</div>
+              <input type="file" accept=".xlsx,.xls" style={{ display: 'none' }}
+                onChange={e => handleTileFileChange(e.target.files?.[0] || null)} />
+            </label>
+
+            {/* Preview table */}
+            {tilePreview && (
+              <>
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Предпросмотр (первые 7 строк)</div>
+                <div style={{ overflowX: 'auto', marginBottom: 16, border: '1px solid var(--border)', borderRadius: 6 }}>
+                  <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ padding: '4px 6px', background: '#f5f5f5', fontWeight: 700, borderBottom: '1px solid var(--border)', position: 'sticky', left: 0 }}>#</th>
+                        {tilePreview.headers.map(h => (
+                          <th key={h} style={{ padding: '4px 8px', background: '#f5f5f5', fontWeight: 700, borderBottom: '1px solid var(--border)', minWidth: 60 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tilePreview.rows.map((row, ri) => (
+                        <tr key={ri} style={{ background: ri + 1 < Number(tileMapping.firstRow) ? '#f9f9f9' : undefined }}>
+                          <td style={{ padding: '3px 6px', borderBottom: '1px solid #eee', fontWeight: 600, color: 'var(--muted)' }}>{ri + 1}</td>
+                          {row.map((cell: string, ci: number) => (
+                            <td key={ci} style={{ padding: '3px 8px', borderBottom: '1px solid #eee', whiteSpace: 'nowrap', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{cell}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Column mapping */}
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Маппинг столбцов</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8, marginBottom: 16 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Первая строка данных *</div>
+                    <input className="admin-input" type="number" value={tileMapping.firstRow}
+                      onChange={e => setTileMapping(m => ({ ...m, firstRow: e.target.value }))} style={{ width: '100%' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Название *</div>
+                    <input className="admin-input" placeholder="напр. B" value={tileMapping.nameCol}
+                      onChange={e => setTileMapping(m => ({ ...m, nameCol: e.target.value.toUpperCase() }))} style={{ width: '100%' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Артикул</div>
+                    <input className="admin-input" placeholder="напр. C" value={tileMapping.articleCol}
+                      onChange={e => setTileMapping(m => ({ ...m, articleCol: e.target.value.toUpperCase() }))} style={{ width: '100%' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Цена</div>
+                    <input className="admin-input" placeholder="напр. F" value={tileMapping.priceCol}
+                      onChange={e => setTileMapping(m => ({ ...m, priceCol: e.target.value.toUpperCase() }))} style={{ width: '100%' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Ед. изм.</div>
+                    <input className="admin-input" placeholder="напр. E" value={tileMapping.unitCol}
+                      onChange={e => setTileMapping(m => ({ ...m, unitCol: e.target.value.toUpperCase() }))} style={{ width: '100%' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Бренд</div>
+                    <input className="admin-input" placeholder="напр. D" value={tileMapping.brandCol}
+                      onChange={e => setTileMapping(m => ({ ...m, brandCol: e.target.value.toUpperCase() }))} style={{ width: '100%' }} />
+                  </div>
+                </div>
+
+                {/* Filter columns */}
+                <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginBottom: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>Столбцы-фильтры</div>
+                    <button className="btn-secondary" style={{ padding: '3px 10px', fontSize: 11 }}
+                      onClick={() => setTileFilterCols(f => [...f, { col: '', label: '' }])}>+ Фильтр</button>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+                    Укажите букву столбца и название фильтра, которое увидят пользователи. Значения фильтра вычислятся автоматически.
+                  </div>
+                  {tileFilterCols.map((fc, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+                      <input className="admin-input" placeholder="Столбец (G)" value={fc.col} style={{ width: 80 }}
+                        onChange={e => {
+                          const arr = [...tileFilterCols];
+                          arr[i] = { ...arr[i], col: e.target.value.toUpperCase() };
+                          setTileFilterCols(arr);
+                        }} />
+                      <input className="admin-input" placeholder="Название фильтра (Ток, А)" value={fc.label} style={{ flex: 1 }}
+                        onChange={e => {
+                          const arr = [...tileFilterCols];
+                          arr[i] = { ...arr[i], label: e.target.value };
+                          setTileFilterCols(arr);
+                        }} />
+                      <button style={{ fontSize: 13, color: 'var(--danger)', cursor: 'pointer', background: 'none', border: 'none', padding: '4px' }}
+                        onClick={() => setTileFilterCols(f => f.filter((_, fi) => fi !== i))}>
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div className="modal-actions">
+              <button className="btn-cancel" onClick={() => setTileDataModal(null)}>Отмена</button>
+              <button className="btn-primary" onClick={handleUploadTileData}
+                disabled={!tileFile || !tileMapping.nameCol || tileUploading}>
+                {tileUploading ? 'Загрузка...' : 'Загрузить данные'}
+              </button>
             </div>
           </div>
         </div>
