@@ -505,71 +505,62 @@ export class CatalogService implements OnModuleInit {
 
   /** Tree format parser: category = row where mapped product columns (name, article, price)
    *  are ALL empty, but some other cell has text. Products = rows with name or article.
-   *  Category right after category = child (deeper level).
-   *  Category after product(s) = sibling of the previous category at that level. */
+   *  All categories are flat (one level) — each category row becomes a direct child of root.
+   *  Products after a category row belong to that category. */
   private async parseTreeFormat(
     plId: number, rows: any[][], firstRow: number,
     nameCol: number, artCol: number, priceCol: number,
     manufacturerId: number,
   ) {
-    const catStack: { id: number; name: string }[] = [];
-    let lastRowWasCategory = false;
+    let currentCatId: number | null = null;
     let productCount = 0;
     let catCount = 0;
+    const catCache: Map<string, number> = new Map();
 
     for (let i = firstRow; i < rows.length; i++) {
       const row = rows[i];
       const productName = String(row[nameCol] || '').trim();
       const article = String(row[artCol] || '').trim();
       const rawPrice = priceCol >= 0 ? String(row[priceCol] || '').replace(/\s/g, '').replace(',', '.').replace(/-/g, '.') : '';
-      const hasPrice = rawPrice && !isNaN(parseFloat(rawPrice)) && parseFloat(rawPrice) > 0;
 
       // If product name column OR article column has text → it's a product
       if (productName || article) {
-        const parentId = catStack.length > 0 ? catStack[catStack.length - 1].id : null;
         const price = rawPrice ? parseFloat(rawPrice) : null;
         await this.prodRepo.save({
           manufacturer_id: manufacturerId,
-          category_id: parentId,
+          category_id: currentCatId,
           name: productName || article,
           article: article || null,
           is_active: true,
           ...(price && !isNaN(price) && price > 0 ? { price } : {}),
         });
         productCount++;
-        lastRowWasCategory = false;
         continue;
       }
 
       // Product columns empty — check if any other cell has text → category
       const firstNonEmpty = row.find((cell: any) => String(cell || '').trim());
-      if (!firstNonEmpty) continue; // completely empty row
+      if (!firstNonEmpty) continue;
       const categoryName = String(firstNonEmpty).trim();
       if (!categoryName) continue;
 
-      // Category row detected
-      if (lastRowWasCategory) {
-        // Category after category → go deeper (child)
-      } else {
-        // Category after product(s) → sibling: pop back to parent level
-        if (catStack.length > 0) catStack.pop();
-      }
-
-      const parentId = catStack.length > 0 ? catStack[catStack.length - 1].id : null;
-      let cat = await this.catRepo.findOne({
-        where: { name: categoryName, manufacturer_id: manufacturerId, parent_id: parentId ?? undefined },
-      });
-      if (!cat) {
-        cat = await this.catRepo.save({
-          name: categoryName, manufacturer_id: manufacturerId, parent_id: parentId,
-          price_list_id: plId, sort_order: catCount,
+      // Flat category: all categories at root level, no nesting
+      if (!catCache.has(categoryName)) {
+        let cat = await this.catRepo.findOne({
+          where: { name: categoryName, manufacturer_id: manufacturerId, parent_id: null as any },
         });
-      } else if (cat.price_list_id !== plId) {
-        await this.catRepo.update(cat.id, { price_list_id: plId });
+        if (!cat) {
+          cat = await this.catRepo.save({
+            name: categoryName, manufacturer_id: manufacturerId, parent_id: null,
+            price_list_id: plId, sort_order: catCount,
+          });
+        } else if (cat.price_list_id !== plId) {
+          await this.catRepo.update(cat.id, { price_list_id: plId });
+        }
+        catCache.set(categoryName, cat.id);
+        catCount++;
       }
-      catStack.push({ id: cat.id, name: categoryName });
-      catCount++;
-      lastRowWasCategory = true;
+      currentCatId = catCache.get(categoryName)!;
     }
     console.log(`Parsed ${productCount} products, ${catCount} categories (tree format) for price list ${plId}`);
   }
