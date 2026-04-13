@@ -388,6 +388,25 @@ function CatalogPageInner() {
               )}
             </div>
           )}
+          {/* Accessories */}
+          {selectedProduct.accessories?.length > 0 && (
+            <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Аксессуары</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {selectedProduct.accessories.map((acc: any, ai: number) => (
+                  <div key={ai} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '4px 8px', background: 'var(--bg)', borderRadius: 4 }}>
+                    <span style={{ color: 'var(--muted)', minWidth: 100 }}>{acc.type}</span>
+                    <span style={{ flex: 1 }}>{acc.name}</span>
+                    {acc.article && <span style={{ color: 'var(--muted)', fontSize: 11 }}>{acc.article}</span>}
+                    <button className="btn-add-to-list" style={{ padding: '2px 8px', fontSize: 11 }}
+                      onClick={e => { e.stopPropagation(); addToSheet({ name: acc.name, article: acc.article, manufacturer: selectedProduct.manufacturer }); }}>
+                      +
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         <button
           className="btn-add-to-list"

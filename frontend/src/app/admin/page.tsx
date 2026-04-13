@@ -116,7 +116,7 @@ export default function AdminPage() {
   const [tileDataModal, setTileDataModal] = useState<any | null>(null); // tile being configured
   const [tileFile, setTileFile] = useState<File | null>(null);
   const [tilePreview, setTilePreview] = useState<{ headers: string[]; rows: any[][] } | null>(null);
-  const [tileMapping, setTileMapping] = useState({ firstRow: '2', nameCol: '', articleCol: '', priceCol: '', unitCol: '', brandCol: '' });
+  const [tileMapping, setTileMapping] = useState({ firstRow: '2', nameCol: '', articleCol: '', priceCol: '', unitCol: '', brandCol: '', accessoriesStartCol: '' });
   const [tileFilterCols, setTileFilterCols] = useState<{ col: string; label: string }[]>([]);
   const [tileUploading, setTileUploading] = useState(false);
 
@@ -476,6 +476,7 @@ export default function AdminPage() {
       priceCol: tile.column_mapping?.priceCol || '',
       unitCol: tile.column_mapping?.unitCol || '',
       brandCol: tile.column_mapping?.brandCol || '',
+      accessoriesStartCol: tile.column_mapping?.accessoriesStartCol || '',
     });
   }
 
@@ -513,6 +514,7 @@ export default function AdminPage() {
       if (tileMapping.priceCol) fd.append('priceCol', tileMapping.priceCol);
       if (tileMapping.unitCol) fd.append('unitCol', tileMapping.unitCol);
       if (tileMapping.brandCol) fd.append('brandCol', tileMapping.brandCol);
+      if (tileMapping.accessoriesStartCol) fd.append('accessoriesStartCol', tileMapping.accessoriesStartCol);
       fd.append('filters', JSON.stringify(tileFilterCols.filter(f => f.col && f.label)));
       const { data } = await catalogApi.uploadTileData(tileDataModal.id, fd);
       toast.success(`Загружено ${data.productsCount} товаров`);
@@ -1735,6 +1737,11 @@ export default function AdminPage() {
                     <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Бренд</div>
                     <input className="admin-input" placeholder="напр. D" value={tileMapping.brandCol}
                       onChange={e => setTileMapping(m => ({ ...m, brandCol: normalizeCol(e.target.value) }))} style={{ width: '100%' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Аксессуары с</div>
+                    <input className="admin-input" placeholder="напр. P или 16" value={tileMapping.accessoriesStartCol}
+                      onChange={e => setTileMapping(m => ({ ...m, accessoriesStartCol: normalizeCol(e.target.value) }))} style={{ width: '100%' }} />
                   </div>
                 </div>
 

@@ -99,6 +99,7 @@ export class CatalogController {
       priceCol: body.priceCol || undefined,
       unitCol: body.unitCol || undefined,
       brandCol: body.brandCol || undefined,
+      accessoriesStartCol: body.accessoriesStartCol || undefined,
       filters,
     };
     return this.service.uploadTileData(id, file, mapping);

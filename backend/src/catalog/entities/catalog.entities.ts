@@ -116,6 +116,7 @@ export class CatalogTile {
     priceCol: string;
     unitCol: string;
     brandCol: string;
+    accessoriesStartCol: string;
     filters: { col: string; label: string }[];
   };
   @Column({ default: 0 }) products_count: number;
@@ -140,4 +141,5 @@ export class TileProduct {
   @Column({ nullable: true }) unit: string;
   @Column({ nullable: true }) brand: string;
   @Column({ type: 'jsonb', default: '{}' }) attributes: Record<string, string>;
+  @Column({ type: 'jsonb', default: '[]' }) accessories: { type: string; name: string; article: string; url: string }[];
 }

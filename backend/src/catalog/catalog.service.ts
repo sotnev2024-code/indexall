@@ -645,6 +645,7 @@ export class CatalogService implements OnModuleInit {
       priceCol?: string;
       unitCol?: string;
       brandCol?: string;
+      accessoriesStartCol?: string;
       filters: { col: string; label: string }[];
     },
   ) {
@@ -670,6 +671,7 @@ export class CatalogService implements OnModuleInit {
     const priceIdx = mapping.priceCol ? XLSX.utils.decode_col(mapping.priceCol.toUpperCase()) : -1;
     const unitIdx = mapping.unitCol ? XLSX.utils.decode_col(mapping.unitCol.toUpperCase()) : -1;
     const brandIdx = mapping.brandCol ? XLSX.utils.decode_col(mapping.brandCol.toUpperCase()) : -1;
+    const accStartIdx = mapping.accessoriesStartCol ? XLSX.utils.decode_col(mapping.accessoriesStartCol.toUpperCase()) : -1;
     const filterCols = (mapping.filters || []).map(f => ({
       idx: XLSX.utils.decode_col(f.col.toUpperCase()),
       label: f.label,
@@ -704,6 +706,25 @@ export class CatalogService implements OnModuleInit {
         }
       }
 
+      // Parse accessories from columns starting at accessoriesStartCol
+      const accessories: { type: string; name: string; article: string; url: string }[] = [];
+      if (accStartIdx >= 0) {
+        for (let c = accStartIdx; c < row.length; c++) {
+          const cell = String(row[c] || '').trim();
+          if (!cell) continue;
+          // Format: "Type:Name:Article:URL" (colon-separated)
+          const parts = cell.split(':');
+          if (parts.length >= 2) {
+            accessories.push({
+              type: (parts[0] || '').trim(),
+              name: (parts[1] || '').trim(),
+              article: (parts[2] || '').trim(),
+              url: parts.slice(3).join(':').trim(), // URL may contain colons
+            });
+          }
+        }
+      }
+
       batch.push({
         tile_id: tileId,
         name,
@@ -712,6 +733,7 @@ export class CatalogService implements OnModuleInit {
         unit: unit || null,
         brand: brand || null,
         attributes,
+        accessories,
       });
     }
 
@@ -796,6 +818,7 @@ export class CatalogService implements OnModuleInit {
       price: r.price,
       unit: r.unit,
       attributes: r.attributes,
+      accessories: r.accessories?.length ? r.accessories : undefined,
       manufacturer: r.brand ? { name: r.brand } : null,
     }));
   }
