@@ -46,6 +46,10 @@ export class Sheet {
   @Column({ nullable: true })
   owner_id: number | null;
 
+  /** User-defined custom columns: [{key: 'col_1', label: 'Примечание'}, ...] */
+  @Column({ type: 'jsonb', default: '[]' })
+  custom_columns: { key: string; label: string }[];
+
   @OneToMany(() => EquipmentRow, (row) => row.sheet, { cascade: true })
   rows: EquipmentRow[];
 

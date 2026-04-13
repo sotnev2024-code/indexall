@@ -57,6 +57,7 @@ interface RowProps {
   onCellMouseEnter: (rowIdx: number, colIdx: number) => void;
   onCellDoubleClick: (rowIdx: number, colIdx: number) => void;
   onRowContextMenu: (rowIdx: number, x: number, y: number) => void;
+  customColumns: { key: string; label: string }[];
 }
 
 const SpecRow = memo(function SpecRow({
@@ -64,6 +65,7 @@ const SpecRow = memo(function SpecRow({
   onNonEditableMouseDown,
   activeCellRow, activeCellCol, isEditing, selR1, selC1, selR2, selC2,
   onCellMouseDown, onCellMouseEnter, onCellDoubleClick, onRowContextMenu,
+  customColumns,
 }: RowProps) {
   const isActive = (col: number) => activeCellRow === idx && activeCellCol === col;
   const inRange = (col: number) => idx >= selR1 && idx <= selR2 && col >= selC1 && col <= selC2;
@@ -184,6 +186,25 @@ const SpecRow = memo(function SpecRow({
           onChange={e => onUpdate(idx, 'deadline', e.target.value)}
         />
       </td>
+
+      {customColumns.map((cc, ci) => {
+        const colIdx = 9 + ci;
+        return (
+          <td key={cc.key} {...tdAttrs(colIdx, 'col-custom')}>
+            <input
+              ref={(el) => inputRef(el, `custom_${cc.key}-${idx}`)}
+              readOnly={!cellEditing(colIdx)}
+              tabIndex={-1}
+              style={{ pointerEvents: cellEditing(colIdx) ? 'auto' : 'none' }}
+              value={row.custom?.[cc.key] || ''}
+              onFocus={onFocus}
+              onBlur={onBlur}
+              onKeyDown={(e) => onInputKeyDown(e, idx, colIdx)}
+              onChange={e => onUpdate(idx, `custom.${cc.key}`, e.target.value)}
+            />
+          </td>
+        );
+      })}
     </tr>
   );
 });
@@ -230,6 +251,7 @@ export default function SpecPageClient() {
   const [sheet, setSheet] = useState<any>(null);
   const [project, setProject] = useState<any>(null);
   const [rows, setRows] = useState<any[]>([]);
+  const [customColumns, setCustomColumns] = useState<{ key: string; label: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [acDrops, setAcDrops] = useState<{ rowIdx: number; field: string; results: any[]; rect: DOMRect } | null>(null);
   const [acFocus, setAcFocus] = useState(-1);
@@ -461,6 +483,7 @@ export default function SpecPageClient() {
       setLoading(true);
       const { data: s } = await sheetsApi.getOne(currentIdRef.current);
       setSheet(s);
+      setCustomColumns(s.custom_columns || []);
       const dbRows = s.rows || [];
       const cleanNum = (v: any, fallback = '') => {
         if (v === null || v === undefined || v === '') return fallback;
@@ -519,15 +542,52 @@ export default function SpecPageClient() {
   const updateRow = useCallback((i: number, field: string, value: any) => {
     setRows((prev) => {
       const next = [...prev];
-      next[i] = { ...next[i], [field]: value };
-      if (['price', 'qty', 'coef'].includes(field)) {
-        const r = next[i];
-        next[i].total = calcTotal(r.price, r.qty, r.coef);
+      if (field.startsWith('custom.')) {
+        const key = field.slice(7);
+        next[i] = { ...next[i], custom: { ...(next[i].custom || {}), [key]: value } };
+      } else {
+        next[i] = { ...next[i], [field]: value };
+        if (['price', 'qty', 'coef'].includes(field)) {
+          const r = next[i];
+          next[i].total = calcTotal(r.price, r.qty, r.coef);
+        }
       }
       return next;
     });
     setUnsaved(true);
   }, [setUnsaved]);
+
+  // ── Custom columns management ──────────────────────────────
+  async function addCustomColumn() {
+    const label = prompt('Название столбца:');
+    if (!label?.trim()) return;
+    const key = `col_${Date.now()}`;
+    const cols = [...customColumns, { key, label: label.trim() }];
+    setCustomColumns(cols);
+    if (sheet?.id) {
+      await sheetsApi.update(sheet.id, { custom_columns: cols });
+    }
+  }
+
+  async function removeCustomColumn(key: string) {
+    const cols = customColumns.filter(c => c.key !== key);
+    setCustomColumns(cols);
+    if (sheet?.id) {
+      await sheetsApi.update(sheet.id, { custom_columns: cols });
+    }
+  }
+
+  async function renameCustomColumn(key: string) {
+    const col = customColumns.find(c => c.key === key);
+    if (!col) return;
+    const label = prompt('Новое название:', col.label);
+    if (!label?.trim() || label.trim() === col.label) return;
+    const cols = customColumns.map(c => c.key === key ? { ...c, label: label.trim() } : c);
+    setCustomColumns(cols);
+    if (sheet?.id) {
+      await sheetsApi.update(sheet.id, { custom_columns: cols });
+    }
+  }
 
   /**
    * Fetch ETM price + delivery term for a single article and patch a row by article match.
@@ -1909,6 +1969,22 @@ export default function SpecPageClient() {
                 <th className="col-coef">Коэф.</th>
                 <th className="col-total">Итого</th>
                 <th className="col-deadline">Срок</th>
+                {customColumns.map(cc => (
+                  <th key={cc.key} className="col-custom" style={{ position: 'relative', minWidth: 80 }}>
+                    <span onDoubleClick={() => renameCustomColumn(cc.key)} style={{ cursor: 'pointer' }}>{cc.label}</span>
+                    <button onClick={() => removeCustomColumn(cc.key)}
+                      style={{ position: 'absolute', top: 1, right: 2, background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: '#999', lineHeight: 1 }}>
+                      ✕
+                    </button>
+                  </th>
+                ))}
+                <th style={{ width: 28, padding: 0, border: 'none' }}>
+                  <button onClick={addCustomColumn}
+                    style={{ background: 'none', border: '1px dashed #ccc', borderRadius: 4, cursor: 'pointer', fontSize: 14, color: '#999', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    title="Добавить столбец">
+                    +
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody onPaste={handleTablePaste}>
@@ -1940,6 +2016,7 @@ export default function SpecPageClient() {
                   onCellMouseEnter={handleCellMouseEnter}
                   onCellDoubleClick={handleCellDoubleClick}
                   onRowContextMenu={handleRowContextMenu}
+                  customColumns={customColumns}
                 />
               ))}
             </tbody>

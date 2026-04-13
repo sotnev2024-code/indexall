@@ -5,21 +5,24 @@ import * as XLSX from 'xlsx';
 export class ExportService {
   exportToXlsx(data: { projectName: string; sheets: any[] }): Buffer {
     const workbook = XLSX.utils.book_new();
-    const HEADERS = ['№', 'Название', 'Бренд', 'Артикул', 'Кол-во', 'Ед. изм', 'Цена, ₽', 'Источник', 'Коэф.', 'Итого, ₽', 'Срок',
-      'Доп. 1', 'Доп. 2', 'Доп. 3', 'Доп. 4', 'Доп. 5', 'Доп. 6', 'Доп. 7', 'Доп. 8', 'Доп. 9', 'Доп. 10'];
+    const BASE_HEADERS = ['№', 'Название', 'Бренд', 'Артикул', 'Кол-во', 'Ед. изм', 'Цена, ₽', 'Источник', 'Коэф.', 'Итого, ₽', 'Срок'];
     const now = new Date().toLocaleDateString('ru-RU');
 
     for (const sheet of data.sheets) {
       const dataRows = (sheet.rows || []).filter((r: any) => r.name || r.article);
+      const customCols: { key: string; label: string }[] = sheet.custom_columns || [];
+      const HEADERS = [...BASE_HEADERS, ...customCols.map(c => c.label)];
+      const totalCols = HEADERS.length;
+      const emptyPad = Array(customCols.length).fill('');
 
       // Row 1: project name + date, Row 2: empty, Row 3: headers, Row 4+: data
-      const aoa: any[][] = [
-        [`Проект: ${data.projectName}`, '', '', '', '', '', '', '', '', '', `Дата: ${now}`, '', '', '', '', '', '', '', '', '', ''],
-        [],
-        HEADERS,
-      ];
+      const titleRow = Array(totalCols).fill('');
+      titleRow[0] = `Проект: ${data.projectName}`;
+      titleRow[10] = `Дата: ${now}`;
+      const aoa: any[][] = [titleRow, [], HEADERS];
 
       dataRows.forEach((r: any, i: number) => {
+        const customVals = customCols.map(c => (r.custom || {})[c.key] || '');
         aoa.push([
           i + 1,
           r.name || '',
@@ -32,13 +35,14 @@ export class ExportService {
           r.coef !== '' && r.coef != null ? Number(r.coef) || 1 : 1,
           r.total !== '' && r.total != null ? Number(r.total) || r.total : '',
           r.deadline || '',
-          '', '', '', '', '', '', '', '', '', '',
+          ...customVals,
         ]);
       });
 
       // Empty rows padding to at least 1000 data rows
+      const emptyRow = (i: number) => [i + 1, '', '', '', '', '', '', '', '', '', '', ...emptyPad];
       for (let i = dataRows.length; i < 1000; i++) {
-        aoa.push([i + 1, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+        aoa.push(emptyRow(i));
       }
 
       // Totals row
@@ -48,8 +52,9 @@ export class ExportService {
 
       const ws = XLSX.utils.aoa_to_sheet(aoa);
 
-      // Ensure sheet range covers all 21 columns (A-U)
-      ws['!ref'] = `A1:U${aoa.length}`;
+      // Ensure sheet range covers all columns
+      const lastColLetter = XLSX.utils.encode_col(totalCols - 1);
+      ws['!ref'] = `A1:${lastColLetter}${aoa.length}`;
 
       // Column widths
       ws['!cols'] = [
@@ -64,12 +69,11 @@ export class ExportService {
         { wch: 8 },  // Коэф.
         { wch: 14 }, // Итого
         { wch: 10 }, // Срок
-        // 10 user-defined columns
-        ...Array(10).fill({ wch: 14 }),
+        ...customCols.map(() => ({ wch: 14 })),
       ];
 
       // Merge project title across row 1
-      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 10 } }];
+      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: Math.min(10, totalCols - 1) } }];
 
       // Style header row (row index 2 = 0-based)
       const headerRowIdx = 2;
@@ -100,7 +104,7 @@ export class ExportService {
       if (ws[valueCell]) ws[valueCell].s = { font: { bold: true }, numFmt: '#,##0.00' };
 
       // Autofilter on header row
-      ws['!autofilter'] = { ref: `A3:U3` };
+      ws['!autofilter'] = { ref: `A3:${lastColLetter}3` };
 
       // Excel sheet names: max 31 chars, must be unique, cannot be empty
       const usedNames = new Set(workbook.SheetNames);

@@ -146,6 +146,7 @@ export class SheetsService {
         coef: r.coef != null ? String(r.coef) : '1',
         total: r.total != null ? String(r.total) : '0',
         _autoPrice: r._autoPrice ?? r.auto_price ?? true,
+        custom: r.custom || {},
       }));
       await this.rowsRepo.save(toSave);
     }

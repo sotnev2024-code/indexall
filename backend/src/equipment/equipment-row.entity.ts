@@ -51,6 +51,9 @@ export class EquipmentRow {
   @Column({ default: true })
   _autoPrice: boolean;
 
+  @Column({ type: 'jsonb', default: '{}' })
+  custom: Record<string, string>;
+
   @CreateDateColumn()
   createdAt: Date;
 
