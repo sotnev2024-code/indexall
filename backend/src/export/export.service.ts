@@ -6,7 +6,7 @@ export class ExportService {
   exportToXlsx(data: { projectName: string; sheets: any[] }): Buffer {
     const workbook = XLSX.utils.book_new();
     const HEADERS = ['№', 'Название', 'Бренд', 'Артикул', 'Кол-во', 'Ед. изм', 'Цена, ₽', 'Источник', 'Коэф.', 'Итого, ₽', 'Срок',
-      '', '', '', '', '', '', '', '', '', ''];
+      'Доп. 1', 'Доп. 2', 'Доп. 3', 'Доп. 4', 'Доп. 5', 'Доп. 6', 'Доп. 7', 'Доп. 8', 'Доп. 9', 'Доп. 10'];
     const now = new Date().toLocaleDateString('ru-RU');
 
     for (const sheet of data.sheets) {
@@ -47,6 +47,9 @@ export class ExportService {
       aoa.push(['', 'ИТОГО:', '', '', '', '', '', '', '', totalSum > 0 ? Math.round(totalSum * 100) / 100 : '', '']);
 
       const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+      // Ensure sheet range covers all 21 columns (A-U)
+      ws['!ref'] = `A1:U${aoa.length}`;
 
       // Column widths
       ws['!cols'] = [
