@@ -1970,7 +1970,7 @@ export default function SpecPageClient() {
                 <th className="col-total">Итого</th>
                 <th className="col-deadline">Срок</th>
                 {customColumns.map(cc => (
-                  <th key={cc.key} className="col-custom" style={{ position: 'relative' }}>
+                  <th key={cc.key} className="col-custom">
                     <span onDoubleClick={() => renameCustomColumn(cc.key)} style={{ cursor: 'pointer' }}>{cc.label}</span>
                     <button onClick={() => removeCustomColumn(cc.key)}
                       style={{ position: 'absolute', top: 1, right: 2, background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: '#999', lineHeight: 1 }}>
