@@ -396,55 +396,142 @@ export class CatalogService implements OnModuleInit {
       const artCol = XLSX.utils.decode_col(mapping.artCol.toUpperCase());
       const priceCol = mapping.priceCol ? XLSX.utils.decode_col(mapping.priceCol.toUpperCase()) : -1;
 
-      const catCache: Map<string, number> = new Map();
+      // Auto-detect tree format: no group columns AND file has category rows
+      // (rows where nameCol has text but artCol is empty)
+      const isTreeFormat = groupCols.length === 0;
 
-      let productCount = 0;
+      if (isTreeFormat) {
+        await this.parseTreeFormat(plId, rows, firstRow, nameCol, artCol, priceCol, manufacturerId);
+      } else {
+        await this.parseFlatFormat(plId, rows, firstRow, groupCols, nameCol, artCol, priceCol, manufacturerId);
+      }
 
-      for (let i = firstRow; i < rows.length; i++) {
-        const row = rows[i];
-        const productName = String(row[nameCol] || '').trim();
-        const article = String(row[artCol] || '').trim();
-        if (!productName && !article) continue;
+      await this.plRepo.update(plId, { status: PriceListStatus.ACTIVE });
+    } catch (err) {
+      console.error(`Failed to parse price list ${plId}:`, err.message);
+      await this.plRepo.update(plId, { status: PriceListStatus.ACTIVE });
+    }
+  }
 
-        const groupVals = groupCols.map(c => String(row[c] || '').trim());
-        let parentId: number | null = null;
-        let cacheKey = '';
+  /** Flat format parser: group columns g1-g6 define category hierarchy per row */
+  private async parseFlatFormat(
+    plId: number, rows: any[][], firstRow: number,
+    groupCols: number[], nameCol: number, artCol: number, priceCol: number,
+    manufacturerId: number,
+  ) {
+    const catCache: Map<string, number> = new Map();
+    let productCount = 0;
 
-        for (let g = 0; g < groupVals.length; g++) {
-          const val = groupVals[g];
-          if (!val) break;
-          cacheKey += `|${val}`;
-          if (!catCache.has(cacheKey)) {
-            let cat = await this.catRepo.findOne({ where: { name: val, manufacturer_id: manufacturerId, parent_id: parentId ?? undefined } });
-            if (!cat) {
-              cat = await this.catRepo.save({ name: val, manufacturer_id: manufacturerId, parent_id: parentId, price_list_id: plId, sort_order: 0 });
-            } else if (cat.price_list_id !== plId) {
-              await this.catRepo.update(cat.id, { price_list_id: plId });
-            }
-            catCache.set(cacheKey, cat.id);
+    for (let i = firstRow; i < rows.length; i++) {
+      const row = rows[i];
+      const productName = String(row[nameCol] || '').trim();
+      const article = String(row[artCol] || '').trim();
+      if (!productName && !article) continue;
+
+      const groupVals = groupCols.map(c => String(row[c] || '').trim());
+      let parentId: number | null = null;
+      let cacheKey = '';
+
+      for (let g = 0; g < groupVals.length; g++) {
+        const val = groupVals[g];
+        if (!val) break;
+        cacheKey += `|${val}`;
+        if (!catCache.has(cacheKey)) {
+          let cat = await this.catRepo.findOne({ where: { name: val, manufacturer_id: manufacturerId, parent_id: parentId ?? undefined } });
+          if (!cat) {
+            cat = await this.catRepo.save({ name: val, manufacturer_id: manufacturerId, parent_id: parentId, price_list_id: plId, sort_order: 0 });
+          } else if (cat.price_list_id !== plId) {
+            await this.catRepo.update(cat.id, { price_list_id: plId });
           }
-          parentId = catCache.get(cacheKey);
+          catCache.set(cacheKey, cat.id);
         }
+        parentId = catCache.get(cacheKey);
+      }
 
-        const rawPrice = priceCol >= 0 ? String(row[priceCol] || '').replace(/\s/g, '').replace(',', '.') : '';
+      const rawPrice = priceCol >= 0 ? String(row[priceCol] || '').replace(/\s/g, '').replace(',', '.') : '';
+      const price = rawPrice ? parseFloat(rawPrice) : null;
+      await this.prodRepo.save({
+        manufacturer_id: manufacturerId,
+        category_id: parentId,
+        name: productName,
+        article: article || null,
+        is_active: true,
+        ...(price && !isNaN(price) && price > 0 ? { price } : {}),
+      });
+      productCount++;
+    }
+    console.log(`Parsed ${productCount} products (flat format) for price list ${plId}`);
+  }
+
+  /** Tree format parser: category = row where mapped product columns (name, article, price)
+   *  are ALL empty, but some other cell has text. Products = rows with name or article.
+   *  Category right after category = child (deeper level).
+   *  Category after product(s) = sibling of the previous category at that level. */
+  private async parseTreeFormat(
+    plId: number, rows: any[][], firstRow: number,
+    nameCol: number, artCol: number, priceCol: number,
+    manufacturerId: number,
+  ) {
+    const catStack: { id: number; name: string }[] = [];
+    let lastRowWasCategory = false;
+    let productCount = 0;
+    let catCount = 0;
+
+    for (let i = firstRow; i < rows.length; i++) {
+      const row = rows[i];
+      const productName = String(row[nameCol] || '').trim();
+      const article = String(row[artCol] || '').trim();
+      const rawPrice = priceCol >= 0 ? String(row[priceCol] || '').replace(/\s/g, '').replace(',', '.').replace(/-/g, '.') : '';
+      const hasPrice = rawPrice && !isNaN(parseFloat(rawPrice)) && parseFloat(rawPrice) > 0;
+
+      // If product name column OR article column has text → it's a product
+      if (productName || article) {
+        const parentId = catStack.length > 0 ? catStack[catStack.length - 1].id : null;
         const price = rawPrice ? parseFloat(rawPrice) : null;
         await this.prodRepo.save({
           manufacturer_id: manufacturerId,
           category_id: parentId,
-          name: productName,
+          name: productName || article,
           article: article || null,
           is_active: true,
           ...(price && !isNaN(price) && price > 0 ? { price } : {}),
         });
         productCount++;
+        lastRowWasCategory = false;
+        continue;
       }
 
-      await this.plRepo.update(plId, { status: PriceListStatus.ACTIVE });
-      console.log(`✅ Parsed ${productCount} products for price list ${plId}`);
-    } catch (err) {
-      console.error(`❌ Failed to parse price list ${plId}:`, err.message);
-      await this.plRepo.update(plId, { status: PriceListStatus.ACTIVE });
+      // Product columns empty — check if any other cell has text → category
+      const firstNonEmpty = row.find((cell: any) => String(cell || '').trim());
+      if (!firstNonEmpty) continue; // completely empty row
+      const categoryName = String(firstNonEmpty).trim();
+      if (!categoryName) continue;
+
+      // Category row detected
+      if (lastRowWasCategory) {
+        // Category after category → go deeper (child)
+      } else {
+        // Category after product(s) → sibling: pop back to parent level
+        if (catStack.length > 0) catStack.pop();
+      }
+
+      const parentId = catStack.length > 0 ? catStack[catStack.length - 1].id : null;
+      let cat = await this.catRepo.findOne({
+        where: { name: categoryName, manufacturer_id: manufacturerId, parent_id: parentId ?? undefined },
+      });
+      if (!cat) {
+        cat = await this.catRepo.save({
+          name: categoryName, manufacturer_id: manufacturerId, parent_id: parentId,
+          price_list_id: plId, sort_order: catCount,
+        });
+      } else if (cat.price_list_id !== plId) {
+        await this.catRepo.update(cat.id, { price_list_id: plId });
+      }
+      catStack.push({ id: cat.id, name: categoryName });
+      catCount++;
+      lastRowWasCategory = true;
     }
+    console.log(`Parsed ${productCount} products, ${catCount} categories (tree format) for price list ${plId}`);
   }
 
   private buildTree(categories: CatalogCategory[], parentId: number | null): any[] {
