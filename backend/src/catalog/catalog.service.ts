@@ -265,8 +265,13 @@ export class CatalogService implements OnModuleInit {
 
     if (activePlIds.length === 0) return [];
 
+    // Only fetch categories that have at least one product (directly or via children)
     const qb = this.catRepo.createQueryBuilder('c')
       .where('c.price_list_id IN (:...plIds)', { plIds: activePlIds })
+      .andWhere(`(
+        EXISTS (SELECT 1 FROM catalog_products p WHERE p.category_id = c.id AND p.is_active = true)
+        OR EXISTS (SELECT 1 FROM catalog_categories ch WHERE ch.parent_id = c.id)
+      )`)
       .orderBy('c.sort_order', 'ASC')
       .addOrderBy('c.name', 'ASC');
 
