@@ -497,7 +497,7 @@ export default function SpecPageClient() {
         return { ...r, qty, price, coef, total: calcTotal(price, qty, coef) };
       });
       const padded = [...normalizedRows];
-      while (padded.length < 25) {
+      while (padded.length < 1000) {
         padded.push({ row_number: padded.length + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ЭТМ', coef: '1', total: '', deadline: '' });
       }
       setRows(padded);
