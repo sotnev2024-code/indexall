@@ -856,7 +856,9 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .col-total { width: 100px; font-weight: 600; }
 .col-deadline { width: 70px; }
 .col-custom { width: 90px; min-width: 90px; max-width: 90px; }
-.col-add-custom { width: 28px; min-width: 28px; padding: 0 2px; }
+.col-add-custom { width: 28px; min-width: 28px; padding: 0 2px; border-right: none !important; }
+.spec-table th.col-custom,
+.spec-table th.col-add-custom { position: sticky; top: 0; z-index: 10; background: var(--white); }
 .brand-chip {
   padding: 4px 10px;
   border-radius: 20px;
