@@ -46,6 +46,21 @@ function extractActuality(fileName: string): string {
   return `${mo}.${y.length === 2 ? '20' + y : y}`;
 }
 
+/** Convert column input: accepts letter (A,B,C) or number (1,2,3) → always returns letter */
+function normalizeCol(val: string): string {
+  const trimmed = val.trim();
+  if (!trimmed) return '';
+  // If it's a pure number, convert to Excel column letter (1→A, 2→B, 26→Z, 27→AA)
+  if (/^\d+$/.test(trimmed)) {
+    let n = parseInt(trimmed, 10);
+    if (n <= 0) return '';
+    let result = '';
+    while (n > 0) { n--; result = String.fromCharCode(65 + (n % 26)) + result; n = Math.floor(n / 26); }
+    return result;
+  }
+  return trimmed.toUpperCase();
+}
+
 export default function AdminPage() {
   const router = useRouter();
   const { user } = useAppStore();
@@ -538,7 +553,7 @@ export default function AdminPage() {
   }
 
   async function handleUpload() {
-    if (!file || !mapping.g1 || !mapping.nameCol || !mapping.artCol) { toast.error('Заполните обязательные поля'); return; }
+    if (!file || !mapping.nameCol || !mapping.artCol) { toast.error('Заполните столбец названия и артикула'); return; }
     const fd = new FormData(); fd.append('file', file);
     Object.entries(mapping).forEach(([k, v]) => v && fd.append(k, v));
     setUploading(true);
@@ -1234,24 +1249,27 @@ export default function AdminPage() {
                   </div>
                   <div className="form-col">
                     <label>Столбец названия *</label>
-                    <input value={mapping.nameCol} onChange={e => setMapping(m => ({ ...m, nameCol: e.target.value.toUpperCase() }))} placeholder="T" />
+                    <input value={mapping.nameCol} onChange={e => setMapping(m => ({ ...m, nameCol: normalizeCol(e.target.value) }))} placeholder="D или 4" />
                   </div>
                   <div className="form-col">
                     <label>Столбец артикула *</label>
-                    <input value={mapping.artCol} onChange={e => setMapping(m => ({ ...m, artCol: e.target.value.toUpperCase() }))} placeholder="U" />
+                    <input value={mapping.artCol} onChange={e => setMapping(m => ({ ...m, artCol: normalizeCol(e.target.value) }))} placeholder="C или 3" />
                   </div>
                   <div className="form-col">
-                    <label>Столбец цены (необяз.)</label>
-                    <input value={mapping.priceCol} onChange={e => setMapping(m => ({ ...m, priceCol: e.target.value.toUpperCase() }))} placeholder="V" />
+                    <label>Столбец цены</label>
+                    <input value={mapping.priceCol} onChange={e => setMapping(m => ({ ...m, priceCol: normalizeCol(e.target.value) }))} placeholder="F или 6" />
                   </div>
                 </div>
                 <div className="categories-bg">
-                  <div className="categories-bg-title">Столбцы категорий (дерево)</div>
+                  <div className="categories-bg-title">Столбцы категорий (плоский формат)</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+                    Если категории — отдельные строки (без артикула), оставьте пустыми — определится автоматически
+                  </div>
                   <div className="form-row-3">
                     {['g1', 'g2', 'g3', 'g4', 'g5', 'g6'].map((k, i) => (
                       <div key={k} className="form-col">
-                        <label>{i === 0 ? 'Столбец 1 группы *' : `Столбец ${i + 1} группы`}</label>
-                        <input value={(mapping as any)[k]} onChange={e => setMapping(m => ({ ...m, [k]: e.target.value.toUpperCase() }))} placeholder={i === 0 ? 'Q' : 'Необяз.'} />
+                        <label>{`Столбец ${i + 1} группы`}</label>
+                        <input value={(mapping as any)[k]} onChange={e => setMapping(m => ({ ...m, [k]: normalizeCol(e.target.value) }))} placeholder="Необяз." />
                       </div>
                     ))}
                   </div>
@@ -1472,15 +1490,15 @@ export default function AdminPage() {
               </div>
               <div className="form-col">
                 <label>Столбец названия *</label>
-                <input value={mapping.nameCol} onChange={e => setMapping(m => ({ ...m, nameCol: e.target.value.toUpperCase() }))} />
+                <input value={mapping.nameCol} onChange={e => setMapping(m => ({ ...m, nameCol: normalizeCol(e.target.value) }))} placeholder="D или 4" />
               </div>
               <div className="form-col">
                 <label>Столбец артикула *</label>
-                <input value={mapping.artCol} onChange={e => setMapping(m => ({ ...m, artCol: e.target.value.toUpperCase() }))} />
+                <input value={mapping.artCol} onChange={e => setMapping(m => ({ ...m, artCol: normalizeCol(e.target.value) }))} placeholder="C или 3" />
               </div>
               <div className="form-col">
-                <label>Столбец цены (необяз.)</label>
-                <input value={mapping.priceCol} onChange={e => setMapping(m => ({ ...m, priceCol: e.target.value.toUpperCase() }))} />
+                <label>Столбец цены</label>
+                <input value={mapping.priceCol} onChange={e => setMapping(m => ({ ...m, priceCol: normalizeCol(e.target.value) }))} placeholder="F или 6" />
               </div>
             </div>
             <div className="modal-actions">
@@ -1696,27 +1714,27 @@ export default function AdminPage() {
                   <div>
                     <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Название *</div>
                     <input className="admin-input" placeholder="напр. B" value={tileMapping.nameCol}
-                      onChange={e => setTileMapping(m => ({ ...m, nameCol: e.target.value.toUpperCase() }))} style={{ width: '100%' }} />
+                      onChange={e => setTileMapping(m => ({ ...m, nameCol: normalizeCol(e.target.value) }))} style={{ width: '100%' }} />
                   </div>
                   <div>
                     <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Артикул</div>
                     <input className="admin-input" placeholder="напр. C" value={tileMapping.articleCol}
-                      onChange={e => setTileMapping(m => ({ ...m, articleCol: e.target.value.toUpperCase() }))} style={{ width: '100%' }} />
+                      onChange={e => setTileMapping(m => ({ ...m, articleCol: normalizeCol(e.target.value) }))} style={{ width: '100%' }} />
                   </div>
                   <div>
                     <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Цена</div>
                     <input className="admin-input" placeholder="напр. F" value={tileMapping.priceCol}
-                      onChange={e => setTileMapping(m => ({ ...m, priceCol: e.target.value.toUpperCase() }))} style={{ width: '100%' }} />
+                      onChange={e => setTileMapping(m => ({ ...m, priceCol: normalizeCol(e.target.value) }))} style={{ width: '100%' }} />
                   </div>
                   <div>
                     <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Ед. изм.</div>
                     <input className="admin-input" placeholder="напр. E" value={tileMapping.unitCol}
-                      onChange={e => setTileMapping(m => ({ ...m, unitCol: e.target.value.toUpperCase() }))} style={{ width: '100%' }} />
+                      onChange={e => setTileMapping(m => ({ ...m, unitCol: normalizeCol(e.target.value) }))} style={{ width: '100%' }} />
                   </div>
                   <div>
                     <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Бренд</div>
                     <input className="admin-input" placeholder="напр. D" value={tileMapping.brandCol}
-                      onChange={e => setTileMapping(m => ({ ...m, brandCol: e.target.value.toUpperCase() }))} style={{ width: '100%' }} />
+                      onChange={e => setTileMapping(m => ({ ...m, brandCol: normalizeCol(e.target.value) }))} style={{ width: '100%' }} />
                   </div>
                 </div>
 
@@ -1735,7 +1753,7 @@ export default function AdminPage() {
                       <input className="admin-input" placeholder="Столбец (G)" value={fc.col} style={{ width: 80 }}
                         onChange={e => {
                           const arr = [...tileFilterCols];
-                          arr[i] = { ...arr[i], col: e.target.value.toUpperCase() };
+                          arr[i] = { ...arr[i], col: normalizeCol(e.target.value) };
                           setTileFilterCols(arr);
                         }} />
                       <input className="admin-input" placeholder="Название фильтра (Ток, А)" value={fc.label} style={{ flex: 1 }}
