@@ -184,6 +184,9 @@ export class CatalogService implements OnModuleInit {
     const pl = await this.plRepo.findOne({ where: { id } });
     if (!pl) throw new NotFoundException('Прайс-лист не найден');
 
+    const manufId = pl.manufacturer_id;
+
+    // Delete products in categories of this price list
     const cats = await this.catRepo.find({ where: { price_list_id: id } });
     if (cats.length > 0) {
       const catIds = cats.map(c => c.id);
@@ -191,18 +194,31 @@ export class CatalogService implements OnModuleInit {
       await this.catRepo.delete({ price_list_id: id });
     }
 
+    // Delete uncategorized products belonging to this manufacturer
+    // (tree-format imports create products with category_id=NULL)
+    if (manufId) {
+      await this.prodRepo
+        .createQueryBuilder()
+        .delete()
+        .where('manufacturer_id = :manufId', { manufId })
+        .andWhere('category_id IS NULL')
+        .execute();
+    }
+
     if (pl.file_path) {
       try { fs.unlinkSync(pl.file_path); } catch { /* file may not exist */ }
     }
 
-    const manufId = pl.manufacturer_id;
     await this.plRepo.delete(id);
 
     // If the manufacturer has no remaining price lists, delete it too
     if (manufId) {
       const remaining = await this.plRepo.count({ where: { manufacturer_id: manufId } });
       if (remaining === 0) {
-        await this.manufRepo.delete(manufId);
+        const remainingProducts = await this.prodRepo.count({ where: { manufacturer_id: manufId } });
+        if (remainingProducts === 0) {
+          await this.manufRepo.delete(manufId);
+        }
       }
     }
 
