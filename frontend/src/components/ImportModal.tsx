@@ -9,7 +9,7 @@ const SPEC_FIELDS = [
   { key: 'qty',      label: 'Кол-во' },
   { key: 'unit',     label: 'Ед.изм' },
   { key: 'price',    label: 'Цена' },
-  { key: 'store',    label: 'Магазин' },
+  { key: 'store',    label: 'Источник' },
   { key: 'coef',     label: 'Коэф.' },
   { key: 'deadline', label: 'Срок' },
 ] as const;

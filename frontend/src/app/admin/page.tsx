@@ -301,7 +301,7 @@ export default function AdminPage() {
   function handleCopyTemplateRows(t: any) {
     const rows = (t.rows || []).filter((r: any) => r.name || r.article);
     if (rows.length === 0) { toast.error('Шаблон пустой'); return; }
-    const header = ['Название', 'Бренд', 'Артикул', 'Кол-во', 'Ед.', 'Цена', 'Магазин', 'Коэф.', 'Срок'];
+    const header = ['Название', 'Бренд', 'Артикул', 'Кол-во', 'Ед.', 'Цена', 'Источник', 'Коэф.', 'Срок'];
     const lines = [header.join('\t')];
     rows.forEach((r: any) => {
       lines.push([r.name, r.brand, r.article, r.qty, r.unit, r.price, r.store, r.coef, r.deadline].map((v: any) => v ?? '').join('\t'));
@@ -964,7 +964,7 @@ export default function AdminPage() {
           {/* ── Шаблоны ── */}
           {tab === 'templates' && (() => {
             const COLS = ['name', 'brand', 'article', 'qty', 'unit', 'price', 'store', 'coef', 'total', 'deadline'];
-            const COL_LABELS: Record<string, string> = { name: 'Название', brand: 'Бренд', article: 'Артикул', qty: 'Кол-во', unit: 'Ед.', price: 'Цена', store: 'Магазин', coef: 'Коэф.', total: 'Итого', deadline: 'Срок' };
+            const COL_LABELS: Record<string, string> = { name: 'Название', brand: 'Бренд', article: 'Артикул', qty: 'Кол-во', unit: 'Ед.', price: 'Цена', store: 'Источник', coef: 'Коэф.', total: 'Итого', deadline: 'Срок' };
 
             const matchName = (name: string) => !tmplSearch || name.toLowerCase().includes(tmplSearch.toLowerCase());
 

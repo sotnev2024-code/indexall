@@ -5,7 +5,8 @@ import * as XLSX from 'xlsx';
 export class ExportService {
   exportToXlsx(data: { projectName: string; sheets: any[] }): Buffer {
     const workbook = XLSX.utils.book_new();
-    const HEADERS = ['№', 'Название', 'Бренд', 'Артикул', 'Кол-во', 'Ед. изм', 'Цена, ₽', 'Магазин', 'Коэф.', 'Итого, ₽', 'Срок'];
+    const HEADERS = ['№', 'Название', 'Бренд', 'Артикул', 'Кол-во', 'Ед. изм', 'Цена, ₽', 'Источник', 'Коэф.', 'Итого, ₽', 'Срок',
+      '', '', '', '', '', '', '', '', '', ''];
     const now = new Date().toLocaleDateString('ru-RU');
 
     for (const sheet of data.sheets) {
@@ -13,7 +14,7 @@ export class ExportService {
 
       // Row 1: project name + date, Row 2: empty, Row 3: headers, Row 4+: data
       const aoa: any[][] = [
-        [`Проект: ${data.projectName}`, '', '', '', '', '', '', '', '', '', `Дата: ${now}`],
+        [`Проект: ${data.projectName}`, '', '', '', '', '', '', '', '', '', `Дата: ${now}`, '', '', '', '', '', '', '', '', '', ''],
         [],
         HEADERS,
       ];
@@ -31,12 +32,13 @@ export class ExportService {
           r.coef !== '' && r.coef != null ? Number(r.coef) || 1 : 1,
           r.total !== '' && r.total != null ? Number(r.total) || r.total : '',
           r.deadline || '',
+          '', '', '', '', '', '', '', '', '', '',
         ]);
       });
 
-      // Empty rows padding to at least 25 data rows
-      for (let i = dataRows.length; i < 25; i++) {
-        aoa.push([i + 1, '', '', '', '', '', '', '', '', '', '']);
+      // Empty rows padding to at least 1000 data rows
+      for (let i = dataRows.length; i < 1000; i++) {
+        aoa.push([i + 1, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
       }
 
       // Totals row
@@ -55,14 +57,16 @@ export class ExportService {
         { wch: 8 },  // Кол-во
         { wch: 8 },  // Ед. изм
         { wch: 12 }, // Цена
-        { wch: 10 }, // Магазин
+        { wch: 12 }, // Источник
         { wch: 8 },  // Коэф.
         { wch: 14 }, // Итого
         { wch: 10 }, // Срок
+        // 10 user-defined columns
+        ...Array(10).fill({ wch: 14 }),
       ];
 
       // Merge project title across row 1
-      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 9 } }];
+      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 10 } }];
 
       // Style header row (row index 2 = 0-based)
       const headerRowIdx = 2;
@@ -93,7 +97,7 @@ export class ExportService {
       if (ws[valueCell]) ws[valueCell].s = { font: { bold: true }, numFmt: '#,##0.00' };
 
       // Autofilter on header row
-      ws['!autofilter'] = { ref: `A3:K3` };
+      ws['!autofilter'] = { ref: `A3:U3` };
 
       // Excel sheet names: max 31 chars, must be unique, cannot be empty
       const usedNames = new Set(workbook.SheetNames);

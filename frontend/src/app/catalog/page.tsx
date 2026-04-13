@@ -67,6 +67,8 @@ function CatalogPageInner() {
   const [showSelectSheet, setShowSelectSheet] = useState(false);
   const addingRef = useRef(false); // prevent double-click race
   const detailRef = useRef<HTMLDivElement>(null);
+  const [etmData, setEtmData] = useState<{ price: number | null; term: string } | null>(null);
+  const [etmLoading, setEtmLoading] = useState(false);
   // Track whether we've done the initial restore fetch
   const restoredRef = useRef(false);
 
@@ -236,6 +238,27 @@ function CatalogPageInner() {
     );
   }
 
+  /** Compute which filter options are available based on current products.
+   *  "Производитель" is always fully available; other filters disable zero-result options. */
+  function getAvailableOpts(): Record<string, Set<string>> {
+    const available: Record<string, Set<string>> = {};
+    for (const fg of dynamicFilters) {
+      if (fg.label === 'Производитель') {
+        available[fg.label] = new Set(fg.opts);
+        continue;
+      }
+      const vals = new Set<string>();
+      for (const p of filterProducts) {
+        const v = p.attributes?.[fg.label];
+        if (v) vals.add(String(v));
+      }
+      available[fg.label] = vals;
+    }
+    return available;
+  }
+
+  const availableOpts = selectedSlug ? getAvailableOpts() : {};
+
   function switchMode(m: 'manuf' | 'filter') {
     setMode(m); setSearch(''); setSelectedProduct(null);
     if (m === 'manuf') { setSelectedSlug(null); setActiveFilters({}); setFilterProducts([]); }
@@ -244,7 +267,19 @@ function CatalogPageInner() {
 
   // ── Product helpers ────────────────────────────────────────
   function selectProduct(p: any) {
-    setSelectedProduct((prev: any) => prev?.id === p.id ? null : p);
+    const isToggleOff = selectedProduct?.id === p.id;
+    setSelectedProduct(isToggleOff ? null : p);
+    setEtmData(null);
+    if (!isToggleOff && p.article) {
+      setEtmLoading(true);
+      storesApi.getEtmPricesWithTerms([p.article])
+        .then(({ data }) => {
+          const entry = data[p.article];
+          setEtmData(entry ? { price: entry.price, term: entry.term || '' } : null);
+        })
+        .catch(() => {})
+        .finally(() => setEtmLoading(false));
+    }
     setTimeout(() => detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
   }
 
@@ -311,20 +346,47 @@ function CatalogPageInner() {
   // ── Inline product detail ──────────────────────────────────
   function inlineDetail(p: any) {
     if (!selectedProduct || selectedProduct.id !== p.id) return null;
+    const attrs = selectedProduct.attributes || {};
+    const attrEntries = Object.entries(attrs).filter(([, v]) => v);
     return (
       <div ref={detailRef} className="product-detail-inline">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 13 }}>
           {selectedProduct.article && (
             <div>Артикул: <strong>{selectedProduct.article}</strong></div>
           )}
+          {selectedProduct.manufacturer?.name && (
+            <div>Производитель: {selectedProduct.manufacturer.name}</div>
+          )}
           {selectedProduct.price && (
-            <div>Цена: <strong>{selectedProduct.price} ₽</strong></div>
+            <div>Цена каталога: <strong>{selectedProduct.price} ₽</strong></div>
           )}
           {selectedProduct.unit && (
             <div>Ед. изм.: {selectedProduct.unit}</div>
           )}
-          {selectedProduct.manufacturer?.name && (
-            <div>Производитель: {selectedProduct.manufacturer.name}</div>
+          {/* Filter attributes */}
+          {attrEntries.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', marginTop: 4 }}>
+              {attrEntries.map(([k, v]) => (
+                <span key={k} style={{ color: 'var(--muted)', fontSize: 12 }}>{k}: <strong style={{ color: 'var(--text)' }}>{String(v)}</strong></span>
+              ))}
+            </div>
+          )}
+          {/* ETM price + term */}
+          {etmLoading && (
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>Загрузка цены ЭТМ...</div>
+          )}
+          {!etmLoading && etmData && (
+            <div style={{ marginTop: 4, padding: '6px 10px', background: '#f0fdf4', borderRadius: 6, fontSize: 12 }}>
+              {etmData.price != null && etmData.price > 0 && (
+                <span>Цена ЭТМ: <strong>{etmData.price} ₽</strong></span>
+              )}
+              {etmData.term && (
+                <span style={{ marginLeft: etmData.price ? 12 : 0 }}>Срок: <strong>{etmData.term}</strong></span>
+              )}
+              {etmData.price == null && !etmData.term && (
+                <span style={{ color: 'var(--muted)' }}>Нет данных ЭТМ</span>
+              )}
+            </div>
           )}
         </div>
         <button
@@ -440,29 +502,37 @@ function CatalogPageInner() {
                   {loadingFilters && (
                     <div style={{ fontSize: 12, color: 'var(--muted)', padding: '8px 0' }}>Загрузка фильтров…</div>
                   )}
-                  {!loadingFilters && dynamicFilters.map((fg) => (
-                    <div key={fg.label} className="filter-group">
-                      <div className="filter-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span>{fg.label}</span>
-                        {(activeFilters[fg.label]?.length > 0) && (
-                          <span style={{ fontSize: 10, color: 'var(--yellow)', cursor: 'pointer' }} onClick={() => clearFilterGroup(fg.label)}>
-                            ✕ сбросить
-                          </span>
-                        )}
+                  {!loadingFilters && dynamicFilters.map((fg) => {
+                    const avail = availableOpts[fg.label];
+                    return (
+                      <div key={fg.label} className="filter-group">
+                        <div className="filter-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span>{fg.label}</span>
+                          {(activeFilters[fg.label]?.length > 0) && (
+                            <span style={{ fontSize: 10, color: 'var(--yellow)', cursor: 'pointer' }} onClick={() => clearFilterGroup(fg.label)}>
+                              ✕ сбросить
+                            </span>
+                          )}
+                        </div>
+                        <div className="filter-options">
+                          {fg.opts.map((opt: string) => {
+                            const checked = (activeFilters[fg.label] || []).includes(opt);
+                            const disabled = avail && !avail.has(opt) && !checked;
+                            return (
+                              <label key={opt}
+                                className={`filter-option${disabled ? ' disabled' : ''}`}
+                                onClick={() => !disabled && toggleFilter(fg.label, opt)}
+                                style={disabled ? { opacity: 0.35, cursor: 'default' } : undefined}
+                              >
+                                <div className={`filter-checkbox${checked ? ' checked' : ''}`} />
+                                <span>{opt}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
                       </div>
-                      <div className="filter-options">
-                        {fg.opts.map((opt: string) => {
-                          const checked = (activeFilters[fg.label] || []).includes(opt);
-                          return (
-                            <label key={opt} className="filter-option" onClick={() => toggleFilter(fg.label, opt)}>
-                              <div className={`filter-checkbox${checked ? ' checked' : ''}`} />
-                              <span>{opt}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )
             )}
@@ -508,29 +578,40 @@ function CatalogPageInner() {
                 {loadingFilter && (
                   <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>Загрузка…</div>
                 )}
-                {!loadingFilter && displayedFilterProducts.map((p, i) => (
-                  <div key={p.id}>
-                    <div
-                      className={`product-item-ref${selectedProduct?.id === p.id ? ' selected' : ''}`}
-                      onClick={() => selectProduct(p)}
-                    >
-                      <span className="product-num">{i + 1}</span>
-                      <div className="product-info">
-                        <div className="product-name">{p.name}</div>
-                        <div className="product-article">
-                          Артикул {p.article}
-                          {p.manufacturer?.name && (
-                            <span style={{ marginLeft: 8, color: 'var(--muted)' }}>{p.manufacturer.name}</span>
+                {!loadingFilter && displayedFilterProducts.map((p, i) => {
+                  const pAttrs = p.attributes || {};
+                  const pAttrEntries = Object.entries(pAttrs).filter(([, v]) => v);
+                  return (
+                    <div key={p.id}>
+                      <div
+                        className={`product-item-ref${selectedProduct?.id === p.id ? ' selected' : ''}`}
+                        onClick={() => selectProduct(p)}
+                      >
+                        <span className="product-num">{i + 1}</span>
+                        <div className="product-info">
+                          <div className="product-name">{p.name}</div>
+                          <div className="product-article">
+                            {p.article && <span>Артикул {p.article}</span>}
+                            {p.manufacturer?.name && (
+                              <span style={{ marginLeft: 8, color: 'var(--muted)' }}>{p.manufacturer.name}</span>
+                            )}
+                          </div>
+                          {pAttrEntries.length > 0 && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', marginTop: 2 }}>
+                              {pAttrEntries.map(([k, v]) => (
+                                <span key={k} style={{ fontSize: 11, color: 'var(--muted)' }}>{k}: {String(v)}</span>
+                              ))}
+                            </div>
                           )}
                         </div>
+                        <button className="btn-add-to-list" onClick={e => { e.stopPropagation(); addToSheet(p); }}>
+                          + Добавить в лист
+                        </button>
                       </div>
-                      <button className="btn-add-to-list" onClick={e => { e.stopPropagation(); addToSheet(p); }}>
-                        + Добавить в лист
-                      </button>
+                      {inlineDetail(p)}
                     </div>
-                    {inlineDetail(p)}
-                  </div>
-                ))}
+                  );
+                })}
                 {!selectedSlug && !loadingFilter && displayedFilterProducts.length === 0 && (
                   <div className="empty-state">Выберите категорию слева</div>
                 )}

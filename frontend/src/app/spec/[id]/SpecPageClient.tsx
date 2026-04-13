@@ -1434,7 +1434,7 @@ export default function SpecPageClient() {
 
   // ── Clipboard: copy whole sheet as TSV (toolbar button) ───────
   function copySheetToClipboard() {
-    const COLS = ['Название', 'Бренд', 'Артикул', 'Кол-во', 'Ед.изм', 'Цена', 'Магазин', 'Коэф.', 'Итого'];
+    const COLS = ['Название', 'Бренд', 'Артикул', 'Кол-во', 'Ед.изм', 'Цена', 'Источник', 'Коэф.', 'Итого'];
     const dataRows = rows.filter(r => r.name || r.article);
     const lines = [COLS.join('\t')];
     dataRows.forEach(r => {
@@ -1753,7 +1753,7 @@ export default function SpecPageClient() {
               <span className="spec-summary-value">0 дн.</span>
             </span>
             <button className="btn-outline" style={{ marginLeft: 8, padding: '5px 10px', fontSize: 12 }} onClick={() => setExportModal(true)}>
-              Excel
+              Экспорт в Excel
             </button>
             <button
               className="btn-outline"
@@ -1905,7 +1905,7 @@ export default function SpecPageClient() {
                 <th className="col-qty">Кол-во</th>
                 <th className="col-unit">Ед.изм</th>
                 <th className="col-price">Цена</th>
-                <th className="col-store">Магазин</th>
+                <th className="col-store">Источник</th>
                 <th className="col-coef">Коэф.</th>
                 <th className="col-total">Итого</th>
                 <th className="col-deadline">Срок</th>
