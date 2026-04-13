@@ -126,13 +126,16 @@ export class CatalogService implements OnModuleInit {
 
   // ── Manufacturers ─────────────────────────────────────────
   async getManufacturers() {
-    // Only return manufacturers that actually have categories (price list data loaded)
+    // Return manufacturers that have active price lists with categories OR products
     return this.manufRepo
       .createQueryBuilder('m')
-      .innerJoin('price_lists', 'pl', 'pl.manufacturer_id = m.id')
-      .innerJoin('catalog_categories', 'cc', 'cc.price_list_id = pl.id')
-      .select(['m.id', 'm.name', 'm.is_active'])
+      .innerJoin('price_lists', 'pl', 'pl.manufacturer_id = m.id AND pl.status = :st', { st: PriceListStatus.ACTIVE })
       .where('m.is_active = true')
+      .andWhere(`(
+        EXISTS (SELECT 1 FROM catalog_categories cc WHERE cc.price_list_id = pl.id)
+        OR EXISTS (SELECT 1 FROM catalog_products cp WHERE cp.manufacturer_id = m.id AND cp.is_active = true)
+      )`)
+      .select(['m.id', 'm.name', 'm.is_active'])
       .distinct(true)
       .orderBy('m.name', 'ASC')
       .getMany();
@@ -256,20 +259,41 @@ export class CatalogService implements OnModuleInit {
     }
 
     const categories = await qb.getMany();
-    return this.buildTree(categories, null);
+    const tree = this.buildTree(categories, null);
+
+    // If manufacturer has products without categories, add a virtual root node
+    if (manufacturerId && tree.length === 0) {
+      const uncategorized = await this.prodRepo.count({
+        where: { manufacturer_id: manufacturerId, category_id: null as any, is_active: true },
+      });
+      if (uncategorized > 0) {
+        tree.push({ id: -manufacturerId, name: 'Все товары', children: [], _uncategorized: true });
+      }
+    }
+
+    return tree;
   }
 
   async getProducts(categoryId: number, attrs?: Record<string, string>) {
     const qb = this.prodRepo.createQueryBuilder('p')
       .leftJoinAndSelect('p.manufacturer', 'm')
-      .where('p.category_id = :categoryId', { categoryId })
       .andWhere('p.is_active = true');
+
+    if (categoryId < 0) {
+      // Virtual node: uncategorized products for manufacturer (id = -manufacturerId)
+      qb.where('p.manufacturer_id = :mId', { mId: -categoryId })
+        .andWhere('p.category_id IS NULL')
+        .andWhere('p.is_active = true');
+    } else {
+      qb.where('p.category_id = :categoryId', { categoryId });
+    }
+
     if (attrs && Object.keys(attrs).length > 0) {
       Object.entries(attrs).forEach(([key, val]) => {
         qb.andWhere(`p.attributes->>'${key}' = :attr_${key}`, { [`attr_${key}`]: val });
       });
     }
-    return qb.orderBy('p.name').getMany();
+    return qb.orderBy('p.name').limit(2000).getMany();
   }
 
   async getAnalogs(productId: number) {
