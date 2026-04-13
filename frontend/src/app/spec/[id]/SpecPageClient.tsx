@@ -1970,7 +1970,7 @@ export default function SpecPageClient() {
                 <th className="col-total">Итого</th>
                 <th className="col-deadline">Срок</th>
                 {customColumns.map(cc => (
-                  <th key={cc.key} className="col-custom" style={{ position: 'relative', minWidth: 80 }}>
+                  <th key={cc.key} className="col-custom" style={{ position: 'relative' }}>
                     <span onDoubleClick={() => renameCustomColumn(cc.key)} style={{ cursor: 'pointer' }}>{cc.label}</span>
                     <button onClick={() => removeCustomColumn(cc.key)}
                       style={{ position: 'absolute', top: 1, right: 2, background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: '#999', lineHeight: 1 }}>
@@ -1978,10 +1978,9 @@ export default function SpecPageClient() {
                     </button>
                   </th>
                 ))}
-                <th style={{ width: 28, padding: 0, border: 'none' }}>
-                  <button onClick={addCustomColumn}
-                    style={{ background: 'none', border: '1px dashed #ccc', borderRadius: 4, cursor: 'pointer', fontSize: 14, color: '#999', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                    title="Добавить столбец">
+                <th className="col-add-custom">
+                  <button onClick={addCustomColumn} title="Добавить столбец"
+                    style={{ background: 'none', border: '1px dashed #ccc', borderRadius: 4, cursor: 'pointer', fontSize: 14, color: '#999', width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     +
                   </button>
                 </th>
