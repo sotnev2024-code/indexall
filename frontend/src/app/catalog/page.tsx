@@ -69,6 +69,8 @@ function CatalogPageInner() {
   const detailRef = useRef<HTMLDivElement>(null);
   const [etmData, setEtmData] = useState<{ price: number | null; term: string } | null>(null);
   const [etmLoading, setEtmLoading] = useState(false);
+  const [accView, setAccView] = useState<'closed' | 'types' | 'list'>('closed');
+  const [accSelectedType, setAccSelectedType] = useState<string | null>(null);
   // Track whether we've done the initial restore fetch
   const restoredRef = useRef(false);
 
@@ -270,6 +272,8 @@ function CatalogPageInner() {
     const isToggleOff = selectedProduct?.id === p.id;
     setSelectedProduct(isToggleOff ? null : p);
     setEtmData(null);
+    setAccView('closed');
+    setAccSelectedType(null);
     if (!isToggleOff && p.article) {
       setEtmLoading(true);
       storesApi.getEtmPricesWithTerms([p.article])
@@ -389,24 +393,71 @@ function CatalogPageInner() {
             </div>
           )}
           {/* Accessories */}
-          {selectedProduct.accessories?.length > 0 && (
-            <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Аксессуары</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {selectedProduct.accessories.map((acc: any, ai: number) => (
-                  <div key={ai} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '4px 8px', background: 'var(--bg)', borderRadius: 4 }}>
-                    <span style={{ color: 'var(--muted)', minWidth: 100 }}>{acc.type}</span>
-                    <span style={{ flex: 1 }}>{acc.name}</span>
-                    {acc.article && <span style={{ color: 'var(--muted)', fontSize: 11 }}>{acc.article}</span>}
-                    <button className="btn-add-to-list" style={{ padding: '2px 8px', fontSize: 11 }}
-                      onClick={e => { e.stopPropagation(); addToSheet({ name: acc.name, article: acc.article, manufacturer: selectedProduct.manufacturer }); }}>
-                      +
-                    </button>
-                  </div>
-                ))}
+          {selectedProduct.accessories?.length > 0 && (() => {
+            const accs: any[] = selectedProduct.accessories;
+            const types = [...new Set(accs.map((a: any) => a.type).filter(Boolean))];
+            return (
+              <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+                {accView === 'closed' && (
+                  <button className="btn-outline" style={{ fontSize: 12, padding: '5px 12px' }}
+                    onClick={e => { e.stopPropagation(); setAccView('types'); }}>
+                    Аксессуары ({accs.length})
+                  </button>
+                )}
+
+                {accView === 'types' && (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <button style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--yellow)', padding: 0 }}
+                        onClick={e => { e.stopPropagation(); setAccView('closed'); }}>
+                        ← Назад
+                      </button>
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>Категории аксессуаров</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {types.map((type: string) => {
+                        const count = accs.filter((a: any) => a.type === type).length;
+                        return (
+                          <div key={type}
+                            onClick={e => { e.stopPropagation(); setAccSelectedType(type); setAccView('list'); }}
+                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: 'var(--bg)', borderRadius: 6, cursor: 'pointer', fontSize: 13, border: '1px solid var(--border)' }}>
+                            <span>{type}</span>
+                            <span style={{ color: 'var(--muted)', fontSize: 12 }}>{count} ›</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+
+                {accView === 'list' && accSelectedType && (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <button style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--yellow)', padding: 0 }}
+                        onClick={e => { e.stopPropagation(); setAccView('types'); setAccSelectedType(null); }}>
+                        ← Назад
+                      </button>
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>{accSelectedType}</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {accs.filter((a: any) => a.type === accSelectedType).map((acc: any, ai: number) => (
+                        <div key={ai} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '6px 10px', background: 'var(--bg)', borderRadius: 4, border: '1px solid var(--border)' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 500 }}>{acc.name}</div>
+                            {acc.article && <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>{acc.article}</div>}
+                          </div>
+                          <button className="btn-add-to-list" style={{ padding: '3px 10px', fontSize: 11, whiteSpace: 'nowrap' }}
+                            onClick={e => { e.stopPropagation(); addToSheet({ name: acc.name, article: acc.article, manufacturer: selectedProduct.manufacturer }); }}>
+                            + В лист
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
         <button
           className="btn-add-to-list"
