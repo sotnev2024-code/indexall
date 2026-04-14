@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { paymentsApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
-import { canActivateTrial } from '@/lib/permissions';
+import { canActivateTrial, PAYMENTS_ENABLED } from '@/lib/permissions';
 import Header from '@/components/layout/Header';
 
 interface TariffConfig {
@@ -74,6 +74,10 @@ export default function PaywallScreen() {
   }
 
   async function handleBuy(plan: 'monthly' | 'annual') {
+    if (!PAYMENTS_ENABLED) {
+      toast('Оплата временно недоступна. Свяжитесь с поддержкой для активации тарифа.', { duration: 5000 });
+      return;
+    }
     // If not logged in, send to login first — purchase happens after auth
     if (!user) {
       router.push('/auth/login?redirect=/pricing');

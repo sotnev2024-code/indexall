@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { paymentsApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
-import { canActivateTrial } from '@/lib/permissions';
+import { canActivateTrial, PAYMENTS_ENABLED } from '@/lib/permissions';
 import Header from '@/components/layout/Header';
 
 interface TariffConfig {
@@ -64,6 +64,10 @@ function PricingContent() {
 
   async function handleBuy(planType: 'monthly' | 'annual') {
     if (!mounted) return;
+    if (!PAYMENTS_ENABLED) {
+      toast('Оплата временно недоступна. Свяжитесь с поддержкой для активации тарифа.', { duration: 5000 });
+      return;
+    }
     const token = localStorage.getItem('token');
     if (!token) { router.push('/auth/login'); return; }
     setLoading(planType);

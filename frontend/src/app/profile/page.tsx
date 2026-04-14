@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import { authApi, profileApi, paymentsApi, storesApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
+import { PAYMENTS_ENABLED } from '@/lib/permissions';
 
 // ── helpers ──────────────────────────────────────────────────
 
@@ -189,6 +190,10 @@ export default function ProfilePage() {
   }
 
   async function handleRenew(planType: 'monthly' | 'annual') {
+    if (!PAYMENTS_ENABLED) {
+      toast('Оплата временно недоступна. Свяжитесь с поддержкой для активации тарифа.', { duration: 5000 });
+      return;
+    }
     setPayLoading(planType);
     try {
       const returnUrl = `${window.location.origin}/profile?success=1`;

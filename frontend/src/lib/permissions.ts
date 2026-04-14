@@ -11,6 +11,13 @@ type Plan = string | null | undefined;
 
 const PAID_PLANS = new Set(['trial', 'base', 'pro', 'admin']);
 
+/**
+ * Feature flag: paid subscription purchase via YooKassa.
+ * Currently disabled — test ЮKassa shop is configured, real payments would fail.
+ * Set to `true` once the production ЮKassa shop credentials are deployed.
+ */
+export const PAYMENTS_ENABLED = false;
+
 interface UserLike {
   plan?: string | null;
   subscriptionExpiresAt?: string | null;
