@@ -48,9 +48,17 @@ export default function PaywallScreen() {
   const monthly = monthlyConfig?.price ?? 7990;
   const annual  = monthlyConfig?.price_annual ?? 79900;
 
-  const trialAvailable = canActivateTrial(user as any);
+  // Show trial card for logged-out users (lead them to sign up) or logged-in users who can activate it
+  const trialUsed = !!(user as any)?.trialUsed;
+  const trialAvailable = !user || canActivateTrial(user as any);
+  const isLoggedOut = !user;
 
   async function handleActivateTrial() {
+    // If not logged in, redirect to register — trial activation happens after sign up
+    if (!user) {
+      router.push('/auth/register');
+      return;
+    }
     setLoading('trial');
     try {
       const { data } = await paymentsApi.activateTrial();
@@ -66,6 +74,11 @@ export default function PaywallScreen() {
   }
 
   async function handleBuy(plan: 'monthly' | 'annual') {
+    // If not logged in, send to login first — purchase happens after auth
+    if (!user) {
+      router.push('/auth/login?redirect=/pricing');
+      return;
+    }
     setLoading(plan);
     try {
       const { data } = await paymentsApi.createPayment(plan, window.location.origin + '/projects');
@@ -161,9 +174,11 @@ export default function PaywallScreen() {
                 disabled={loading === 'trial'}
                 style={{ width: '100%', padding: '12px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}
               >
-                {loading === 'trial' ? '...' : 'Оформить'}
+                {loading === 'trial' ? '...' : (isLoggedOut ? 'Зарегистрироваться' : 'Оформить')}
               </button>
-              <p style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>Только один раз, бесплатно</p>
+              <p style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>
+                {isLoggedOut ? 'Создайте аккаунт и получите 7 дней Pro' : 'Только один раз, бесплатно'}
+              </p>
             </div>
           )}
         </div>

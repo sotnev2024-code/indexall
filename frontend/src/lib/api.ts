@@ -182,6 +182,7 @@ export const adminApi = {
   updateUserStatus: (id: number, status: string) => api.patch(`/admin/users/${id}/status`, { status }),
   updateUserVerified: (id: number, emailVerified: boolean) => api.patch(`/admin/users/${id}/verified`, { emailVerified }),
   updateUserSubscription: (id: number, subscriptionExpiresAt: string | null) => api.patch(`/admin/users/${id}/subscription`, { subscriptionExpiresAt }),
+  updateUserPassword: (id: number, newPassword: string) => api.patch(`/admin/users/${id}/password`, { newPassword }),
   getStats: () => api.get('/admin/stats'),
   getConversions: () => api.get('/admin/conversions'),
   getTariffOperations: () => api.get('/admin/tariff-operations'),

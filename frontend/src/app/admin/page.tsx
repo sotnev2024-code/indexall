@@ -229,6 +229,16 @@ export default function AdminPage() {
     } catch { toast.error('Ошибка обновления статуса'); }
   }
 
+  async function handleChangePassword(userId: number, userEmail: string) {
+    const newPassword = prompt(`Новый пароль для ${userEmail}:`);
+    if (!newPassword) return;
+    if (newPassword.length < 6) { toast.error('Пароль должен быть не короче 6 символов'); return; }
+    try {
+      await adminApi.updateUserPassword(userId, newPassword);
+      toast.success('Пароль обновлён');
+    } catch { toast.error('Ошибка обновления пароля'); }
+  }
+
   async function handleVerifiedToggle(userId: number, current: boolean) {
     try {
       await adminApi.updateUserVerified(userId, !current);
@@ -670,6 +680,7 @@ export default function AdminPage() {
                       <th>Тариф</th>
                       <th>Срок до</th>
                       <th>Статус</th>
+                      <th>Действия</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -746,10 +757,17 @@ export default function AdminPage() {
                             <option value="sleep">sleep</option>
                           </select>
                         </td>
+                        <td>
+                          <button className="btn-outline" style={{ padding: '3px 8px', fontSize: 11, whiteSpace: 'nowrap' }}
+                            onClick={() => handleChangePassword(u.id, u.email)}
+                            title="Сменить пароль пользователя">
+                            Сменить пароль
+                          </button>
+                        </td>
                       </tr>
                     ))}
                     {users.length === 0 && (
-                      <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Нет пользователей</td></tr>
+                      <tr><td colSpan={9} style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Нет пользователей</td></tr>
                     )}
                   </tbody>
                 </table>

@@ -149,6 +149,22 @@ export class AdminController implements OnModuleInit {
     return safe;
   }
 
+  /** Admin: set a new password for any user (for lost-password recovery by support) */
+  @Patch('users/:id/password')
+  async updatePassword(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('newPassword') newPassword: string,
+  ) {
+    if (!newPassword || newPassword.length < 6) {
+      throw new Error('Пароль должен быть не короче 6 символов');
+    }
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const bcrypt = require('bcrypt');
+    const hash = await bcrypt.hash(newPassword, 10);
+    await this.usersRepo.update(id, { password: hash });
+    return { success: true };
+  }
+
   // ── Conversions ──────────────────────────────────────────────
 
   @Get('conversions')
