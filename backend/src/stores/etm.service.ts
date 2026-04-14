@@ -527,31 +527,34 @@ export class EtmService {
       }
     }
 
-    // Step 2: remains — batched up to 50 per request (ETM API supports it).
-    // Only for articles with valid prices to save time. Articles without price get "нет".
+    // Step 2: remains — single fetch per article (ETM /remains doesn't return
+    // per-item delivery terms reliably in batch mode, so we query one at a time).
+    // Only for articles with valid prices to save time; articles without price get "нет".
     const termMap: Record<string, string> = {};
-    const articlesWithPrice = toFetch.filter(a => priceMap[a] != null);
-    for (const a of toFetch) {
-      if (priceMap[a] == null) termMap[a] = 'нет';
-    }
     sessionRefreshed = false;
-    for (let i = 0; i < articlesWithPrice.length; i += 50) {
-      const slice = articlesWithPrice.slice(i, i + 50);
+    for (const a of toFetch) {
+      if (priceMap[a] == null) {
+        termMap[a] = 'нет';
+        continue;
+      }
       try {
-        const terms = await this.fetchRemainsBatch(slice, session);
-        for (const a of slice) termMap[a] = terms[a] || 'нет';
+        const term = await this.fetchRemains(a, session);
+        termMap[a] = term || 'нет';
       } catch (e: any) {
         if (e?.message === 'SESSION_EXPIRED' && !sessionRefreshed) {
-          this.logger.warn(`ETM session expired during remains batch, refreshing`);
+          this.logger.warn(`ETM session expired during remains, refreshing`);
           const newSession = await this.getUserSession(userId, true);
           if (newSession) {
             session = newSession;
             sessionRefreshed = true;
-            i -= 50; // retry this slice
-            continue;
+            try {
+              const term = await this.fetchRemains(a, session);
+              termMap[a] = term || 'нет';
+              continue;
+            } catch { /* fallthrough */ }
           }
         }
-        for (const a of slice) termMap[a] = 'нет';
+        termMap[a] = 'нет';
       }
     }
 
