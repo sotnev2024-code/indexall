@@ -868,8 +868,8 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
   gap: 2px;
   background: var(--white);
 }
-.spec-table tr:hover .row-actions { display: flex; }
-.spec-table tr:hover .row-num-label { visibility: hidden; }
+.spec-table td.col-num:hover .row-actions { display: flex; }
+.spec-table td.col-num:hover .row-num-label { visibility: hidden; }
 .row-action-btn {
   width: 18px;
   height: 18px;
