@@ -128,21 +128,6 @@ export class EtmService {
     return sessionKey;
   }
 
-  /**
-   * Legacy: prices only (no terms). Batches up to 50 per request.
-   * Used by code paths that don't need delivery terms.
-   */
-  async getPricesForUser(articles: string[], userId?: number): Promise<Record<string, number | null>> {
-    if (userId) {
-      // Reuse the new path that includes cache + batching, then strip terms
-      const full = await this.getPricesAndTermsForUser(articles, userId);
-      const out: Record<string, number | null> = {};
-      for (const a of Object.keys(full)) out[a] = full[a].price;
-      return out;
-    }
-    return this.getPrices(articles);
-  }
-
   private async curlRequest(url: string, method: 'GET' | 'POST' = 'GET', saveCookies = false): Promise<any> {
     const args = [
       '-s',
@@ -458,131 +443,82 @@ export class EtmService {
    * Uses cache (7 days) to avoid hitting ETM API repeatedly.
    * Falls back to "нет" for term if not found.
    */
+  /**
+   * Fetch fresh prices (no cache — each user has a personal quote in ETM).
+   * Returns map: article → price (number) or null.
+   */
+  async getPricesForUser(articles: string[], userId: number): Promise<Record<string, number | null>> {
+    const unique = [...new Set(articles.filter(a => a && a.trim()))];
+    const result: Record<string, number | null> = {};
+    if (unique.length === 0) return result;
+
+    let session = await this.getUserSession(userId, false);
+    if (!session) {
+      for (const a of unique) result[a] = null;
+      return result;
+    }
+
+    let sessionRefreshed = false;
+    for (let i = 0; i < unique.length; i += 50) {
+      const slice = unique.slice(i, i + 50);
+      try {
+        const prices = await this.fetchPricesBatch(slice, session);
+        Object.assign(result, prices);
+      } catch (e: any) {
+        if (e?.message === 'SESSION_EXPIRED' && !sessionRefreshed) {
+          const newSession = await this.getUserSession(userId, true);
+          if (newSession) { session = newSession; sessionRefreshed = true; i -= 50; continue; }
+        }
+        for (const a of slice) result[a] = null;
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Fetch fresh delivery term for a single article (no cache).
+   * Returns term string or null.
+   */
+  async getTermForUser(article: string, userId: number): Promise<string | null> {
+    if (!article?.trim()) return null;
+    let session = await this.getUserSession(userId, false);
+    if (!session) return null;
+
+    try {
+      return await this.fetchRemains(article, session);
+    } catch (e: any) {
+      if (e?.message === 'SESSION_EXPIRED') {
+        const newSession = await this.getUserSession(userId, true);
+        if (newSession) {
+          try { return await this.fetchRemains(article, newSession); } catch { return null; }
+        }
+      }
+      return null;
+    }
+  }
+
+  /**
+   * Legacy combined endpoint kept for backward compatibility (catalog add-to-sheet, etc.)
+   * Fetches prices + terms without any caching. Prefer split endpoints for new UX.
+   */
   async getPricesAndTermsForUser(
     articles: string[],
     userId: number,
-    options: { skipCache?: boolean } = {},
+    _options: { skipCache?: boolean } = {},
   ): Promise<Record<string, { price: number | null; term: string }>> {
     const unique = [...new Set(articles.filter(a => a && a.trim()))];
     const result: Record<string, { price: number | null; term: string }> = {};
     if (unique.length === 0) return result;
 
-    // Check cache first (7-day TTL)
-    const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-    const cached: Record<string, EtmCache> = {};
-    if (!options.skipCache) {
-      try {
-        const cacheRows = await this.cacheRepo.find({ where: { article: In(unique) } });
-        const now = Date.now();
-        for (const c of cacheRows) {
-          if (c.updated_at && now - new Date(c.updated_at).getTime() < CACHE_TTL_MS) {
-            cached[c.article] = c;
-          }
-        }
-      } catch (e: any) {
-        this.logger.warn(`ETM cache read error: ${e?.message}`);
-      }
-    }
-
-    const toFetch = unique.filter(a => !cached[a]);
-
-    // Fill from cache
+    const prices = await this.getPricesForUser(unique, userId);
     for (const a of unique) {
-      if (cached[a]) {
-        result[a] = {
-          price: cached[a].price != null ? Number(cached[a].price) : null,
-          term: cached[a].term || 'нет',
-        };
-      }
-    }
-
-    if (toFetch.length === 0) {
-      this.logger.log(`ETM lookup: ${unique.length} articles, all from cache`);
-      return result;
-    }
-
-    // Need session — if caller forced cache skip, also force session refresh
-    // so re-saved credentials are used immediately without waiting for old session to expire
-    let session = await this.getUserSession(userId, !!options.skipCache);
-    if (!session) {
-      // No user session — return null prices and "нет" terms for fetched articles
-      for (const a of toFetch) result[a] = { price: null, term: 'нет' };
-      return result;
-    }
-
-    // Step 1: batch prices (up to 50 per request)
-    const priceMap: Record<string, number | null> = {};
-    let sessionRefreshed = false;
-    for (let i = 0; i < toFetch.length; i += 50) {
-      const slice = toFetch.slice(i, i + 50);
-      try {
-        const prices = await this.fetchPricesBatch(slice, session);
-        Object.assign(priceMap, prices);
-      } catch (e: any) {
-        if (e?.message === 'SESSION_EXPIRED' && !sessionRefreshed) {
-          this.logger.warn(`ETM session expired for user ${userId}, refreshing`);
-          const newSession = await this.getUserSession(userId, true);
-          if (newSession) {
-            session = newSession;
-            sessionRefreshed = true;
-            i -= 50; // retry this slice
-            continue;
-          }
-        }
-        for (const a of slice) priceMap[a] = null;
-      }
-    }
-
-    // Step 2: remains — single fetch per article (ETM /remains doesn't return
-    // per-item delivery terms reliably in batch mode, so we query one at a time).
-    // Only for articles with valid prices to save time; articles without price get "нет".
-    const termMap: Record<string, string> = {};
-    sessionRefreshed = false;
-    for (const a of toFetch) {
-      if (priceMap[a] == null) {
-        termMap[a] = 'нет';
+      if (prices[a] == null) {
+        result[a] = { price: null, term: 'нет' };
         continue;
       }
-      try {
-        const term = await this.fetchRemains(a, session);
-        termMap[a] = term || 'нет';
-      } catch (e: any) {
-        if (e?.message === 'SESSION_EXPIRED' && !sessionRefreshed) {
-          this.logger.warn(`ETM session expired during remains, refreshing`);
-          const newSession = await this.getUserSession(userId, true);
-          if (newSession) {
-            session = newSession;
-            sessionRefreshed = true;
-            try {
-              const term = await this.fetchRemains(a, session);
-              termMap[a] = term || 'нет';
-              continue;
-            } catch { /* fallthrough */ }
-          }
-        }
-        termMap[a] = 'нет';
-      }
+      const term = await this.getTermForUser(a, userId);
+      result[a] = { price: prices[a], term: term || 'нет' };
     }
-
-    // Save to cache + build result
-    const toUpsert: EtmCache[] = [];
-    for (const a of toFetch) {
-      const price = priceMap[a] ?? null;
-      const term = termMap[a] || 'нет';
-      result[a] = { price, term };
-      toUpsert.push({ article: a, price, term, updated_at: new Date() });
-    }
-    try {
-      await this.cacheRepo.save(toUpsert);
-    } catch (e: any) {
-      this.logger.warn(`ETM cache save error: ${e?.message}`);
-    }
-
-    this.logger.log(
-      `ETM lookup: ${unique.length} articles (${unique.length - toFetch.length} from cache, ${toFetch.length} fetched), ` +
-        `${Object.values(result).filter(r => r.price != null).length} prices found`
-    );
-
     return result;
   }
 

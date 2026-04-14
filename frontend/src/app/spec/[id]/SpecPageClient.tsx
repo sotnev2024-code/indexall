@@ -1727,15 +1727,14 @@ export default function SpecPageClient() {
     if (targets.length === 0) { toast('Нет строк с артикулом для обновления'); return; }
 
     setRefreshing(true);
-    setRefreshProgress({ done: 0, total: targets.length });
-    const snap = JSON.parse(JSON.stringify(rowsRef.current));
-    // Unique articles only — backend handles batching of 50/request
     const uniqueArticles = Array.from(new Set(targets.map(({ r }) => r.article as string)));
+    setRefreshProgress({ done: 0, total: uniqueArticles.length });
+    const snap = rowsRef.current.map(r => ({ ...r }));
 
     try {
-      // Force refresh — skip cache so user always gets fresh prices
-      const { data } = await storesApi.getEtmPricesWithTerms(uniqueArticles, true);
-      let updated = 0;
+      // Step 1: fetch all prices in one batch (no cache) — fast, usually 1-2 seconds
+      const { data: prices } = await storesApi.getEtmPrices(uniqueArticles);
+      let priceFoundCount = 0;
 
       setRows(prev => {
         const next = [...prev];
@@ -1743,31 +1742,71 @@ export default function SpecPageClient() {
           const r = next[i];
           if (!r.article) continue;
           if (r.store && r.store !== 'ЭТМ' && r.store.toUpperCase() !== 'ETM') continue;
-          const entry = data[r.article];
-          // No entry from backend for this article — set deadline to "нет" but keep price empty
-          if (!entry) {
-            next[i] = { ...r, store: 'ЭТМ', deadline: 'нет' };
-            continue;
-          }
-          const price = entry.price;
-          const term = entry.term || 'нет';
+          const price = prices[r.article];
           const priceStr = price != null && price > 0 ? String(price) : '';
-          if (priceStr) updated++;
+          if (priceStr) priceFoundCount++;
           next[i] = {
             ...r,
             price: priceStr,
             store: 'ЭТМ',
-            deadline: term,
+            deadline: priceStr ? '...' : 'нет', // placeholder until term arrives
             total: calcTotal(priceStr, r.qty, r.coef),
           };
         }
         return next;
       });
 
+      if (priceFoundCount === 0) {
+        toast('ЭТМ: цены не найдены. Проверьте артикулы.');
+        setRefreshing(false);
+        setRefreshProgress(null);
+        return;
+      }
+
+      // Step 2: progressively fetch delivery terms per article (1 request each)
+      // Articles without price skip term lookup (already set to "нет").
+      const articlesWithPrice = uniqueArticles.filter(a => prices[a] != null && prices[a]! > 0);
+      let done = 0;
+
+      // Fire all requests in parallel — backend queue serializes them, but each
+      // completion immediately updates its rows so the user sees progressive progress.
+      await Promise.all(articlesWithPrice.map(async (article) => {
+        try {
+          const { data } = await storesApi.getEtmTerm(article);
+          const term = data.term || 'нет';
+          setRows(prev => {
+            const next = [...prev];
+            for (let i = 0; i < next.length; i++) {
+              const r = next[i];
+              if (r.article === article && (r.store === 'ЭТМ' || !r.store || r.store.toUpperCase() === 'ETM')) {
+                next[i] = { ...r, deadline: term };
+              }
+            }
+            return next;
+          });
+        } catch {
+          setRows(prev => {
+            const next = [...prev];
+            for (let i = 0; i < next.length; i++) {
+              const r = next[i];
+              if (r.article === article && r.deadline === '...') {
+                next[i] = { ...r, deadline: 'нет' };
+              }
+            }
+            return next;
+          });
+        } finally {
+          done++;
+          setRefreshProgress({ done, total: articlesWithPrice.length });
+        }
+      }));
+
+      // Mark articles without price as "нет" for deadline (in case any '...' slipped through)
+      setRows(prev => prev.map(r => r.deadline === '...' ? { ...r, deadline: 'нет' } : r));
+
       pushHistorySnapshot(snap);
       setUnsaved(true);
-      if (updated > 0) toast.success(`ЭТМ: обновлено ${updated} из ${targets.length}`);
-      else toast('ЭТМ: цены не найдены. Проверьте артикулы.');
+      toast.success(`ЭТМ: обновлено ${priceFoundCount} из ${uniqueArticles.length}`);
     } catch (err: any) {
       const status = err?.response?.status;
       const msg = err?.response?.data?.message || '';

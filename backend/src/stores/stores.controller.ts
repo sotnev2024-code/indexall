@@ -60,6 +60,23 @@ export class StoresController {
     return this.etmService.getPricesAndTermsForUser(articles, userId, { skipCache: !!skipCache });
   }
 
+  /**
+   * Returns delivery term for a single article. Used by progressive UI:
+   * client sends one request per article and updates the row as each answer arrives.
+   * Response: { term: string | null }
+   */
+  @Post('etm/term')
+  @UseGuards(ProGuard)
+  async getEtmTerm(@Body('article') article: string, @Req() req: any) {
+    if (!article || typeof article !== 'string') {
+      throw new HttpException('article required', HttpStatus.BAD_REQUEST);
+    }
+    const userId = req.user?.userId;
+    if (!userId) throw new HttpException('Auth required', HttpStatus.UNAUTHORIZED);
+    const term = await this.etmService.getTermForUser(article, userId);
+    return { term };
+  }
+
   // ── ETM per-user credentials ──────────────────────────────────
   @Get('etm/credentials')
   async getEtmCredentials(@Req() req: any) {

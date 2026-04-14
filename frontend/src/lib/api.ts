@@ -157,12 +157,16 @@ export const storesApi = {
   getEtmStatus: () => api.get<{ configured: boolean; usingProxy?: boolean }>('/stores/etm/status'),
   // Returns { [article]: price | null } — takes up to 1.1s per article (ETM rate limit)
   getEtmPrices: (articles: string[]) => api.post<Record<string, number | null>>('/stores/etm/prices', { articles }),
-  // Returns { [article]: { price, term } } — uses 7-day cache + batching (50 articles/request)
+  // Legacy combined endpoint. Prefer getEtmPrices + getEtmTerm for progressive loading.
   getEtmPricesWithTerms: (articles: string[], skipCache = false) =>
     api.post<Record<string, { price: number | null; term: string }>>(
       '/stores/etm/prices-with-terms',
       { articles, skipCache },
     ),
+  /** Returns delivery term for a single article. Used by progressive UI —
+   * call per-article in parallel, update the row as each response arrives. */
+  getEtmTerm: (article: string) =>
+    api.post<{ term: string | null }>('/stores/etm/term', { article }),
   getEtmCredentials: () => api.get('/stores/etm/credentials'),
   saveEtmCredentials: (login: string, password: string) => api.post('/stores/etm/credentials', { login, password }),
   removeEtmCredentials: () => api.delete('/stores/etm/credentials'),
