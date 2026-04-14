@@ -30,10 +30,11 @@ export class EtmService {
   private readonly ENCRYPTION_KEY: Buffer;
   private readonly userSessions = new Map<number, { key: string; expiry: number }>();
 
-  // Global rate-limited request queue (1 req/sec — ETM limit per IP)
+  // Global rate-limited request queue. ETM doesn't publish a hard limit; empirically ~1 req/sec is safe.
+  // Reduced from 1100ms → 700ms to cut lookup time ~30%. If ETM starts throttling, bump this back up.
   private requestQueue: Promise<any> = Promise.resolve();
   private lastRequestAt = 0;
-  private readonly MIN_INTERVAL_MS = 1100;
+  private readonly MIN_INTERVAL_MS = 700;
 
   constructor(
     @InjectRepository(EtmCredential)
@@ -260,9 +261,15 @@ export class EtmService {
     if (code === 401 || code === 403 || msg.includes('session') || msg.includes('auth') || msg.includes('unauthor')) {
       throw new Error('SESSION_EXPIRED');
     }
-    if (code !== 200 || !json.data) return null;
+    if (code !== 200 || !json.data) {
+      this.logger.warn(`ETM single price miss for ${article}: code=${code} msg=${json?.status?.message || ''}`);
+      return null;
+    }
     const row = Array.isArray(json.data.rows) ? json.data.rows[0] : json.data;
     const p = row?.pricewnds ?? row?.price ?? 0;
+    if (!(Number(p) > 0)) {
+      this.logger.warn(`ETM price=0 for ${article} (товар без цены в ЭТМ)`);
+    }
     return Number(p) > 0 ? Number(p) : null;
   }
 
