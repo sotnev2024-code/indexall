@@ -58,6 +58,8 @@ interface RowProps {
   onCellDoubleClick: (rowIdx: number, colIdx: number) => void;
   onRowContextMenu: (rowIdx: number, x: number, y: number) => void;
   customColumns: { key: string; label: string }[];
+  onInsertBelow: (rowIdx: number) => void;
+  onDeleteRow: (rowIdx: number) => void;
 }
 
 const SpecRow = memo(function SpecRow({
@@ -65,7 +67,7 @@ const SpecRow = memo(function SpecRow({
   onNonEditableMouseDown,
   activeCellRow, activeCellCol, isEditing, selR1, selC1, selR2, selC2,
   onCellMouseDown, onCellMouseEnter, onCellDoubleClick, onRowContextMenu,
-  customColumns,
+  customColumns, onInsertBelow, onDeleteRow,
 }: RowProps) {
   const isActive = (col: number) => activeCellRow === idx && activeCellCol === col;
   const inRange = (col: number) => idx >= selR1 && idx <= selR2 && col >= selC1 && col <= selC2;
@@ -97,8 +99,18 @@ const SpecRow = memo(function SpecRow({
   });
 
   return (
-    <tr onContextMenu={e => { e.preventDefault(); onRowContextMenu(idx, e.clientX, e.clientY); }}>
-      <td className="col-num" onMouseDown={onNonEditableMouseDown}>{idx + 1}</td>
+    <tr className="spec-row" onContextMenu={e => { e.preventDefault(); onRowContextMenu(idx, e.clientX, e.clientY); }}>
+      <td className="col-num" onMouseDown={onNonEditableMouseDown} style={{ position: 'relative' }}>
+        <span className="row-num-label">{idx + 1}</span>
+        <span className="row-actions">
+          <button className="row-action-btn" title="Добавить строку ниже"
+            onMouseDown={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); onInsertBelow(idx); }}>+</button>
+          <button className="row-action-btn row-action-btn--danger" title="Удалить строку"
+            onMouseDown={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); onDeleteRow(idx); }}>×</button>
+        </span>
+      </td>
 
       <td {...tdAttrs(0, 'col-name', { position: 'relative' })}>
         <input
@@ -1219,11 +1231,23 @@ export default function SpecPageClient() {
     pushHistorySnapshot(rowsRef.current);
     setRows(prev => {
       const next = prev.filter((_, i) => i !== rowIdx);
-      while (next.length < 25) next.push(emptyRow(next.length));
+      while (next.length < 1000) next.push(emptyRow(next.length));
       return next;
     });
     setUnsaved(true);
     toast.success('Строка удалена');
+  }
+
+  // Insert empty row below given index (used by row action button)
+  function insertRowBelow(rowIdx: number) {
+    pushHistorySnapshot(rowsRef.current);
+    setRows(prev => {
+      const next = [...prev];
+      next.splice(rowIdx + 1, 0, emptyRow(rowIdx + 1));
+      // Renumber if you store row_number; recompute indices
+      return next.map((r, i) => ({ ...r, row_number: i + 1 }));
+    });
+    setUnsaved(true);
   }
 
   const handleRowContextMenu = useCallback((rowIdx: number, x: number, y: number) => {
@@ -2016,6 +2040,8 @@ export default function SpecPageClient() {
                   onCellDoubleClick={handleCellDoubleClick}
                   onRowContextMenu={handleRowContextMenu}
                   customColumns={customColumns}
+                  onInsertBelow={insertRowBelow}
+                  onDeleteRow={deleteRow}
                 />
               ))}
             </tbody>

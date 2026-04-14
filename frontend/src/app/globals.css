@@ -856,6 +856,37 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .col-total { width: 100px; font-weight: 600; }
 .col-deadline { width: 70px; }
 .col-custom { width: 90px; min-width: 90px; max-width: 90px; }
+
+/* Row hover actions: insert/delete buttons inside № column */
+.row-actions {
+  display: none;
+  position: absolute;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: var(--white);
+}
+.spec-row:hover .row-actions { display: flex; }
+.spec-row:hover .row-num-label { visibility: hidden; }
+.row-action-btn {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #555;
+  padding: 0;
+}
+.row-action-btn:hover { background: #f5f5f5; border-color: #999; }
+.row-action-btn--danger { color: #c00; }
+.row-action-btn--danger:hover { background: #fee; border-color: #c00; }
 .col-add-custom { width: 28px; min-width: 28px; padding: 0 2px; border-right: none !important; }
 .spec-table th.col-custom,
 .spec-table th.col-add-custom { position: sticky; top: 0; z-index: 10; background: var(--white); }
