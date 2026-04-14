@@ -341,6 +341,85 @@ export class EtmService {
     return result;
   }
 
+  /** Parse one /remains response row into a delivery term string. */
+  private parseRemainsRow(data: any): string | null {
+    if (!data) return null;
+    let hasStock = false;
+    if (Array.isArray(data.InfoStores)) {
+      for (const s of data.InfoStores) {
+        if (Number(s?.StoreQuantRem) > 0) { hasStock = true; break; }
+      }
+    }
+    const dlv = data?.InforDeliveryTime || {};
+    const fmt = (v: any): string => {
+      const s = String(v ?? '').trim();
+      if (!s) return '';
+      if (/дн|day/i.test(s)) return s.replace(/\s+/g, ' ').trim();
+      return `${s} дн`;
+    };
+    if (hasStock && dlv.DeliveryTimeInPres) return fmt(dlv.DeliveryTimeInPres);
+    if (dlv.DeliveryProductionTerm) return fmt(dlv.DeliveryProductionTerm);
+    if (dlv.DeliveryTimeInPres) return fmt(dlv.DeliveryTimeInPres);
+    return null;
+  }
+
+  /**
+   * Batch fetch delivery terms for up to 50 articles in one request.
+   * Returns map: article → term | null. Falls back to single fetches on error/mismatch.
+   * Throws 'SESSION_EXPIRED' on auth failure.
+   */
+  private async fetchRemainsBatch(articles: string[], session: string): Promise<Record<string, string | null>> {
+    const result: Record<string, string | null> = {};
+    if (articles.length === 0) return result;
+    if (articles.length === 1) {
+      result[articles[0]] = await this.fetchRemains(articles[0], session);
+      return result;
+    }
+
+    const ids = articles.map(a => encodeURIComponent(a)).join('%2C');
+    const url =
+      `https://${this.host}/api/v1/goods/${ids}/remains` +
+      `?type=mnf&sessionid=${encodeURIComponent(session)}`;
+
+    let json: any;
+    try {
+      json = await this.enqueue(() => this.curlRequest(url, 'GET'));
+    } catch (e: any) {
+      this.logger.warn(`ETM remains batch error: ${e?.message}. Falling back to single fetches.`);
+      for (const a of articles) {
+        try { result[a] = await this.fetchRemains(a, session); }
+        catch (ex: any) { if (ex?.message === 'SESSION_EXPIRED') throw ex; result[a] = null; }
+      }
+      return result;
+    }
+
+    const code = json?.status?.code;
+    const msg = String(json?.status?.message || '').toLowerCase();
+    if (code === 401 || code === 403 || msg.includes('session') || msg.includes('auth') || msg.includes('unauthor')) {
+      throw new Error('SESSION_EXPIRED');
+    }
+    if (code !== 200 || !json.data) {
+      for (const a of articles) result[a] = null;
+      return result;
+    }
+
+    const rows = Array.isArray(json.data.rows) ? json.data.rows : (json.data ? [json.data] : []);
+    if (rows.length === articles.length) {
+      for (let i = 0; i < articles.length; i++) {
+        result[articles[i]] = this.parseRemainsRow(rows[i]);
+      }
+      return result;
+    }
+
+    // Row count mismatch — fall back to single fetches
+    this.logger.warn(`ETM remains batch row count mismatch: requested ${articles.length}, got ${rows.length}. Falling back.`);
+    for (const a of articles) {
+      try { result[a] = await this.fetchRemains(a, session); }
+      catch (ex: any) { if (ex?.message === 'SESSION_EXPIRED') throw ex; result[a] = null; }
+    }
+    return result;
+  }
+
   /**
    * Fetch delivery term for a single article from /remains.
    * Returns: { term: string | null }.
@@ -365,29 +444,7 @@ export class EtmService {
       throw new Error('SESSION_EXPIRED');
     }
     if (code !== 200 || !json.data) return null;
-
-    const data = json.data;
-    // Stock available somewhere?
-    let hasStock = false;
-    if (Array.isArray(data.InfoStores)) {
-      for (const s of data.InfoStores) {
-        if (Number(s?.StoreQuantRem) > 0) { hasStock = true; break; }
-      }
-    }
-
-    const dlv = data?.InforDeliveryTime || {};
-    const fmt = (v: any): string => {
-      const s = String(v ?? '').trim();
-      if (!s) return '';
-      // If already contains a unit (дн / дней / day), return as-is
-      if (/дн|day/i.test(s)) return s.replace(/\s+/g, ' ').trim();
-      return `${s} дн`;
-    };
-
-    if (hasStock && dlv.DeliveryTimeInPres) return fmt(dlv.DeliveryTimeInPres);
-    if (dlv.DeliveryProductionTerm) return fmt(dlv.DeliveryProductionTerm);
-    if (dlv.DeliveryTimeInPres) return fmt(dlv.DeliveryTimeInPres);
-    return null;
+    return this.parseRemainsRow(json.data);
   }
 
   /**
@@ -470,33 +527,31 @@ export class EtmService {
       }
     }
 
-    // Step 2: remains (1 article per request) — only for articles with valid prices
-    // to save time. Articles without price get term "нет".
+    // Step 2: remains — batched up to 50 per request (ETM API supports it).
+    // Only for articles with valid prices to save time. Articles without price get "нет".
     const termMap: Record<string, string> = {};
-    sessionRefreshed = false;
+    const articlesWithPrice = toFetch.filter(a => priceMap[a] != null);
     for (const a of toFetch) {
-      if (priceMap[a] == null) {
-        termMap[a] = 'нет';
-        continue;
-      }
+      if (priceMap[a] == null) termMap[a] = 'нет';
+    }
+    sessionRefreshed = false;
+    for (let i = 0; i < articlesWithPrice.length; i += 50) {
+      const slice = articlesWithPrice.slice(i, i + 50);
       try {
-        const term = await this.fetchRemains(a, session);
-        termMap[a] = term || 'нет';
+        const terms = await this.fetchRemainsBatch(slice, session);
+        for (const a of slice) termMap[a] = terms[a] || 'нет';
       } catch (e: any) {
         if (e?.message === 'SESSION_EXPIRED' && !sessionRefreshed) {
-          this.logger.warn(`ETM session expired during remains, refreshing`);
+          this.logger.warn(`ETM session expired during remains batch, refreshing`);
           const newSession = await this.getUserSession(userId, true);
           if (newSession) {
             session = newSession;
             sessionRefreshed = true;
-            try {
-              const term = await this.fetchRemains(a, session);
-              termMap[a] = term || 'нет';
-              continue;
-            } catch { /* fallthrough */ }
+            i -= 50; // retry this slice
+            continue;
           }
         }
-        termMap[a] = 'нет';
+        for (const a of slice) termMap[a] = 'нет';
       }
     }
 
