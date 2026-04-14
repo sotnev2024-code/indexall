@@ -858,17 +858,18 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .col-custom { width: 90px; min-width: 90px; max-width: 90px; }
 
 /* Row hover actions: insert/delete buttons inside № column */
+.spec-table td.col-num { position: relative; }
 .row-actions {
   display: none;
   position: absolute;
-  inset: 0;
+  top: 0; left: 0; right: 0; bottom: 0;
   align-items: center;
   justify-content: center;
   gap: 2px;
   background: var(--white);
 }
-.spec-row:hover .row-actions { display: flex; }
-.spec-row:hover .row-num-label { visibility: hidden; }
+.spec-table tr:hover .row-actions { display: flex; }
+.spec-table tr:hover .row-num-label { visibility: hidden; }
 .row-action-btn {
   width: 18px;
   height: 18px;

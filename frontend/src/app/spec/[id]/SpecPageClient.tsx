@@ -99,8 +99,8 @@ const SpecRow = memo(function SpecRow({
   });
 
   return (
-    <tr className="spec-row" onContextMenu={e => { e.preventDefault(); onRowContextMenu(idx, e.clientX, e.clientY); }}>
-      <td className="col-num" onMouseDown={onNonEditableMouseDown} style={{ position: 'relative' }}>
+    <tr onContextMenu={e => { e.preventDefault(); onRowContextMenu(idx, e.clientX, e.clientY); }}>
+      <td className="col-num" onMouseDown={onNonEditableMouseDown}>
         <span className="row-num-label">{idx + 1}</span>
         <span className="row-actions">
           <button className="row-action-btn" title="Добавить строку ниже"
@@ -1227,7 +1227,7 @@ export default function SpecPageClient() {
   }
 
   // Single-row delete used by keyboard flow
-  function deleteRow(rowIdx: number) {
+  const deleteRow = useCallback((rowIdx: number) => {
     pushHistorySnapshot(rowsRef.current);
     setRows(prev => {
       const next = prev.filter((_, i) => i !== rowIdx);
@@ -1236,19 +1236,18 @@ export default function SpecPageClient() {
     });
     setUnsaved(true);
     toast.success('Строка удалена');
-  }
+  }, [setUnsaved]);
 
   // Insert empty row below given index (used by row action button)
-  function insertRowBelow(rowIdx: number) {
+  const insertRowBelow = useCallback((rowIdx: number) => {
     pushHistorySnapshot(rowsRef.current);
     setRows(prev => {
       const next = [...prev];
       next.splice(rowIdx + 1, 0, emptyRow(rowIdx + 1));
-      // Renumber if you store row_number; recompute indices
       return next.map((r, i) => ({ ...r, row_number: i + 1 }));
     });
     setUnsaved(true);
-  }
+  }, [setUnsaved]);
 
   const handleRowContextMenu = useCallback((rowIdx: number, x: number, y: number) => {
     setRowCtxMenu({ rowIdx, x, y });
