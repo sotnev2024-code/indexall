@@ -96,6 +96,9 @@ const SpecRow = memo(function SpecRow({
     onFocus,
     onBlur,
     onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => onInputKeyDown(e, idx, col),
+    // In edit mode, prevent mousedown from bubbling to the td (which would start cell-range selection
+    // and block text selection inside the input)
+    onMouseDown: cellEditing(col) ? (e: React.MouseEvent) => e.stopPropagation() : undefined,
   });
 
   return (
@@ -213,6 +216,7 @@ const SpecRow = memo(function SpecRow({
               onBlur={onBlur}
               onKeyDown={(e) => onInputKeyDown(e, idx, colIdx)}
               onChange={e => onUpdate(idx, `custom.${cc.key}`, e.target.value)}
+              onMouseDown={cellEditing(colIdx) ? (e) => e.stopPropagation() : undefined}
             />
           </td>
         );
