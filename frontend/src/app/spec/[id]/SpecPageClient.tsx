@@ -534,8 +534,12 @@ export default function SpecPageClient() {
         const coef  = cleanNum(r.coef, '1') || '1';
         return { ...r, qty, price, coef, total: calcTotal(price, qty, coef) };
       });
+      // Show data rows + 50 empty buffer (max 1000 total).
+      // Rendering 1000 DOM rows × 11 cells = 11000+ inputs which freezes the UI on insert/delete.
+      // Export still pads to 1000; user can add more via "+" button on row hover.
+      const PAD_TARGET = Math.min(1000, normalizedRows.length + 50);
       const padded = [...normalizedRows];
-      while (padded.length < 1000) {
+      while (padded.length < PAD_TARGET) {
         padded.push({ row_number: padded.length + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ЭТМ', coef: '1', total: '', deadline: '' });
       }
       setRows(padded);
@@ -1257,7 +1261,8 @@ export default function SpecPageClient() {
     pushHistorySnapshot(rowsRef.current);
     setRows(prev => {
       const next = prev.filter((_, i) => i !== rowIdx);
-      while (next.length < 1000) next.push(emptyRow(next.length));
+      // Keep length stable: append exactly one empty row to compensate
+      next.push(emptyRow(next.length));
       return next;
     });
     setUnsaved(true);
