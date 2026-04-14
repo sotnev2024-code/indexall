@@ -30,11 +30,12 @@ export class EtmService {
   private readonly ENCRYPTION_KEY: Buffer;
   private readonly userSessions = new Map<number, { key: string; expiry: number }>();
 
-  // Global rate-limited request queue. ETM doesn't publish a hard limit; empirically ~1 req/sec is safe.
-  // Reduced from 1100ms → 700ms to cut lookup time ~30%. If ETM starts throttling, bump this back up.
+  // Global rate-limited request queue.
+  // Official ETM API docs (24.01.2025): 1 request per second per endpoint. ETM reserves the right
+  // to block the client IP on excess. Keep 1100ms to stay above the 1 req/sec threshold.
   private requestQueue: Promise<any> = Promise.resolve();
   private lastRequestAt = 0;
-  private readonly MIN_INTERVAL_MS = 700;
+  private readonly MIN_INTERVAL_MS = 1100;
 
   constructor(
     @InjectRepository(EtmCredential)
@@ -261,14 +262,19 @@ export class EtmService {
     if (code === 401 || code === 403 || msg.includes('session') || msg.includes('auth') || msg.includes('unauthor')) {
       throw new Error('SESSION_EXPIRED');
     }
+    if (code === 404) {
+      this.logger.warn(`ETM ${article}: not found (code=404)`);
+      return null;
+    }
     if (code !== 200 || !json.data) {
-      this.logger.warn(`ETM single price miss for ${article}: code=${code} msg=${json?.status?.message || ''}`);
+      this.logger.warn(`ETM price miss for ${article}: code=${code} msg=${json?.status?.message || ''}`);
       return null;
     }
     const row = Array.isArray(json.data.rows) ? json.data.rows[0] : json.data;
     const p = row?.pricewnds ?? row?.price ?? 0;
     if (!(Number(p) > 0)) {
-      this.logger.warn(`ETM price=0 for ${article} (товар без цены в ЭТМ)`);
+      // Per ETM docs: all 0 prices = "цена по запросу" (individual quote required)
+      this.logger.warn(`ETM ${article}: price=0 — товар с индивидуальной ценой`);
     }
     return Number(p) > 0 ? Number(p) : null;
   }
