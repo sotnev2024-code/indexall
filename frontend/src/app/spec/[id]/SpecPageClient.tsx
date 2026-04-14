@@ -219,6 +219,30 @@ const SpecRow = memo(function SpecRow({
       })}
     </tr>
   );
+}, (prev, next) => {
+  // Custom equality: with 1000 rows, default shallow compare causes ALL rows
+  // to re-render on any cell click. We only re-render this row if its data
+  // actually changed OR its highlight state (active/in-selection) changed.
+  if (prev.row !== next.row) return false;
+  if (prev.idx !== next.idx) return false;
+  if (prev.isFirst !== next.isFirst) return false;
+  if (prev.pricelists !== next.pricelists) return false;
+  if (prev.customColumns !== next.customColumns) return false;
+  if (prev.isEditing !== next.isEditing && (prev.activeCellRow === prev.idx || next.activeCellRow === next.idx)) return false;
+
+  // Active cell: only relevant if this row is now or was active
+  const wasActiveRow = prev.activeCellRow === prev.idx;
+  const isActiveRow = next.activeCellRow === next.idx;
+  if (wasActiveRow !== isActiveRow) return false;
+  if (isActiveRow && prev.activeCellCol !== next.activeCellCol) return false;
+
+  // Selection range: only relevant if this row is now or was in selection
+  const wasInSel = prev.idx >= prev.selR1 && prev.idx <= prev.selR2;
+  const isInSel = next.idx >= next.selR1 && next.idx <= next.selR2;
+  if (wasInSel !== isInSel) return false;
+  if (isInSel && (prev.selC1 !== next.selC1 || prev.selC2 !== next.selC2)) return false;
+
+  return true; // skip re-render
 });
 
 // ── Page ──────────────────────────────────────────────────────
