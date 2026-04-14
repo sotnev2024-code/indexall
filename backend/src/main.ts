@@ -23,6 +23,8 @@ async function bootstrap() {
       'http://localhost:3001',
       'http://localhost:3002',
       'http://localhost:3003',
+      'https://indexall.nkubot.ru',
+      'https://service.indexall.ru',
       process.env.FRONTEND_URL || 'http://localhost:3000',
     ],
     credentials: true,
