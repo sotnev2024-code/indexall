@@ -348,6 +348,15 @@ export default function SpecPageClient() {
   const [selFocus, setSelFocus] = useState<{ row: number; col: number } | null>(null);
   const [isEditing, setIsEditing] = useState(false);
 
+  // When edit mode ends, clear any text selection inside inputs (so leftover blue
+  // highlight from drag-selecting partial text doesn't persist across cells).
+  useEffect(() => {
+    if (!isEditing) {
+      const sel = typeof window !== 'undefined' ? window.getSelection() : null;
+      if (sel && sel.rangeCount > 0) sel.removeAllRanges();
+    }
+  }, [isEditing]);
+
   const activeCellRef = useRef<{ row: number; col: number } | null>(null);
   const selAnchorRef = useRef<{ row: number; col: number } | null>(null);
   const selFocusRef  = useRef<{ row: number; col: number } | null>(null);
