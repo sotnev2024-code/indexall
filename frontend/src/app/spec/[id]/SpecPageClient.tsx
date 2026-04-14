@@ -1734,7 +1734,9 @@ export default function SpecPageClient() {
     try {
       // Step 1: fetch all prices in one batch (no cache) — fast, usually 1-2 seconds
       const { data: prices } = await storesApi.getEtmPrices(uniqueArticles);
-      let priceFoundCount = 0;
+      // Count articles where ETM returned a valid price (not per-row, per unique article)
+      const articlesWithPrice = uniqueArticles.filter(a => prices[a] != null && prices[a]! > 0);
+      const articlesWithoutPrice = uniqueArticles.length - articlesWithPrice.length;
 
       setRows(prev => {
         const next = [...prev];
@@ -1743,29 +1745,34 @@ export default function SpecPageClient() {
           if (!r.article) continue;
           if (r.store && r.store !== 'ЭТМ' && r.store.toUpperCase() !== 'ETM') continue;
           const price = prices[r.article];
-          const priceStr = price != null && price > 0 ? String(price) : '';
-          if (priceStr) priceFoundCount++;
-          next[i] = {
-            ...r,
-            price: priceStr,
-            store: 'ЭТМ',
-            deadline: priceStr ? '...' : 'нет', // placeholder until term arrives
-            total: calcTotal(priceStr, r.qty, r.coef),
-          };
+          if (price != null && price > 0) {
+            // Got fresh price — update row, queue term placeholder
+            const priceStr = String(price);
+            next[i] = {
+              ...r,
+              price: priceStr,
+              store: 'ЭТМ',
+              deadline: '...', // placeholder until /term arrives
+              total: calcTotal(priceStr, r.qty, r.coef),
+            };
+          } else {
+            // No fresh price from ETM. Keep previous price if any (don't erase user's data).
+            next[i] = { ...r, store: 'ЭТМ' };
+          }
         }
         return next;
       });
 
-      if (priceFoundCount === 0) {
-        toast('ЭТМ: цены не найдены. Проверьте артикулы.');
+      if (articlesWithPrice.length === 0) {
+        // ETM returned nothing for all articles — could be temporary API issue, expired session, etc.
+        toast.error('ЭТМ не вернул данные. Попробуйте позже или проверьте учётные данные.');
         setRefreshing(false);
         setRefreshProgress(null);
         return;
       }
 
       // Step 2: progressively fetch delivery terms per article (1 request each)
-      // Articles without price skip term lookup (already set to "нет").
-      const articlesWithPrice = uniqueArticles.filter(a => prices[a] != null && prices[a]! > 0);
+      // articlesWithPrice already computed above
       let done = 0;
 
       // Fire all requests in parallel — backend queue serializes them, but each
@@ -1806,7 +1813,12 @@ export default function SpecPageClient() {
 
       pushHistorySnapshot(snap);
       setUnsaved(true);
-      toast.success(`ЭТМ: обновлено ${priceFoundCount} из ${uniqueArticles.length}`);
+      const total = uniqueArticles.length;
+      if (articlesWithoutPrice === 0) {
+        toast.success(`ЭТМ: обновлено ${articlesWithPrice.length} артикулов`);
+      } else {
+        toast.success(`ЭТМ: обновлено ${articlesWithPrice.length} из ${total}. Без цены: ${articlesWithoutPrice}`);
+      }
     } catch (err: any) {
       const status = err?.response?.status;
       const msg = err?.response?.data?.message || '';
