@@ -2011,7 +2011,7 @@ export default function SpecPageClient() {
           onPaste={handleWrapPaste}
           style={{ outline: 'none' }}
         >
-          <table className="spec-table" style={{ userSelect: 'none' }}>
+          <table className="spec-table">
             <thead>
               <tr>
                 <th className="col-num">№</th>

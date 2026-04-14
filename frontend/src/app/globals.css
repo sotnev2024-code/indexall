@@ -1498,6 +1498,12 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
   cursor: text;
 }
 
+/* Disable text selection on cells (so drag selects cells, not text),
+ * but ALWAYS allow text selection inside inputs/selects (text copy works in edit mode) */
+.spec-table td { user-select: none; }
+.spec-table td input,
+.spec-table td select { user-select: text; }
+
 /* Table wrapper focus ring — subtle */
 .spec-table-wrap:focus {
   outline: none;
