@@ -31,12 +31,19 @@ export class StoresController {
 
   @Post('etm/prices')
   @UseGuards(ProGuard)
-  async getEtmPrices(@Body('articles') articles: string[], @Req() req: any) {
-    if (!Array.isArray(articles) || articles.length === 0) {
-      throw new HttpException('articles must be a non-empty array', HttpStatus.BAD_REQUEST);
-    }
-    // Use per-user credentials if configured, fall back to global
+  async getEtmPrices(
+    @Body('articles') articles: string[],
+    @Body('items') items: { article?: string; etmCode?: string }[],
+    @Req() req: any,
+  ) {
     const userId = req.user?.userId;
+    // Prefer items[] (with etmCode support); fall back to plain articles[] for backwards compat.
+    if (Array.isArray(items) && items.length > 0) {
+      return this.etmService.getPricesForItems(items, userId);
+    }
+    if (!Array.isArray(articles) || articles.length === 0) {
+      throw new HttpException('articles or items must be a non-empty array', HttpStatus.BAD_REQUEST);
+    }
     return this.etmService.getPricesForUser(articles, userId);
   }
 
@@ -67,13 +74,17 @@ export class StoresController {
    */
   @Post('etm/term')
   @UseGuards(ProGuard)
-  async getEtmTerm(@Body('article') article: string, @Req() req: any) {
-    if (!article || typeof article !== 'string') {
-      throw new HttpException('article required', HttpStatus.BAD_REQUEST);
-    }
+  async getEtmTerm(
+    @Body('article') article: string,
+    @Body('etmCode') etmCode: string,
+    @Req() req: any,
+  ) {
     const userId = req.user?.userId;
     if (!userId) throw new HttpException('Auth required', HttpStatus.UNAUTHORIZED);
-    const term = await this.etmService.getTermForUser(article, userId);
+    if ((!article || typeof article !== 'string') && (!etmCode || typeof etmCode !== 'string')) {
+      throw new HttpException('article or etmCode required', HttpStatus.BAD_REQUEST);
+    }
+    const term = await this.etmService.getTermForItem({ article, etmCode }, userId);
     return { term };
   }
 

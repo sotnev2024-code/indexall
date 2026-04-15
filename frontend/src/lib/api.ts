@@ -157,6 +157,11 @@ export const storesApi = {
   getEtmStatus: () => api.get<{ configured: boolean; usingProxy?: boolean }>('/stores/etm/status'),
   // Returns { [article]: price | null } — takes up to 1.1s per article (ETM rate limit)
   getEtmPrices: (articles: string[]) => api.post<Record<string, number | null>>('/stores/etm/prices', { articles }),
+  /** Batch prices with per-item ETM-code support. When `etmCode` is set on an item,
+   *  lookup uses type=etm with that code; otherwise type=mnf with article. Keys in the
+   *  response are the user-visible identifier (article preferred, else etmCode). */
+  getEtmPricesByItems: (items: { article?: string; etmCode?: string }[]) =>
+    api.post<Record<string, number | null>>('/stores/etm/prices', { items }),
   // Legacy combined endpoint. Prefer getEtmPrices + getEtmTerm for progressive loading.
   getEtmPricesWithTerms: (articles: string[], skipCache = false) =>
     api.post<Record<string, { price: number | null; term: string }>>(
@@ -164,9 +169,10 @@ export const storesApi = {
       { articles, skipCache },
     ),
   /** Returns delivery term for a single article. Used by progressive UI —
-   * call per-article in parallel, update the row as each response arrives. */
-  getEtmTerm: (article: string) =>
-    api.post<{ term: string | null }>('/stores/etm/term', { article }),
+   * call per-article in parallel, update the row as each response arrives.
+   * Pass etmCode to use type=etm lookup (preferred when ETM internal code is known). */
+  getEtmTerm: (article: string, etmCode?: string) =>
+    api.post<{ term: string | null }>('/stores/etm/term', { article, etmCode }),
   getEtmCredentials: () => api.get('/stores/etm/credentials'),
   saveEtmCredentials: (login: string, password: string) => api.post('/stores/etm/credentials', { login, password }),
   removeEtmCredentials: () => api.delete('/stores/etm/credentials'),

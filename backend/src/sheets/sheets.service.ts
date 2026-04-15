@@ -139,6 +139,7 @@ export class SheetsService {
         name: r.name || '',
         brand: r.brand || '',
         article: r.article || '',
+        etm_code: r.etm_code || '',
         qty: r.qty != null ? String(r.qty) : '0',
         unit: r.unit || 'шт',
         price: r.price != null ? String(r.price) : '0',

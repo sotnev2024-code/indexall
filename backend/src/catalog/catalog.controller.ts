@@ -99,6 +99,7 @@ export class CatalogController {
       priceCol: body.priceCol || undefined,
       unitCol: body.unitCol || undefined,
       brandCol: body.brandCol || undefined,
+      etmCodeCol: body.etmCodeCol || undefined,
       accessoriesStartCol: body.accessoriesStartCol || undefined,
       filters,
     };
@@ -196,6 +197,7 @@ export class CatalogController {
       nameCol: body.nameCol,
       artCol: body.artCol,
       priceCol: body.priceCol || undefined,
+      etmCodeCol: body.etmCodeCol || undefined,
     };
     return this.service.uploadPriceList(file, mapping, req.user.userId);
   }
@@ -209,7 +211,7 @@ export class CatalogController {
     @Body() body: any,
     @Req() req: any,
   ) {
-    const mapping = { firstRow: Number(body.firstRow) || 2, g1: body.g1, g2: body.g2, g3: body.g3, g4: body.g4, g5: body.g5, g6: body.g6, nameCol: body.nameCol, artCol: body.artCol, priceCol: body.priceCol || undefined };
+    const mapping = { firstRow: Number(body.firstRow) || 2, g1: body.g1, g2: body.g2, g3: body.g3, g4: body.g4, g5: body.g5, g6: body.g6, nameCol: body.nameCol, artCol: body.artCol, priceCol: body.priceCol || undefined, etmCodeCol: body.etmCodeCol || undefined };
     return this.service.replacePriceList(id, file, mapping, req.user.userId);
   }
 

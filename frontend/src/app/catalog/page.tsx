@@ -63,6 +63,8 @@ function CatalogPageInner() {
 
   // ── Shared ─────────────────────────────────────────────────
   const [search, setSearch] = useState('');
+  const [globalSearchResults, setGlobalSearchResults] = useState<any[]>([]);
+  const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [showSelectSheet, setShowSelectSheet] = useState(false);
   const addingRef = useRef(false); // prevent double-click race
@@ -71,6 +73,8 @@ function CatalogPageInner() {
   const [etmLoading, setEtmLoading] = useState(false);
   const [accView, setAccView] = useState<'closed' | 'types' | 'list'>('closed');
   const [accSelectedType, setAccSelectedType] = useState<string | null>(null);
+  // ETM data for accessories keyed by article: { price, term, loading }
+  const [accEtm, setAccEtm] = useState<Record<string, { price: number | null; term: string | null; loading: boolean }>>({});
   // Track whether we've done the initial restore fetch
   const restoredRef = useRef(false);
 
@@ -231,6 +235,82 @@ function CatalogPageInner() {
     });
   }
 
+  // Load ETM price + term for accessories when user opens a category.
+  // Uses same progressive pattern as spec refresh: batch prices first, then per-article term.
+  useEffect(() => {
+    if (accView !== 'list' || !accSelectedType || !selectedProduct?.accessories) return;
+    const listAccs = selectedProduct.accessories.filter((a: any) => a.type === accSelectedType && a.article);
+    const articles = [...new Set(listAccs.map((a: any) => a.article).filter(Boolean))] as string[];
+    if (articles.length === 0) return;
+    // Skip articles we've already loaded (or are loading)
+    const toLoad = articles.filter(a => !accEtm[a]);
+    if (toLoad.length === 0) return;
+
+    // Mark as loading
+    setAccEtm(prev => {
+      const next = { ...prev };
+      for (const a of toLoad) next[a] = { price: null, term: null, loading: true };
+      return next;
+    });
+
+    // Step 1: batch prices
+    (async () => {
+      try {
+        const { data: prices } = await storesApi.getEtmPrices(toLoad);
+        setAccEtm(prev => {
+          const next = { ...prev };
+          for (const a of toLoad) {
+            const cur = next[a] || { price: null, term: null, loading: true };
+            next[a] = { ...cur, price: prices[a] ?? null };
+          }
+          return next;
+        });
+        // Step 2: per-article terms in parallel (backend serializes them)
+        const withPrice = toLoad.filter(a => prices[a] != null && prices[a]! > 0);
+        await Promise.all(withPrice.map(async (article) => {
+          try {
+            const { data } = await storesApi.getEtmTerm(article);
+            setAccEtm(prev => ({ ...prev, [article]: { ...(prev[article] || { price: null, term: null, loading: false }), term: data.term || 'нет', loading: false } }));
+          } catch {
+            setAccEtm(prev => ({ ...prev, [article]: { ...(prev[article] || { price: null, term: null, loading: false }), term: 'нет', loading: false } }));
+          }
+        }));
+        // Mark no-price articles as done too
+        setAccEtm(prev => {
+          const next = { ...prev };
+          for (const a of toLoad) {
+            if (next[a]?.loading) next[a] = { ...next[a], loading: false };
+          }
+          return next;
+        });
+      } catch {
+        setAccEtm(prev => {
+          const next = { ...prev };
+          for (const a of toLoad) next[a] = { price: null, term: null, loading: false };
+          return next;
+        });
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accView, accSelectedType, selectedProduct?.id]);
+
+  // Global search across all products (catalog + tiles) with 300ms debounce.
+  // Triggers when user types in the toolbar search field — works even without
+  // selected category/tile so user can find by article from anywhere.
+  useEffect(() => {
+    const q = search.trim();
+    if (q.length < 2) { setGlobalSearchResults([]); setGlobalSearchLoading(false); return; }
+    setGlobalSearchLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const { data } = await catalogApi.search(q);
+        setGlobalSearchResults((data as any[]) || []);
+      } catch { setGlobalSearchResults([]); }
+      finally { setGlobalSearchLoading(false); }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
   function getDisplayedFilterProducts() {
     // Parametric filtering is handled on the backend; here we only apply the text search bar
     if (!search.trim()) return filterProducts;
@@ -274,6 +354,7 @@ function CatalogPageInner() {
     setEtmData(null);
     setAccView('closed');
     setAccSelectedType(null);
+    setAccEtm({});
     if (!isToggleOff && p.article) {
       setEtmLoading(true);
       storesApi.getEtmPricesWithTerms([p.article])
@@ -328,7 +409,8 @@ function CatalogPageInner() {
       await sheetsApi.saveRows(activeSheetId, [...existing, {
         row_number: existing.length + 1,
         name: product.name, brand: product.manufacturer?.name || '',
-        article, unit: product.unit || 'шт',
+        article, etm_code: product.etm_code || '',
+        unit: product.unit || 'шт',
         price: finalPrice,
         store: 'ЭТМ', qty: '1', coef: '1',
         deadline: etmTerm,
@@ -430,31 +512,48 @@ function CatalogPageInner() {
                   </>
                 )}
 
-                {accView === 'list' && accSelectedType && (
-                  <>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                      <button style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--yellow)', padding: 0 }}
-                        onClick={e => { e.stopPropagation(); setAccView('types'); setAccSelectedType(null); }}>
-                        ← Назад
-                      </button>
-                      <span style={{ fontSize: 13, fontWeight: 600 }}>{accSelectedType}</span>
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      {accs.filter((a: any) => a.type === accSelectedType).map((acc: any, ai: number) => (
-                        <div key={ai} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '6px 10px', background: 'var(--bg)', borderRadius: 4, border: '1px solid var(--border)' }}>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontWeight: 500 }}>{acc.name}</div>
-                            {acc.article && <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>{acc.article}</div>}
-                          </div>
-                          <button className="btn-add-to-list" style={{ padding: '3px 10px', fontSize: 11, whiteSpace: 'nowrap' }}
-                            onClick={e => { e.stopPropagation(); addToSheet({ name: acc.name, article: acc.article, manufacturer: selectedProduct.manufacturer }); }}>
-                            + В лист
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
+                {accView === 'list' && accSelectedType && (() => {
+                  const listAccs = accs.filter((a: any) => a.type === accSelectedType);
+                  return (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <button style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--yellow)', padding: 0 }}
+                          onClick={e => { e.stopPropagation(); setAccView('types'); setAccSelectedType(null); }}>
+                          ← Назад
+                        </button>
+                        <span style={{ fontSize: 13, fontWeight: 600 }}>{accSelectedType}</span>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {listAccs.map((acc: any, ai: number) => {
+                          const etm = acc.article ? accEtm[acc.article] : undefined;
+                          return (
+                            <div key={ai} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '6px 10px', background: 'var(--bg)', borderRadius: 4, border: '1px solid var(--border)' }}>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontWeight: 500 }}>{acc.name}</div>
+                                {acc.article && <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>{acc.article}</div>}
+                                <div style={{ fontSize: 11, marginTop: 3, color: 'var(--muted)' }}>
+                                  {etm?.loading && 'Загрузка цены...'}
+                                  {etm && !etm.loading && (
+                                    <>
+                                      {etm.price != null && etm.price > 0
+                                        ? <span>Цена ЭТМ: <strong>{etm.price} ₽</strong></span>
+                                        : <span>Цена: нет</span>}
+                                      {etm.term && <span style={{ marginLeft: 10 }}>Срок: <strong>{etm.term}</strong></span>}
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                              <button className="btn-add-to-list" style={{ padding: '3px 10px', fontSize: 11, whiteSpace: 'nowrap' }}
+                                onClick={e => { e.stopPropagation(); addToSheet({ name: acc.name, article: acc.article, manufacturer: selectedProduct.manufacturer }); }}>
+                                + В лист
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             );
           })()}
@@ -611,7 +710,44 @@ function CatalogPageInner() {
           {/* Right panel */}
           <div className="catalog-right">
 
-            {mode === 'manuf' && (
+            {/* Global search results — show whenever user types in the toolbar search,
+                regardless of selected category/tile. Falls back to category/tile view if search is empty. */}
+            {search.trim().length >= 2 && (
+              <>
+                <div className="catalog-breadcrumb-ref">Поиск: «{search.trim()}»</div>
+                {globalSearchLoading && (
+                  <div style={{ padding: 20, color: 'var(--muted)', fontSize: 13 }}>Поиск…</div>
+                )}
+                {!globalSearchLoading && globalSearchResults.length === 0 && (
+                  <div className="empty-state">Ничего не найдено по запросу</div>
+                )}
+                {!globalSearchLoading && globalSearchResults.map((p, i) => (
+                  <div key={`gs-${p.id}-${i}`}>
+                    <div
+                      className={`product-item-ref${selectedProduct?.id === p.id ? ' selected' : ''}`}
+                      onClick={() => selectProduct(p)}
+                    >
+                      <span className="product-num">{i + 1}</span>
+                      <div className="product-info">
+                        <div className="product-name">{p.name}</div>
+                        <div className="product-article">
+                          {p.article && <span>Артикул {p.article}</span>}
+                          {p.manufacturer?.name && (
+                            <span style={{ marginLeft: 8, color: 'var(--muted)' }}>{p.manufacturer.name}</span>
+                          )}
+                        </div>
+                      </div>
+                      <button className="btn-add-to-list" onClick={e => { e.stopPropagation(); addToSheet(p); }}>
+                        + Добавить в лист
+                      </button>
+                    </div>
+                    {inlineDetail(p)}
+                  </div>
+                ))}
+              </>
+            )}
+
+            {search.trim().length < 2 && mode === 'manuf' && (
               <>
                 {breadcrumbPath.length > 0 && (
                   <div className="catalog-breadcrumb-ref">{breadcrumbPath.join('/')}</div>
@@ -640,7 +776,7 @@ function CatalogPageInner() {
               </>
             )}
 
-            {mode === 'filter' && (
+            {search.trim().length < 2 && mode === 'filter' && (
               <>
                 <div className="catalog-breadcrumb-ref">
                   Каталог/{selectedTile ? selectedTile.name : ''}

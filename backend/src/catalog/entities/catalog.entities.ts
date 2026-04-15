@@ -59,6 +59,8 @@ export class CatalogProduct {
   @ManyToOne(() => CatalogCategory, { nullable: true }) @JoinColumn({ name: 'category_id' }) category: CatalogCategory;
   @Column() name: string;
   @Column({ nullable: true }) article: string;
+  /** ETM internal code for direct API lookup (type=etm). Optional. */
+  @Column({ nullable: true }) etm_code: string;
   @Column({ nullable: true }) unit: string;
   @Column({ nullable: true, type: 'decimal', precision: 12, scale: 2 }) price: number;
   @Column({ nullable: true, type: 'jsonb' }) attributes: object;
@@ -116,6 +118,7 @@ export class CatalogTile {
     priceCol: string;
     unitCol: string;
     brandCol: string;
+    etmCodeCol: string;
     accessoriesStartCol: string;
     filters: { col: string; label: string }[];
   };
@@ -140,6 +143,8 @@ export class TileProduct {
   @Column({ nullable: true, type: 'decimal', precision: 12, scale: 2 }) price: number;
   @Column({ nullable: true }) unit: string;
   @Column({ nullable: true }) brand: string;
+  /** ETM internal code for direct API lookup (type=etm). Optional — falls back to article. */
+  @Column({ nullable: true }) etm_code: string;
   @Column({ type: 'jsonb', default: '{}' }) attributes: Record<string, string>;
   @Column({ type: 'jsonb', default: '[]' }) accessories: { type: string; name: string; article: string; url: string }[];
 }

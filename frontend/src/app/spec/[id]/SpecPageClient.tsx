@@ -721,6 +721,7 @@ export default function SpecPageClient() {
               ...r,
               name: r.name || exact.name || '',
               brand: r.brand || mfr,
+              etm_code: r.etm_code || exact.etm_code || '',
               unit: r.unit || exact.unit || 'шт',
               price: priceStr,
               qty: q || '1',
@@ -756,6 +757,7 @@ export default function SpecPageClient() {
         name: p.name,
         brand: mfr,
         article,
+        etm_code: p.etm_code || next[i].etm_code || '',
         unit: p.unit || next[i].unit || 'шт',
         price: p.price ? String(p.price) : '',
         store: matchedPl || 'ЭТМ',
@@ -1723,28 +1725,43 @@ export default function SpecPageClient() {
 
     const targets = rowsRef.current
       .map((r, i) => ({ r, i }))
-      .filter(({ r }) => r.article && (!r.store || r.store === 'ЭТМ' || r.store.toUpperCase() === 'ETM'));
+      .filter(({ r }) => (r.article || r.etm_code) && (!r.store || r.store === 'ЭТМ' || r.store.toUpperCase() === 'ETM'));
     if (targets.length === 0) { toast('Нет строк с артикулом для обновления'); return; }
 
     setRefreshing(true);
-    const uniqueArticles = Array.from(new Set(targets.map(({ r }) => r.article as string)));
-    setRefreshProgress({ done: 0, total: uniqueArticles.length });
+    // Unique items keyed by article (preferred) or etm_code.
+    // Each key carries an optional etmCode for ETM lookup via type=etm.
+    const itemMap = new Map<string, { article?: string; etmCode?: string }>();
+    for (const { r } of targets) {
+      const key = (r.article || r.etm_code || '').trim();
+      if (!key || itemMap.has(key)) continue;
+      itemMap.set(key, {
+        article: r.article || undefined,
+        etmCode: r.etm_code || undefined,
+      });
+    }
+    const uniqueKeys = Array.from(itemMap.keys());
+    setRefreshProgress({ done: 0, total: uniqueKeys.length });
     const snap = rowsRef.current.map(r => ({ ...r }));
 
     try {
       // Step 1: fetch all prices in one batch (no cache) — fast, usually 1-2 seconds
-      const { data: prices } = await storesApi.getEtmPrices(uniqueArticles);
-      // Count articles where ETM returned a valid price (not per-row, per unique article)
-      const articlesWithPrice = uniqueArticles.filter(a => prices[a] != null && prices[a]! > 0);
-      const articlesWithoutPrice = uniqueArticles.length - articlesWithPrice.length;
+      const { data: prices } = await storesApi.getEtmPricesByItems(Array.from(itemMap.values()));
+      // Count keys where ETM returned a valid price
+      const keysWithPrice = uniqueKeys.filter(k => prices[k] != null && prices[k]! > 0);
+      const keysWithoutPrice = uniqueKeys.length - keysWithPrice.length;
+
+      // Helper: find the price-map key for a row (article preferred, else etm_code).
+      const rowKey = (r: any) => (r.article || r.etm_code || '').trim();
 
       setRows(prev => {
         const next = [...prev];
         for (let i = 0; i < next.length; i++) {
           const r = next[i];
-          if (!r.article) continue;
+          const key = rowKey(r);
+          if (!key) continue;
           if (r.store && r.store !== 'ЭТМ' && r.store.toUpperCase() !== 'ETM') continue;
-          const price = prices[r.article];
+          const price = prices[key];
           if (price != null && price > 0) {
             // Got fresh price — update row, queue term placeholder
             const priceStr = String(price);
@@ -1763,29 +1780,27 @@ export default function SpecPageClient() {
         return next;
       });
 
-      if (articlesWithPrice.length === 0) {
-        // ETM returned nothing for all articles — could be temporary API issue, expired session, etc.
+      if (keysWithPrice.length === 0) {
         toast.error('ЭТМ не вернул данные. Попробуйте позже или проверьте учётные данные.');
         setRefreshing(false);
         setRefreshProgress(null);
         return;
       }
 
-      // Step 2: progressively fetch delivery terms per article (1 request each)
-      // articlesWithPrice already computed above
+      // Step 2: progressively fetch delivery terms per item (1 request each)
       let done = 0;
 
-      // Fire all requests in parallel — backend queue serializes them, but each
-      // completion immediately updates its rows so the user sees progressive progress.
-      await Promise.all(articlesWithPrice.map(async (article) => {
+      // Fire all requests in parallel — backend queue serializes them
+      await Promise.all(keysWithPrice.map(async (key) => {
+        const item = itemMap.get(key);
         try {
-          const { data } = await storesApi.getEtmTerm(article);
+          const { data } = await storesApi.getEtmTerm(item?.article || '', item?.etmCode);
           const term = data.term || 'нет';
           setRows(prev => {
             const next = [...prev];
             for (let i = 0; i < next.length; i++) {
               const r = next[i];
-              if (r.article === article && (r.store === 'ЭТМ' || !r.store || r.store.toUpperCase() === 'ETM')) {
+              if (rowKey(r) === key && (r.store === 'ЭТМ' || !r.store || r.store.toUpperCase() === 'ETM')) {
                 next[i] = { ...r, deadline: term };
               }
             }
@@ -1796,7 +1811,7 @@ export default function SpecPageClient() {
             const next = [...prev];
             for (let i = 0; i < next.length; i++) {
               const r = next[i];
-              if (r.article === article && r.deadline === '...') {
+              if (rowKey(r) === key && r.deadline === '...') {
                 next[i] = { ...r, deadline: 'нет' };
               }
             }
@@ -1804,20 +1819,19 @@ export default function SpecPageClient() {
           });
         } finally {
           done++;
-          setRefreshProgress({ done, total: articlesWithPrice.length });
+          setRefreshProgress({ done, total: keysWithPrice.length });
         }
       }));
 
-      // Mark articles without price as "нет" for deadline (in case any '...' slipped through)
       setRows(prev => prev.map(r => r.deadline === '...' ? { ...r, deadline: 'нет' } : r));
 
       pushHistorySnapshot(snap);
       setUnsaved(true);
-      const total = uniqueArticles.length;
-      if (articlesWithoutPrice === 0) {
-        toast.success(`ЭТМ: обновлено ${articlesWithPrice.length} артикулов`);
+      const total = uniqueKeys.length;
+      if (keysWithoutPrice === 0) {
+        toast.success(`ЭТМ: обновлено ${keysWithPrice.length} артикулов`);
       } else {
-        toast.success(`ЭТМ: обновлено ${articlesWithPrice.length} из ${total}. Без цены: ${articlesWithoutPrice}`);
+        toast.success(`ЭТМ: обновлено ${keysWithPrice.length} из ${total}. Без цены: ${keysWithoutPrice}`);
       }
     } catch (err: any) {
       const status = err?.response?.status;

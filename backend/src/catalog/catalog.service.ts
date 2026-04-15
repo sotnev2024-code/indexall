@@ -12,7 +12,8 @@ export interface PriceListMapping {
   g1: string; g2?: string; g3?: string; g4?: string; g5?: string; g6?: string;
   nameCol: string;
   artCol: string;
-  priceCol?: string;  // ADD THIS
+  priceCol?: string;
+  etmCodeCol?: string;
 }
 
 // Only 4 categories per TZ — opts are loaded dynamically from bot_database.db
@@ -417,13 +418,52 @@ export class CatalogService implements OnModuleInit {
   async searchProducts(q: string, limit = 20) {
     if (!q || q.length < 2) return [];
     const s = `%${q.toLowerCase()}%`;
-    return this.prodRepo.createQueryBuilder('p')
+    const ql = q.toLowerCase();
+
+    // Search both catalog_products (price lists) AND tile_products (tile catalogs)
+    const fromPriceLists = await this.prodRepo.createQueryBuilder('p')
       .leftJoinAndSelect('p.manufacturer', 'm')
       .where('p.is_active = true')
       .andWhere('(LOWER(p.name) LIKE :s OR LOWER(p.article) LIKE :s)', { s })
-      .orderBy(`CASE WHEN LOWER(p.article) = '${q.toLowerCase()}' THEN 0 WHEN LOWER(p.article) LIKE '${q.toLowerCase()}%' THEN 1 ELSE 2 END`)
+      .orderBy(`CASE WHEN LOWER(p.article) = :ql THEN 0 WHEN LOWER(p.article) LIKE :prefix THEN 1 ELSE 2 END`)
+      .setParameters({ ql, prefix: `${ql}%` })
       .limit(limit)
       .getMany();
+
+    const fromTiles = await this.tileProductRepo.createQueryBuilder('tp')
+      .where('(LOWER(tp.name) LIKE :s OR LOWER(tp.article) LIKE :s)', { s })
+      .orderBy(`CASE WHEN LOWER(tp.article) = :ql THEN 0 WHEN LOWER(tp.article) LIKE :prefix THEN 1 ELSE 2 END`)
+      .setParameters({ ql, prefix: `${ql}%` })
+      .limit(limit)
+      .getMany();
+
+    // Normalize tile products to the same shape as catalog products
+    const normalizedTiles = fromTiles.map(tp => ({
+      id: tp.id,
+      name: tp.name,
+      article: tp.article,
+      price: tp.price,
+      unit: tp.unit,
+      attributes: tp.attributes,
+      etm_code: (tp as any).etm_code || null,
+      manufacturer: tp.brand ? { name: tp.brand } : null,
+      _source: 'tile' as const,
+    }));
+
+    // Merge: catalog products first, then tile products. Deduplicate by article (catalog wins).
+    const seen = new Set<string>();
+    const merged: any[] = [];
+    for (const p of fromPriceLists) {
+      const key = (p.article || '').toLowerCase();
+      if (key) seen.add(key);
+      merged.push(p);
+    }
+    for (const tp of normalizedTiles) {
+      const key = (tp.article || '').toLowerCase();
+      if (key && seen.has(key)) continue;
+      merged.push(tp);
+    }
+    return merged.slice(0, limit);
   }
 
   // ── xlsx parser ───────────────────────────────────────────
@@ -440,15 +480,16 @@ export class CatalogService implements OnModuleInit {
       const nameCol = XLSX.utils.decode_col(mapping.nameCol.toUpperCase());
       const artCol = XLSX.utils.decode_col(mapping.artCol.toUpperCase());
       const priceCol = mapping.priceCol ? XLSX.utils.decode_col(mapping.priceCol.toUpperCase()) : -1;
+      const etmCol = mapping.etmCodeCol ? XLSX.utils.decode_col(mapping.etmCodeCol.toUpperCase()) : -1;
 
       // Auto-detect tree format: no group columns AND file has category rows
       // (rows where nameCol has text but artCol is empty)
       const isTreeFormat = groupCols.length === 0;
 
       if (isTreeFormat) {
-        await this.parseTreeFormat(plId, rows, firstRow, nameCol, artCol, priceCol, manufacturerId);
+        await this.parseTreeFormat(plId, rows, firstRow, nameCol, artCol, priceCol, etmCol, manufacturerId);
       } else {
-        await this.parseFlatFormat(plId, rows, firstRow, groupCols, nameCol, artCol, priceCol, manufacturerId);
+        await this.parseFlatFormat(plId, rows, firstRow, groupCols, nameCol, artCol, priceCol, etmCol, manufacturerId);
       }
 
       await this.plRepo.update(plId, { status: PriceListStatus.ACTIVE });
@@ -462,7 +503,7 @@ export class CatalogService implements OnModuleInit {
   private async parseFlatFormat(
     plId: number, rows: any[][], firstRow: number,
     groupCols: number[], nameCol: number, artCol: number, priceCol: number,
-    manufacturerId: number,
+    etmCol: number, manufacturerId: number,
   ) {
     const catCache: Map<string, number> = new Map();
     let productCount = 0;
@@ -495,11 +536,13 @@ export class CatalogService implements OnModuleInit {
 
       const rawPrice = priceCol >= 0 ? String(row[priceCol] || '').replace(/\s/g, '').replace(',', '.') : '';
       const price = rawPrice ? parseFloat(rawPrice) : null;
+      const etmCode = etmCol >= 0 ? String(row[etmCol] || '').trim() : '';
       await this.prodRepo.save({
         manufacturer_id: manufacturerId,
         category_id: parentId,
         name: productName,
         article: article || null,
+        etm_code: etmCode || null,
         is_active: true,
         ...(price && !isNaN(price) && price > 0 ? { price } : {}),
       });
@@ -514,7 +557,7 @@ export class CatalogService implements OnModuleInit {
    *  Products after a category row belong to that category. */
   private async parseTreeFormat(
     plId: number, rows: any[][], firstRow: number,
-    nameCol: number, artCol: number, priceCol: number,
+    nameCol: number, artCol: number, priceCol: number, etmCol: number,
     manufacturerId: number,
   ) {
     let currentCatId: number | null = null;
@@ -526,6 +569,7 @@ export class CatalogService implements OnModuleInit {
       const row = rows[i];
       const productName = String(row[nameCol] || '').trim();
       const article = String(row[artCol] || '').trim();
+      const etmCode = etmCol >= 0 ? String(row[etmCol] || '').trim() : '';
       const rawPrice = priceCol >= 0 ? String(row[priceCol] || '').replace(/\s/g, '').replace(',', '.').replace(/-/g, '.') : '';
 
       // If product name column OR article column has text → it's a product
@@ -536,6 +580,7 @@ export class CatalogService implements OnModuleInit {
           category_id: currentCatId,
           name: productName || article,
           article: article || null,
+          etm_code: etmCode || null,
           is_active: true,
           ...(price && !isNaN(price) && price > 0 ? { price } : {}),
         });
@@ -645,6 +690,7 @@ export class CatalogService implements OnModuleInit {
       priceCol?: string;
       unitCol?: string;
       brandCol?: string;
+      etmCodeCol?: string;
       accessoriesStartCol?: string;
       filters: { col: string; label: string }[];
     },
@@ -671,6 +717,7 @@ export class CatalogService implements OnModuleInit {
     const priceIdx = mapping.priceCol ? XLSX.utils.decode_col(mapping.priceCol.toUpperCase()) : -1;
     const unitIdx = mapping.unitCol ? XLSX.utils.decode_col(mapping.unitCol.toUpperCase()) : -1;
     const brandIdx = mapping.brandCol ? XLSX.utils.decode_col(mapping.brandCol.toUpperCase()) : -1;
+    const etmCodeIdx = mapping.etmCodeCol ? XLSX.utils.decode_col(mapping.etmCodeCol.toUpperCase()) : -1;
     const accStartIdx = mapping.accessoriesStartCol ? XLSX.utils.decode_col(mapping.accessoriesStartCol.toUpperCase()) : -1;
     const filterCols = (mapping.filters || []).map(f => ({
       idx: XLSX.utils.decode_col(f.col.toUpperCase()),
@@ -692,6 +739,7 @@ export class CatalogService implements OnModuleInit {
       if (!name) continue;
 
       const article = artIdx >= 0 ? String(row[artIdx] || '').trim() : '';
+      const etmCode = etmCodeIdx >= 0 ? String(row[etmCodeIdx] || '').trim() : '';
       const rawPrice = priceIdx >= 0 ? String(row[priceIdx] || '').replace(/\s/g, '').replace(',', '.') : '';
       const price = rawPrice ? parseFloat(rawPrice) : null;
       const unit = unitIdx >= 0 ? String(row[unitIdx] || '').trim() : '';
@@ -729,6 +777,7 @@ export class CatalogService implements OnModuleInit {
         tile_id: tileId,
         name,
         article: article || null,
+        etm_code: etmCode || null,
         price: price && !isNaN(price) && price > 0 ? price : null,
         unit: unit || null,
         brand: brand || null,
@@ -815,6 +864,7 @@ export class CatalogService implements OnModuleInit {
       id: r.id,
       name: r.name,
       article: r.article,
+      etm_code: r.etm_code,
       price: r.price,
       unit: r.unit,
       attributes: r.attributes,

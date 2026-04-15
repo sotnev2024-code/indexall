@@ -30,6 +30,11 @@ export class EquipmentRow {
   @Column({ default: '' })
   article: string;
 
+  /** ETM internal code (hidden field) — when set, ETM lookup uses type=etm with this code
+   *  instead of type=mnf with article. Optional, falls back to article. */
+  @Column({ default: '' })
+  etm_code: string;
+
   @Column({ default: '0' })
   qty: string;
 
