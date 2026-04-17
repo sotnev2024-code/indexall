@@ -493,12 +493,19 @@ export class CatalogService implements OnModuleInit {
   ): Promise<any[]> {
     const repo = table === 'tile_products' ? this.tileProductRepo : this.prodRepo;
     const like = `%${q}%`;
+    // Normalized query: strip spaces, dashes, dots for loose article matching
+    // e.g. "1C2" matches "1P-C-2A" because normalized both become substrings
+    const qNorm = q.replace(/[\s\-\.\/]/g, '');
+    const likeNorm = `%${qNorm}%`;
 
-    // Tier 1: exact/prefix article match + substring LIKE on name
+    // Tier 1: exact/prefix article match + substring LIKE on name + normalized article LIKE
     const qb1 = repo.createQueryBuilder(alias)
-      .where(`(LOWER(${alias}.article) = :q OR LOWER(${alias}.article) LIKE :prefix OR LOWER(${alias}.name) LIKE :like)`, {
-        q, prefix: `${q}%`, like,
-      })
+      .where(`(
+        LOWER(${alias}.article) = :q
+        OR LOWER(${alias}.article) LIKE :prefix
+        OR LOWER(${alias}.name) LIKE :like
+        OR LOWER(REPLACE(REPLACE(REPLACE(REPLACE(${alias}.article, '-', ''), ' ', ''), '.', ''), '/', '')) LIKE :likeNorm
+      )`, { q, prefix: `${q}%`, like, likeNorm })
       .orderBy(`CASE WHEN LOWER(${alias}.article) = :q THEN 0 WHEN LOWER(${alias}.article) LIKE :prefix THEN 1 ELSE 2 END`)
       .setParameters({ q, prefix: `${q}%` })
       .limit(limit);
