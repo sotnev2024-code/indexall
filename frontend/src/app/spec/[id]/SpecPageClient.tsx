@@ -176,7 +176,7 @@ const SpecRow = memo(function SpecRow({
           onBlur={onBlur}
         >
           <option value="ЭТМ">ЭТМ</option>
-          {pricelists.map(pl => <option key={pl} value={pl}>{pl}</option>)}
+          <option value="Прайс-лист">Прайс-лист</option>
           <option value="">—</option>
         </select>
       </td>
@@ -706,16 +706,15 @@ export default function SpecPageClient() {
         const exact = results.find(p => (p.article || '').toLowerCase() === article.toLowerCase());
         if (exact) {
           const mfr = exact.manufacturer?.name || exact.brand || '';
-          const matchedPl = pricelistsRef.current.find(pl => pl === mfr);
+          const hasCatalogPrice = exact.price && Number(exact.price) > 0;
           setRows(prev => {
             const next = [...prev];
             const r = next[rowIdx];
             if (!r || r.article !== article) return prev;
             const q = r.qty || '1';
             const c = r.coef || '1';
-            // Use price list price if product is from a price list, otherwise keep empty for ETM
-            const priceStr = matchedPl
-              ? (r.price || (exact.price ? String(exact.price) : ''))
+            const priceStr = hasCatalogPrice
+              ? (r.price || String(exact.price))
               : (r.price || '');
             next[rowIdx] = {
               ...r,
@@ -726,9 +725,8 @@ export default function SpecPageClient() {
               price: priceStr,
               qty: q || '1',
               coef: c,
-              // Set store to price list name if from price list, otherwise ЭТМ
-              store: r.store || matchedPl || 'ЭТМ',
-              auto_price: !matchedPl,
+              store: r.store || (hasCatalogPrice ? 'Прайс-лист' : 'ЭТМ'),
+              auto_price: !hasCatalogPrice,
               total: calcTotal(priceStr, q || '1', c),
             };
             return next;
@@ -747,7 +745,7 @@ export default function SpecPageClient() {
     focusSnapshotRef.current = null;
     const article = p.article || '';
     const mfr = p.manufacturer?.name || p.brand || '';
-    const matchedPl = pricelistsRef.current.find(pl => pl === mfr);
+    const hasCatalogPrice = p.price && Number(p.price) > 0;
     setRows((prev) => {
       const next = [...prev];
       const q = next[i].qty || '1';
@@ -759,19 +757,19 @@ export default function SpecPageClient() {
         article,
         etm_code: p.etm_code || next[i].etm_code || '',
         unit: p.unit || next[i].unit || 'шт',
-        price: p.price ? String(p.price) : '',
-        store: matchedPl || 'ЭТМ',
-        auto_price: !matchedPl,
+        price: hasCatalogPrice ? String(p.price) : '',
+        store: hasCatalogPrice ? 'Прайс-лист' : 'ЭТМ',
+        auto_price: !hasCatalogPrice,
         qty: q,
         coef: c,
-        total: calcTotal(p.price ? String(p.price) : '', q, c),
+        total: calcTotal(hasCatalogPrice ? String(p.price) : '', q, c),
       };
       return next;
     });
     setAcDrops(null);
     setUnsaved(true);
     // Fetch live ETM data if store is ЭТМ
-    if (!matchedPl && article) fetchEtmForArticle(article);
+    if (!hasCatalogPrice && article) fetchEtmForArticle(article);
   }, [pushHistorySnapshot, setUnsaved, fetchEtmForArticle]);
 
   const addProductFromSearch = useCallback((p: any) => {
@@ -886,9 +884,9 @@ export default function SpecPageClient() {
 
   const handleStoreChange = useCallback(async (rowIdx: number, store: string) => {
     updateRow(rowIdx, 'store', store);
-    // If switched to a pricelist name and row has an article, fetch price from catalog
     const article = rowsRef.current[rowIdx]?.article;
-    if (store && store !== 'ЭТМ' && store !== '' && article) {
+    // If switched to "Прайс-лист" and row has an article — fetch price from catalog
+    if (store === 'Прайс-лист' && article) {
       try {
         const { data: prices } = await catalogApi.getPricesByArticles([article]);
         const entry = prices[article];
