@@ -41,7 +41,7 @@ interface RowProps {
   onSearch: (q: string, rowIdx: number, field: string, el: HTMLInputElement) => void;
   onInputKeyDown: (e: React.KeyboardEvent<HTMLInputElement>, rowIdx: number, colIdx: number) => void;
   onStoreClick: (rowIdx: number, el: HTMLSelectElement) => void;
-  pricelists: string[];
+
   onStoreChange: (rowIdx: number, store: string) => void;
   onArticleBlur: (rowIdx: number, article: string) => void;
   inputRef: (el: HTMLElement | null, key: string) => void;
@@ -63,7 +63,7 @@ interface RowProps {
 }
 
 const SpecRow = memo(function SpecRow({
-  row, idx, isFirst, onUpdate, onSearch, onInputKeyDown, onStoreClick, pricelists, onStoreChange, onArticleBlur, inputRef, onFocus, onBlur,
+  row, idx, isFirst, onUpdate, onSearch, onInputKeyDown, onStoreClick, onStoreChange, onArticleBlur, inputRef, onFocus, onBlur,
   onNonEditableMouseDown,
   activeCellRow, activeCellCol, isEditing, selR1, selC1, selR2, selC2,
   onCellMouseDown, onCellMouseEnter, onCellDoubleClick, onRowContextMenu,
@@ -230,7 +230,6 @@ const SpecRow = memo(function SpecRow({
   if (prev.row !== next.row) return false;
   if (prev.idx !== next.idx) return false;
   if (prev.isFirst !== next.isFirst) return false;
-  if (prev.pricelists !== next.pricelists) return false;
   if (prev.customColumns !== next.customColumns) return false;
   if (prev.isEditing !== next.isEditing && (prev.activeCellRow === prev.idx || next.activeCellRow === next.idx)) return false;
 
@@ -299,9 +298,6 @@ export default function SpecPageClient() {
 
   const [brandFilter, setBrandFilter] = useState<string>('all');
   const [brands, setBrands] = useState<string[]>(STATIC_BRANDS);
-  const [pricelists, setPricelists] = useState<string[]>([]);
-  const pricelistsRef = useRef<string[]>([]);
-  useEffect(() => { pricelistsRef.current = pricelists; }, [pricelists]);
   const [globalSearch, setGlobalSearch] = useState('');
   const [globalResults, setGlobalResults] = useState<any[]>([]);
   const globalSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -492,7 +488,7 @@ export default function SpecPageClient() {
   // ── Load data on sheet change ─────────────────────────────────
   useEffect(() => {
     loadData();
-    if (currentId === Number(_routeId)) { loadBrands(); loadPricelists(); }
+    if (currentId === Number(_routeId)) { loadBrands(); }
     const close = (e: Event) => {
       setAcDrops(null); setStoreDropdown(null); setGlobalResults([]);
       const t = e.target as HTMLElement;
@@ -516,17 +512,6 @@ export default function SpecPageClient() {
         .slice(0, 12);
       if (names.length > 0) setBrands(names);
     } catch { /* keep static list */ }
-  }
-
-  async function loadPricelists() {
-    try {
-      // Use public manufacturers endpoint instead of admin-only pricelists
-      const { data } = await catalogApi.getManufacturers();
-      const names: string[] = (data as any[])
-        .map((m: any) => m.name as string)
-        .filter(Boolean);
-      setPricelists(names);
-    } catch { /* no pricelists */ }
   }
 
   async function loadData() {
@@ -2129,7 +2114,6 @@ export default function SpecPageClient() {
                   onSearch={debouncedSearch}
                   onInputKeyDown={handleInputKeyDown}
                   onStoreClick={openStoreDropdown}
-                  pricelists={pricelists}
                   onStoreChange={handleStoreChange}
                   onArticleBlur={handleArticleBlur}
                   inputRef={setInputRef}
