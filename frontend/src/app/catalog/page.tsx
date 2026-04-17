@@ -192,24 +192,33 @@ function CatalogPageInner() {
   }
 
   async function selectCategorySlug(slug: string) {
-    setSelectedSlug(slug); setActiveFilters({}); setFilterProducts([]);
+    const isSameSlug = selectedSlug === slug;
+    setSelectedSlug(slug);
     setSelectedProduct(null); setSearch('');
-    // Load dynamic filter options and products in parallel
-    setLoadingFilters(true);
-    try {
-      const { data } = await catalogApi.getFilterOptions(slug);
-      setDynamicFilters(data);
-    } catch {
-      setDynamicFilters([]);
-    } finally {
-      setLoadingFilters(false);
+
+    if (!isSameSlug) {
+      // New category — reset filters and reload
+      setActiveFilters({}); setFilterProducts([]);
+      setLoadingFilters(true);
+      try {
+        const { data } = await catalogApi.getFilterOptions(slug);
+        setDynamicFilters(data);
+      } catch {
+        setDynamicFilters([]);
+      } finally {
+        setLoadingFilters(false);
+      }
+      fetchFilterProducts(slug, {});
+    } else {
+      // Same category — reuse existing filters, refetch products with saved filters
+      fetchFilterProducts(slug, activeFilters);
     }
-    fetchFilterProducts(slug, {});
   }
 
   function backToCategoryTiles() {
-    setSelectedSlug(null); setActiveFilters({}); setFilterProducts([]);
-    setSelectedProduct(null); setSearch(''); setDynamicFilters([]);
+    // Keep activeFilters and dynamicFilters so they persist when user returns to same category
+    setSelectedSlug(null); setFilterProducts([]);
+    setSelectedProduct(null); setSearch('');
   }
 
   function toggleFilter(group: string, val: string) {
@@ -605,7 +614,49 @@ function CatalogPageInner() {
           </button>
         </div>
 
-        {/* ── Body ── */}
+        {/* ── Full-width tiles view when no category selected in filter mode ── */}
+        {mode === 'filter' && !selectedSlug && (
+          <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
+            {search.trim().length >= 2 ? (
+              <>
+                <div className="catalog-breadcrumb-ref" style={{ marginBottom: 12 }}>Поиск: «{search.trim()}»</div>
+                {globalSearchLoading && <div style={{ padding: 20, color: 'var(--muted)', fontSize: 13 }}>Поиск…</div>}
+                {!globalSearchLoading && globalSearchResults.length === 0 && <div className="empty-state">Ничего не найдено</div>}
+                {!globalSearchLoading && globalSearchResults.map((p, i) => (
+                  <div key={`gs-${p.id}-${i}`}>
+                    <div className={`product-item-ref${selectedProduct?.id === p.id ? ' selected' : ''}`} onClick={() => selectProduct(p)}>
+                      <span className="product-num">{i + 1}</span>
+                      <div className="product-info">
+                        <div className="product-name">{p.name}</div>
+                        <div className="product-article">
+                          {p.article && <span>Артикул {p.article}</span>}
+                          {p.manufacturer?.name && <span style={{ marginLeft: 8, color: 'var(--muted)' }}>{p.manufacturer.name}</span>}
+                        </div>
+                      </div>
+                      <button className="btn-add-to-list" onClick={e => { e.stopPropagation(); addToSheet(p); }}>+ Добавить в лист</button>
+                    </div>
+                    {inlineDetail(p)}
+                  </div>
+                ))}
+              </>
+            ) : (
+              <div className="category-tiles-ref" style={{ maxWidth: 900, margin: '0 auto' }}>
+                {tiles.map((tile, idx) => (
+                  <div key={tile.id} className={`category-tile-ref${tile.is_large || idx === 0 ? ' large' : ''}`}
+                    onClick={() => selectCategorySlug(tile.slug)}>
+                    {tile.image_path
+                      ? <img src={`${process.env.NEXT_PUBLIC_API_URL}/uploads/${tile.image_path.split(/[\\/]/).pop()}`} alt={tile.name} className="category-tile-img" />
+                      : <div className="category-tile-icon" style={{ fontSize: 36 }}>{tile.icon}</div>}
+                    <div className="category-tile-name-ref">{tile.name}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Body (two-column layout for manuf mode or when category is selected) ── */}
+        {!(mode === 'filter' && !selectedSlug) && (
         <div className="catalog-body">
 
           {/* Left panel */}
@@ -829,6 +880,7 @@ function CatalogPageInner() {
 
           </div>
         </div>
+        )}
       </div>
 
       {showSelectSheet && (

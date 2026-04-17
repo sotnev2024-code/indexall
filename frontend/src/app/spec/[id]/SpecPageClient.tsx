@@ -186,7 +186,6 @@ const SpecRow = memo(function SpecRow({
           onBlur={onBlur}
         >
           <option value="ЭТМ">ЭТМ</option>
-          <option value="Прайс-лист">Прайс-лист</option>
           <option value="">—</option>
         </select>
       </td>
@@ -722,7 +721,7 @@ export default function SpecPageClient() {
               price: priceStr,
               qty: q || '1',
               coef: c,
-              store: r.store || (hasCatalogPrice ? 'Прайс-лист' : 'ЭТМ'),
+              store: r.store || 'ЭТМ',
               auto_price: !hasCatalogPrice,
               total: calcTotal(priceStr, q || '1', c),
             };
@@ -755,7 +754,7 @@ export default function SpecPageClient() {
         etm_code: p.etm_code || next[i].etm_code || '',
         unit: p.unit || next[i].unit || 'шт',
         price: hasCatalogPrice ? String(p.price) : '',
-        store: hasCatalogPrice ? 'Прайс-лист' : 'ЭТМ',
+        store: 'ЭТМ',
         auto_price: !hasCatalogPrice,
         qty: q,
         coef: c,
@@ -882,8 +881,8 @@ export default function SpecPageClient() {
   const handleStoreChange = useCallback(async (rowIdx: number, store: string) => {
     updateRow(rowIdx, 'store', store);
     const article = rowsRef.current[rowIdx]?.article;
-    // If switched to "Прайс-лист" and row has an article — fetch price from catalog
-    if (store === 'Прайс-лист' && article) {
+    // No additional logic needed — ETM prices are fetched via the dedicated buttons
+    if (false && article) {
       try {
         const { data: prices } = await catalogApi.getPricesByArticles([article]);
         const entry = prices[article];
@@ -1914,14 +1913,6 @@ export default function SpecPageClient() {
           <button className="btn-outline" onClick={() => router.push('/templates')}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             Вставить шаблон
-          </button>
-          <button className="btn-outline" title="Скопировать лист как таблицу (для Excel / Google Таблиц)" onClick={copySheetToClipboard}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-            Копировать лист
-          </button>
-          <button className="btn-outline" title="Загрузить прайс-лист из файла (.xlsx, .csv)" onClick={() => setImportModalOpen(true)}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-            Прайс-лист
           </button>
           <div style={{ flex: 1 }} />
           <div className="spec-summary">
