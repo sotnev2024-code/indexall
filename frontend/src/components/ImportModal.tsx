@@ -8,7 +8,7 @@ const SPEC_FIELDS = [
   { key: 'article',  label: 'Артикул' },
   { key: 'qty',      label: 'Кол-во' },
   { key: 'unit',     label: 'Ед.изм' },
-  { key: 'price',    label: 'Цена' },
+  { key: 'price',    label: 'Цена с НДС' },
   { key: 'store',    label: 'Источник' },
   { key: 'coef',     label: 'Коэф.' },
   { key: 'deadline', label: 'Срок' },

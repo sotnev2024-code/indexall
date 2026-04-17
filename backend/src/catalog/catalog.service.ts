@@ -415,7 +415,7 @@ export class CatalogService implements OnModuleInit {
     return prodQb.orderBy('p.name').limit(2000).getMany();
   }
 
-  async searchProducts(q: string, limit = 20) {
+  async searchProducts(q: string, limit = 100) {
     if (!q || q.length < 2) return [];
     const s = `%${q.toLowerCase()}%`;
     const ql = q.toLowerCase();

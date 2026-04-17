@@ -5,7 +5,7 @@ import * as XLSX from 'xlsx';
 export class ExportService {
   exportToXlsx(data: { projectName: string; sheets: any[] }): Buffer {
     const workbook = XLSX.utils.book_new();
-    const BASE_HEADERS = ['№', 'Название', 'Бренд', 'Артикул', 'Кол-во', 'Ед. изм', 'Цена, ₽', 'Источник', 'Коэф.', 'Итого, ₽', 'Срок'];
+    const BASE_HEADERS = ['№', 'Название', 'Бренд', 'Артикул', 'Кол-во', 'Ед. изм', 'Цена с НДС, ₽', 'Источник', 'Коэф.', 'Итого, ₽', 'Срок'];
     const now = new Date().toLocaleDateString('ru-RU');
 
     for (const sheet of data.sheets) {

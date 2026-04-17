@@ -520,10 +520,10 @@ export default function SpecPageClient() {
 
   async function loadPricelists() {
     try {
-      const { data } = await catalogApi.getPriceLists();
+      // Use public manufacturers endpoint instead of admin-only pricelists
+      const { data } = await catalogApi.getManufacturers();
       const names: string[] = (data as any[])
-        .filter((p: any) => p.is_active)
-        .map((p: any) => p.name as string)
+        .map((m: any) => m.name as string)
         .filter(Boolean);
       setPricelists(names);
     } catch { /* no pricelists */ }
@@ -703,7 +703,7 @@ export default function SpecPageClient() {
       try {
         const { data } = await catalogApi.search(article);
         const results = (data as any[]) || [];
-        const exact = results.find(p => (p.article || '').toLowerCase() === article.toLowerCase()) || results[0];
+        const exact = results.find(p => (p.article || '').toLowerCase() === article.toLowerCase());
         if (exact) {
           const mfr = exact.manufacturer?.name || exact.brand || '';
           const matchedPl = pricelistsRef.current.find(pl => pl === mfr);
@@ -1565,7 +1565,7 @@ export default function SpecPageClient() {
 
   // ── Clipboard: copy whole sheet as TSV (toolbar button) ───────
   function copySheetToClipboard() {
-    const COLS = ['Название', 'Бренд', 'Артикул', 'Кол-во', 'Ед.изм', 'Цена', 'Источник', 'Коэф.', 'Итого'];
+    const COLS = ['Название', 'Бренд', 'Артикул', 'Кол-во', 'Ед.изм', 'Цена с НДС', 'Источник', 'Коэф.', 'Итого'];
     const dataRows = rows.filter(r => r.name || r.article);
     const lines = [COLS.join('\t')];
     dataRows.forEach(r => {
@@ -2098,7 +2098,7 @@ export default function SpecPageClient() {
                 <th className="col-article">Артикул</th>
                 <th className="col-qty">Кол-во</th>
                 <th className="col-unit">Ед.изм</th>
-                <th className="col-price">Цена</th>
+                <th className="col-price">Цена с НДС</th>
                 <th className="col-store">Источник</th>
                 <th className="col-coef">Коэф.</th>
                 <th className="col-total">Итого</th>
