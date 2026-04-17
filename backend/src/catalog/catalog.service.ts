@@ -85,6 +85,17 @@ export class CatalogService implements OnModuleInit {
         `CREATE INDEX IF NOT EXISTS idx_tile_products_attrs_gin ON tile_products USING GIN (attributes)`,
       );
     } catch { /* index may already exist or table not yet synced */ }
+
+    // Enable pg_trgm extension + create trigram indexes for fuzzy search
+    try {
+      await this.prodRepo.query(`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
+      await this.prodRepo.query(`CREATE INDEX IF NOT EXISTS idx_catalog_products_name_trgm ON catalog_products USING GIN (name gin_trgm_ops)`);
+      await this.prodRepo.query(`CREATE INDEX IF NOT EXISTS idx_catalog_products_article_trgm ON catalog_products USING GIN (article gin_trgm_ops)`);
+      await this.tileProductRepo.query(`CREATE INDEX IF NOT EXISTS idx_tile_products_name_trgm ON tile_products USING GIN (name gin_trgm_ops)`);
+      await this.tileProductRepo.query(`CREATE INDEX IF NOT EXISTS idx_tile_products_article_trgm ON tile_products USING GIN (article gin_trgm_ops)`);
+    } catch (e: any) {
+      console.warn('pg_trgm setup:', e?.message);
+    }
   }
 
   // ── Catalog Tiles ─────────────────────────────────────────
@@ -415,42 +426,43 @@ export class CatalogService implements OnModuleInit {
     return prodQb.orderBy('p.name').limit(2000).getMany();
   }
 
+  /**
+   * Smart search across both catalog_products (price lists) and tile_products.
+   *
+   * Algorithm (3-tier):
+   *  1. Exact article match (= or starts with) — highest priority
+   *  2. Full-text search with Russian morphology (to_tsquery)
+   *  3. Fuzzy search via pg_trgm (similarity) — catches typos
+   *
+   * Results from all tiers are merged, deduplicated by article, and ranked.
+   */
   async searchProducts(q: string, limit = 100) {
     if (!q || q.length < 2) return [];
-    const s = `%${q.toLowerCase()}%`;
-    const ql = q.toLowerCase();
+    const ql = q.trim().toLowerCase();
 
-    // Search both catalog_products (price lists) AND tile_products (tile catalogs)
-    const fromPriceLists = await this.prodRepo.createQueryBuilder('p')
-      .leftJoinAndSelect('p.manufacturer', 'm')
-      .where('p.is_active = true')
-      .andWhere('(LOWER(p.name) LIKE :s OR LOWER(p.article) LIKE :s)', { s })
-      .orderBy(`CASE WHEN LOWER(p.article) = :ql THEN 0 WHEN LOWER(p.article) LIKE :prefix THEN 1 ELSE 2 END`)
-      .setParameters({ ql, prefix: `${ql}%` })
-      .limit(limit)
-      .getMany();
+    // ── Search catalog_products ─────────────────────────────────
+    const fromPriceLists = await this.searchInTable(
+      'catalog_products', 'p', ql, limit,
+      (qb) => qb.leftJoinAndSelect('p.manufacturer', 'm').andWhere('p.is_active = true'),
+    );
 
-    const fromTiles = await this.tileProductRepo.createQueryBuilder('tp')
-      .where('(LOWER(tp.name) LIKE :s OR LOWER(tp.article) LIKE :s)', { s })
-      .orderBy(`CASE WHEN LOWER(tp.article) = :ql THEN 0 WHEN LOWER(tp.article) LIKE :prefix THEN 1 ELSE 2 END`)
-      .setParameters({ ql, prefix: `${ql}%` })
-      .limit(limit)
-      .getMany();
+    // ── Search tile_products ────────────────────────────────────
+    const fromTilesRaw = await this.searchInTable('tile_products', 'tp', ql, limit);
 
-    // Normalize tile products to the same shape as catalog products
-    const normalizedTiles = fromTiles.map(tp => ({
+    // Normalize tile products to same shape
+    const fromTiles = fromTilesRaw.map((tp: any) => ({
       id: tp.id,
       name: tp.name,
       article: tp.article,
       price: tp.price,
       unit: tp.unit,
       attributes: tp.attributes,
-      etm_code: (tp as any).etm_code || null,
+      etm_code: tp.etm_code || null,
       manufacturer: tp.brand ? { name: tp.brand } : null,
       _source: 'tile' as const,
     }));
 
-    // Merge: catalog products first, then tile products. Deduplicate by article (catalog wins).
+    // Merge + deduplicate by article
     const seen = new Set<string>();
     const merged: any[] = [];
     for (const p of fromPriceLists) {
@@ -458,12 +470,83 @@ export class CatalogService implements OnModuleInit {
       if (key) seen.add(key);
       merged.push(p);
     }
-    for (const tp of normalizedTiles) {
+    for (const tp of fromTiles) {
       const key = (tp.article || '').toLowerCase();
       if (key && seen.has(key)) continue;
       merged.push(tp);
     }
     return merged.slice(0, limit);
+  }
+
+  /**
+   * 3-tier search within a single table:
+   *  1. Exact/prefix article match
+   *  2. Full-text search (Russian morphology via to_tsquery)
+   *  3. pg_trgm fuzzy fallback (typo tolerance)
+   */
+  private async searchInTable(
+    table: string,
+    alias: string,
+    q: string,
+    limit: number,
+    customize?: (qb: any) => void,
+  ): Promise<any[]> {
+    const repo = table === 'tile_products' ? this.tileProductRepo : this.prodRepo;
+    const like = `%${q}%`;
+
+    // Tier 1: exact/prefix article match + substring LIKE on name
+    const qb1 = repo.createQueryBuilder(alias)
+      .where(`(LOWER(${alias}.article) = :q OR LOWER(${alias}.article) LIKE :prefix OR LOWER(${alias}.name) LIKE :like)`, {
+        q, prefix: `${q}%`, like,
+      })
+      .orderBy(`CASE WHEN LOWER(${alias}.article) = :q THEN 0 WHEN LOWER(${alias}.article) LIKE :prefix THEN 1 ELSE 2 END`)
+      .setParameters({ q, prefix: `${q}%` })
+      .limit(limit);
+    if (customize) customize(qb1);
+    const tier1 = await qb1.getMany();
+
+    if (tier1.length >= limit) return tier1;
+
+    // Tier 2: Full-text search with Russian morphology
+    // Convert query to tsquery: split words, join with & (AND), add :* for prefix matching
+    const tsWords = q.split(/\s+/).filter(w => w.length >= 2).map(w => `${w}:*`).join(' & ');
+    let tier2: any[] = [];
+    if (tsWords) {
+      try {
+        const qb2 = repo.createQueryBuilder(alias)
+          .where(`to_tsvector('russian', coalesce(${alias}.name, '') || ' ' || coalesce(${alias}.article, '')) @@ to_tsquery('russian', :tsq)`, { tsq: tsWords })
+          .orderBy(`ts_rank(to_tsvector('russian', coalesce(${alias}.name, '') || ' ' || coalesce(${alias}.article, '')), to_tsquery('russian', :tsq))`, 'DESC')
+          .setParameters({ tsq: tsWords })
+          .limit(limit);
+        if (customize) customize(qb2);
+        tier2 = await qb2.getMany();
+      } catch { /* tsquery syntax error — skip FTS tier */ }
+    }
+
+    // Tier 3: pg_trgm fuzzy search (catches typos)
+    const existingIds = new Set([...tier1, ...tier2].map((r: any) => r.id));
+    let tier3: any[] = [];
+    if (tier1.length + tier2.length < limit) {
+      try {
+        const qb3 = repo.createQueryBuilder(alias)
+          .where(`(similarity(${alias}.name, :q) > 0.15 OR similarity(${alias}.article, :q) > 0.3)`, { q })
+          .orderBy(`GREATEST(similarity(${alias}.name, :q), similarity(${alias}.article, :q))`, 'DESC')
+          .setParameters({ q })
+          .limit(limit);
+        if (customize) customize(qb3);
+        tier3 = (await qb3.getMany()).filter((r: any) => !existingIds.has(r.id));
+      } catch { /* pg_trgm not available — skip */ }
+    }
+
+    // Merge all tiers: tier1 (exact) → tier2 (FTS) → tier3 (fuzzy), deduplicated
+    const allIds = new Set<number>();
+    const result: any[] = [];
+    for (const r of [...tier1, ...tier2, ...tier3]) {
+      if (allIds.has(r.id)) continue;
+      allIds.add(r.id);
+      result.push(r);
+    }
+    return result.slice(0, limit);
   }
 
   // ── xlsx parser ───────────────────────────────────────────
