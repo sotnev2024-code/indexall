@@ -14,6 +14,8 @@ export interface PriceListMapping {
   artCol: string;
   priceCol?: string;
   etmCodeCol?: string;
+  imageUrlCol?: string;
+  externalUrlCol?: string;
 }
 
 // Only 4 categories per TZ — opts are loaded dynamically from bot_database.db
@@ -458,6 +460,8 @@ export class CatalogService implements OnModuleInit {
       unit: tp.unit,
       attributes: tp.attributes,
       etm_code: tp.etm_code || null,
+      image_url: tp.image_url || null,
+      external_url: tp.external_url || null,
       manufacturer: tp.brand ? { name: tp.brand } : null,
       _source: 'tile' as const,
     }));
@@ -571,15 +575,17 @@ export class CatalogService implements OnModuleInit {
       const artCol = XLSX.utils.decode_col(mapping.artCol.toUpperCase());
       const priceCol = mapping.priceCol ? XLSX.utils.decode_col(mapping.priceCol.toUpperCase()) : -1;
       const etmCol = mapping.etmCodeCol ? XLSX.utils.decode_col(mapping.etmCodeCol.toUpperCase()) : -1;
+      const imgCol = mapping.imageUrlCol ? XLSX.utils.decode_col(mapping.imageUrlCol.toUpperCase()) : -1;
+      const urlCol = mapping.externalUrlCol ? XLSX.utils.decode_col(mapping.externalUrlCol.toUpperCase()) : -1;
 
       // Auto-detect tree format: no group columns AND file has category rows
       // (rows where nameCol has text but artCol is empty)
       const isTreeFormat = groupCols.length === 0;
 
       if (isTreeFormat) {
-        await this.parseTreeFormat(plId, rows, firstRow, nameCol, artCol, priceCol, etmCol, manufacturerId);
+        await this.parseTreeFormat(plId, rows, firstRow, nameCol, artCol, priceCol, etmCol, imgCol, urlCol, manufacturerId);
       } else {
-        await this.parseFlatFormat(plId, rows, firstRow, groupCols, nameCol, artCol, priceCol, etmCol, manufacturerId);
+        await this.parseFlatFormat(plId, rows, firstRow, groupCols, nameCol, artCol, priceCol, etmCol, imgCol, urlCol, manufacturerId);
       }
 
       await this.plRepo.update(plId, { status: PriceListStatus.ACTIVE });
@@ -593,7 +599,7 @@ export class CatalogService implements OnModuleInit {
   private async parseFlatFormat(
     plId: number, rows: any[][], firstRow: number,
     groupCols: number[], nameCol: number, artCol: number, priceCol: number,
-    etmCol: number, manufacturerId: number,
+    etmCol: number, imgCol: number, urlCol: number, manufacturerId: number,
   ) {
     const catCache: Map<string, number> = new Map();
     let productCount = 0;
@@ -627,12 +633,16 @@ export class CatalogService implements OnModuleInit {
       const rawPrice = priceCol >= 0 ? String(row[priceCol] || '').replace(/\s/g, '').replace(',', '.') : '';
       const price = rawPrice ? parseFloat(rawPrice) : null;
       const etmCode = etmCol >= 0 ? String(row[etmCol] || '').trim() : '';
+      const imageUrl = imgCol >= 0 ? String(row[imgCol] || '').trim() : '';
+      const externalUrl = urlCol >= 0 ? String(row[urlCol] || '').trim() : '';
       await this.prodRepo.save({
         manufacturer_id: manufacturerId,
         category_id: parentId,
         name: productName,
         article: article || null,
         etm_code: etmCode || null,
+        image_url: imageUrl || null,
+        external_url: externalUrl || null,
         is_active: true,
         ...(price && !isNaN(price) && price > 0 ? { price } : {}),
       });
@@ -648,7 +658,7 @@ export class CatalogService implements OnModuleInit {
   private async parseTreeFormat(
     plId: number, rows: any[][], firstRow: number,
     nameCol: number, artCol: number, priceCol: number, etmCol: number,
-    manufacturerId: number,
+    imgCol: number, urlCol: number, manufacturerId: number,
   ) {
     let currentCatId: number | null = null;
     let productCount = 0;
@@ -665,12 +675,16 @@ export class CatalogService implements OnModuleInit {
       // If product name column OR article column has text → it's a product
       if (productName || article) {
         const price = rawPrice ? parseFloat(rawPrice) : null;
+        const imageUrl = imgCol >= 0 ? String(row[imgCol] || '').trim() : '';
+        const externalUrl = urlCol >= 0 ? String(row[urlCol] || '').trim() : '';
         await this.prodRepo.save({
           manufacturer_id: manufacturerId,
           category_id: currentCatId,
           name: productName || article,
           article: article || null,
           etm_code: etmCode || null,
+          image_url: imageUrl || null,
+          external_url: externalUrl || null,
           is_active: true,
           ...(price && !isNaN(price) && price > 0 ? { price } : {}),
         });
@@ -781,6 +795,8 @@ export class CatalogService implements OnModuleInit {
       unitCol?: string;
       brandCol?: string;
       etmCodeCol?: string;
+      imageUrlCol?: string;
+      externalUrlCol?: string;
       accessoriesStartCol?: string;
       filters: { col: string; label: string }[];
     },
@@ -808,6 +824,8 @@ export class CatalogService implements OnModuleInit {
     const unitIdx = mapping.unitCol ? XLSX.utils.decode_col(mapping.unitCol.toUpperCase()) : -1;
     const brandIdx = mapping.brandCol ? XLSX.utils.decode_col(mapping.brandCol.toUpperCase()) : -1;
     const etmCodeIdx = mapping.etmCodeCol ? XLSX.utils.decode_col(mapping.etmCodeCol.toUpperCase()) : -1;
+    const imageUrlIdx = mapping.imageUrlCol ? XLSX.utils.decode_col(mapping.imageUrlCol.toUpperCase()) : -1;
+    const externalUrlIdx = mapping.externalUrlCol ? XLSX.utils.decode_col(mapping.externalUrlCol.toUpperCase()) : -1;
     const accStartIdx = mapping.accessoriesStartCol ? XLSX.utils.decode_col(mapping.accessoriesStartCol.toUpperCase()) : -1;
     const filterCols = (mapping.filters || []).map(f => ({
       idx: XLSX.utils.decode_col(f.col.toUpperCase()),
@@ -830,6 +848,8 @@ export class CatalogService implements OnModuleInit {
 
       const article = artIdx >= 0 ? String(row[artIdx] || '').trim() : '';
       const etmCode = etmCodeIdx >= 0 ? String(row[etmCodeIdx] || '').trim() : '';
+      const imageUrl = imageUrlIdx >= 0 ? String(row[imageUrlIdx] || '').trim() : '';
+      const externalUrl = externalUrlIdx >= 0 ? String(row[externalUrlIdx] || '').trim() : '';
       const rawPrice = priceIdx >= 0 ? String(row[priceIdx] || '').replace(/\s/g, '').replace(',', '.') : '';
       const price = rawPrice ? parseFloat(rawPrice) : null;
       const unit = unitIdx >= 0 ? String(row[unitIdx] || '').trim() : '';
@@ -868,6 +888,8 @@ export class CatalogService implements OnModuleInit {
         name,
         article: article || null,
         etm_code: etmCode || null,
+        image_url: imageUrl || null,
+        external_url: externalUrl || null,
         price: price && !isNaN(price) && price > 0 ? price : null,
         unit: unit || null,
         brand: brand || null,
@@ -957,6 +979,8 @@ export class CatalogService implements OnModuleInit {
       etm_code: r.etm_code,
       price: r.price,
       unit: r.unit,
+      image_url: r.image_url,
+      external_url: r.external_url,
       attributes: r.attributes,
       accessories: r.accessories?.length ? r.accessories : undefined,
       manufacturer: r.brand ? { name: r.brand } : null,

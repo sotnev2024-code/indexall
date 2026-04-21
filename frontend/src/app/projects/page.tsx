@@ -56,7 +56,14 @@ function ProjectsPageInner() {
 
   const [tree, setTree] = useState<{ children: FolderNode[]; items: SheetItem[] }>({ children: [], items: [] });
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [expanded, setExpanded] = useState<Set<number>>(() => {
+    if (typeof window === 'undefined') return new Set();
+    try {
+      const saved = localStorage.getItem('projects_tree_expanded');
+      if (saved) return new Set(JSON.parse(saved) as number[]);
+    } catch {}
+    return new Set();
+  });
   const [search, setSearch] = useState('');
 
   // Renaming
@@ -112,17 +119,23 @@ function ProjectsPageInner() {
 
   useEffect(() => { loadTree(); }, []);
 
+  // Persist expanded state across page navigation
+  useEffect(() => {
+    try {
+      localStorage.setItem('projects_tree_expanded', JSON.stringify([...expanded]));
+    } catch {}
+  }, [expanded]);
+
   async function loadTree() {
     try {
       const { data } = await foldersApi.getTree('projects');
       setTree(data);
       if (data.children.length === 0 && data.items.length === 0) setShowWelcome(true);
-      if (firstLoad.current) {
-        // Auto-expand root folders only on the very first load
+      if (firstLoad.current && expanded.size === 0) {
+        // Auto-expand root folders only if no saved state
         setExpanded(new Set(data.children.map((f: FolderNode) => f.id)));
-        firstLoad.current = false;
       }
-      // On subsequent reloads (after move/rename/etc.) keep expanded state as-is
+      firstLoad.current = false;
     } catch { toast.error('Ошибка загрузки проектов'); }
     finally { setLoading(false); }
   }

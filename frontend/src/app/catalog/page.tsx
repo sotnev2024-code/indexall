@@ -65,6 +65,8 @@ function CatalogPageInner() {
   const [search, setSearch] = useState('');
   const [globalSearchResults, setGlobalSearchResults] = useState<any[]>([]);
   const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
+  // ETM prices for visible product rows (keyed by article)
+  const [rowEtmPrices, setRowEtmPrices] = useState<Record<string, number | null>>({});
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [showSelectSheet, setShowSelectSheet] = useState(false);
   const addingRef = useRef(false); // prevent double-click race
@@ -304,8 +306,6 @@ function CatalogPageInner() {
   }, [accView, accSelectedType, selectedProduct?.id]);
 
   // Global search across all products (catalog + tiles) with 300ms debounce.
-  // Triggers when user types in the toolbar search field — works even without
-  // selected category/tile so user can find by article from anywhere.
   useEffect(() => {
     const q = search.trim();
     if (q.length < 2) { setGlobalSearchResults([]); setGlobalSearchLoading(false); return; }
@@ -319,6 +319,25 @@ function CatalogPageInner() {
     }, 300);
     return () => clearTimeout(t);
   }, [search]);
+
+  // Fetch ETM prices for visible product rows (search results + filter products).
+  // Heavy debounce (2.5s) — don't hit ETM on every keystroke. Skips articles already fetched.
+  useEffect(() => {
+    const rows = search.trim().length >= 2 ? globalSearchResults : filterProducts;
+    if (!rows || rows.length === 0) return;
+    const items = rows
+      .map(r => ({ article: r.article, etmCode: r.etm_code }))
+      .filter(it => (it.article || it.etmCode) && rowEtmPrices[(it.article || it.etmCode)!] === undefined);
+    if (items.length === 0) return;
+
+    const t = setTimeout(async () => {
+      try {
+        const { data } = await storesApi.getEtmPrices(items.map(it => it.article || it.etmCode!).filter(Boolean));
+        setRowEtmPrices(prev => ({ ...prev, ...data }));
+      } catch { /* silent — ETM may be unavailable */ }
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [globalSearchResults, filterProducts, search, rowEtmPrices]);
 
   function getDisplayedFilterProducts() {
     // Parametric filtering is handled on the backend; here we only apply the text search bar
@@ -439,13 +458,74 @@ function CatalogPageInner() {
   const selectedTile = tiles.find(t => t.slug === selectedSlug);
 
   // ── Inline product detail ──────────────────────────────────
+  /** Render a single product row: thumbnail + info + ETM price + link + add button */
+  function renderProductRow(p: any, i: number, keyPrefix = '') {
+    const pAttrs = p.attributes || {};
+    const pAttrEntries = Object.entries(pAttrs).filter(([, v]) => v);
+    const key = (p.article || p.etm_code || '').trim();
+    const etmPrice = key ? rowEtmPrices[key] : undefined;
+    return (
+      <div key={`${keyPrefix}${p.id}-${i}`}>
+        <div className={`product-item-ref${selectedProduct?.id === p.id ? ' selected' : ''}`} onClick={() => selectProduct(p)}>
+          <span className="product-num">{i + 1}</span>
+          {/* Thumbnail */}
+          {p.image_url ? (
+            <img src={p.image_url} alt="" style={{ width: 40, height: 40, objectFit: 'contain', marginRight: 8, borderRadius: 4, flexShrink: 0 }}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+          ) : (
+            <div style={{ width: 40, height: 40, marginRight: 8, background: '#f5f5f5', borderRadius: 4, flexShrink: 0 }} />
+          )}
+          <div className="product-info">
+            <div className="product-name">{p.name}</div>
+            <div className="product-article">
+              {p.article && <span>Артикул {p.article}</span>}
+              {p.manufacturer?.name && <span style={{ marginLeft: 8, color: 'var(--muted)' }}>{p.manufacturer.name}</span>}
+            </div>
+            {pAttrEntries.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', marginTop: 2 }}>
+                {pAttrEntries.map(([k, v]) => (
+                  <span key={k} style={{ fontSize: 11, color: 'var(--muted)' }}>{k}: {String(v)}</span>
+                ))}
+              </div>
+            )}
+          </div>
+          {/* ETM price inline */}
+          {etmPrice != null && etmPrice > 0 && (
+            <div style={{ fontSize: 13, fontWeight: 600, marginRight: 8, whiteSpace: 'nowrap', color: 'var(--text)' }}>
+              {etmPrice.toLocaleString('ru-RU')} ₽
+            </div>
+          )}
+          {/* External link */}
+          {p.external_url && (
+            <a href={p.external_url} target="_blank" rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              style={{
+                background: '#fff', color: '#1976d2', border: '1px solid #1976d2',
+                borderRadius: 4, padding: '4px 10px', fontSize: 12, fontWeight: 500,
+                textDecoration: 'none', marginRight: 6, whiteSpace: 'nowrap',
+              }}>
+              Сайт
+            </a>
+          )}
+          <button className="btn-add-to-list" onClick={e => { e.stopPropagation(); addToSheet(p); }}>+ Добавить в лист</button>
+        </div>
+        {inlineDetail(p)}
+      </div>
+    );
+  }
+
   function inlineDetail(p: any) {
     if (!selectedProduct || selectedProduct.id !== p.id) return null;
     const attrs = selectedProduct.attributes || {};
     const attrEntries = Object.entries(attrs).filter(([, v]) => v);
     return (
       <div ref={detailRef} className="product-detail-inline">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 13 }}>
+        <div style={{ display: 'flex', gap: 12 }}>
+          {selectedProduct.image_url && (
+            <img src={selectedProduct.image_url} alt="" style={{ width: 120, height: 120, objectFit: 'contain', background: '#f5f5f5', borderRadius: 6, flexShrink: 0 }}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+          )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 13, flex: 1 }}>
           {selectedProduct.article && (
             <div>Артикул: <strong>{selectedProduct.article}</strong></div>
           )}
@@ -454,6 +534,17 @@ function CatalogPageInner() {
           )}
           {selectedProduct.price && (
             <div>Цена каталога: <strong>{selectedProduct.price} ₽</strong></div>
+          )}
+          {selectedProduct.external_url && (
+            <a href={selectedProduct.external_url} target="_blank" rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              style={{
+                background: '#1976d2', color: '#fff', borderRadius: 4,
+                padding: '5px 12px', fontSize: 12, fontWeight: 500,
+                textDecoration: 'none', display: 'inline-block', width: 'fit-content', marginTop: 2,
+              }}>
+              Открыть на сайте →
+            </a>
           )}
           {selectedProduct.unit && (
             <div>Ед. изм.: {selectedProduct.unit}</div>
@@ -567,6 +658,7 @@ function CatalogPageInner() {
             );
           })()}
         </div>
+        </div>
         <button
           className="btn-add-to-list"
           style={{ marginTop: 10, alignSelf: 'flex-start' }}
@@ -581,7 +673,7 @@ function CatalogPageInner() {
   return (
     <>
       <Header breadcrumb="Каталог" />
-      <div className="catalog-screen">
+      <div className={`catalog-screen${mode === 'filter' && !selectedSlug ? ' catalog-screen--tiles' : ''}`}>
 
         {/* ── Toolbar ── */}
         <div className="catalog-toolbar">
@@ -622,22 +714,7 @@ function CatalogPageInner() {
                 <div className="catalog-breadcrumb-ref" style={{ marginBottom: 12 }}>Поиск: «{search.trim()}»</div>
                 {globalSearchLoading && <div style={{ padding: 20, color: 'var(--muted)', fontSize: 13 }}>Поиск…</div>}
                 {!globalSearchLoading && globalSearchResults.length === 0 && <div className="empty-state">Ничего не найдено</div>}
-                {!globalSearchLoading && globalSearchResults.map((p, i) => (
-                  <div key={`gs-${p.id}-${i}`}>
-                    <div className={`product-item-ref${selectedProduct?.id === p.id ? ' selected' : ''}`} onClick={() => selectProduct(p)}>
-                      <span className="product-num">{i + 1}</span>
-                      <div className="product-info">
-                        <div className="product-name">{p.name}</div>
-                        <div className="product-article">
-                          {p.article && <span>Артикул {p.article}</span>}
-                          {p.manufacturer?.name && <span style={{ marginLeft: 8, color: 'var(--muted)' }}>{p.manufacturer.name}</span>}
-                        </div>
-                      </div>
-                      <button className="btn-add-to-list" onClick={e => { e.stopPropagation(); addToSheet(p); }}>+ Добавить в лист</button>
-                    </div>
-                    {inlineDetail(p)}
-                  </div>
-                ))}
+                {!globalSearchLoading && globalSearchResults.map((p, i) => renderProductRow(p, i, 'gs-'))}
               </>
             ) : (
               <div className="category-tiles-ref" style={{ maxWidth: 900, margin: '0 auto' }}>
@@ -772,29 +849,7 @@ function CatalogPageInner() {
                 {!globalSearchLoading && globalSearchResults.length === 0 && (
                   <div className="empty-state">Ничего не найдено по запросу</div>
                 )}
-                {!globalSearchLoading && globalSearchResults.map((p, i) => (
-                  <div key={`gs-${p.id}-${i}`}>
-                    <div
-                      className={`product-item-ref${selectedProduct?.id === p.id ? ' selected' : ''}`}
-                      onClick={() => selectProduct(p)}
-                    >
-                      <span className="product-num">{i + 1}</span>
-                      <div className="product-info">
-                        <div className="product-name">{p.name}</div>
-                        <div className="product-article">
-                          {p.article && <span>Артикул {p.article}</span>}
-                          {p.manufacturer?.name && (
-                            <span style={{ marginLeft: 8, color: 'var(--muted)' }}>{p.manufacturer.name}</span>
-                          )}
-                        </div>
-                      </div>
-                      <button className="btn-add-to-list" onClick={e => { e.stopPropagation(); addToSheet(p); }}>
-                        + Добавить в лист
-                      </button>
-                    </div>
-                    {inlineDetail(p)}
-                  </div>
-                ))}
+                {!globalSearchLoading && globalSearchResults.map((p, i) => renderProductRow(p, i, 'gs2-'))}
               </>
             )}
 
@@ -803,24 +858,7 @@ function CatalogPageInner() {
                 {breadcrumbPath.length > 0 && (
                   <div className="catalog-breadcrumb-ref">{breadcrumbPath.join('/')}</div>
                 )}
-                {filteredManufProducts.map((p, i) => (
-                  <div key={p.id}>
-                    <div
-                      className={`product-item-ref${selectedProduct?.id === p.id ? ' selected' : ''}`}
-                      onClick={() => selectProduct(p)}
-                    >
-                      <span className="product-num">{i + 1}</span>
-                      <div className="product-info">
-                        <div className="product-name">{p.name}</div>
-                        <div className="product-article">Артикул {p.article}</div>
-                      </div>
-                      <button className="btn-add-to-list" onClick={e => { e.stopPropagation(); addToSheet(p); }}>
-                        + Добавить в лист
-                      </button>
-                    </div>
-                    {inlineDetail(p)}
-                  </div>
-                ))}
+                {filteredManufProducts.map((p, i) => renderProductRow(p, i, 'mf-'))}
                 {!selectedCatId && (
                   <div className="empty-state">Выберите раздел в дереве слева</div>
                 )}
@@ -835,40 +873,7 @@ function CatalogPageInner() {
                 {loadingFilter && (
                   <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>Загрузка…</div>
                 )}
-                {!loadingFilter && displayedFilterProducts.map((p, i) => {
-                  const pAttrs = p.attributes || {};
-                  const pAttrEntries = Object.entries(pAttrs).filter(([, v]) => v);
-                  return (
-                    <div key={p.id}>
-                      <div
-                        className={`product-item-ref${selectedProduct?.id === p.id ? ' selected' : ''}`}
-                        onClick={() => selectProduct(p)}
-                      >
-                        <span className="product-num">{i + 1}</span>
-                        <div className="product-info">
-                          <div className="product-name">{p.name}</div>
-                          <div className="product-article">
-                            {p.article && <span>Артикул {p.article}</span>}
-                            {p.manufacturer?.name && (
-                              <span style={{ marginLeft: 8, color: 'var(--muted)' }}>{p.manufacturer.name}</span>
-                            )}
-                          </div>
-                          {pAttrEntries.length > 0 && (
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', marginTop: 2 }}>
-                              {pAttrEntries.map(([k, v]) => (
-                                <span key={k} style={{ fontSize: 11, color: 'var(--muted)' }}>{k}: {String(v)}</span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        <button className="btn-add-to-list" onClick={e => { e.stopPropagation(); addToSheet(p); }}>
-                          + Добавить в лист
-                        </button>
-                      </div>
-                      {inlineDetail(p)}
-                    </div>
-                  );
-                })}
+                {!loadingFilter && displayedFilterProducts.map((p, i) => renderProductRow(p, i, 'dfp-'))}
                 {!selectedSlug && !loadingFilter && displayedFilterProducts.length === 0 && (
                   <div className="empty-state">Выберите категорию слева</div>
                 )}

@@ -63,6 +63,10 @@ export class CatalogProduct {
   @Column({ nullable: true }) etm_code: string;
   @Column({ nullable: true }) unit: string;
   @Column({ nullable: true, type: 'decimal', precision: 12, scale: 2 }) price: number;
+  /** External URL to manufacturer/supplier page for this product */
+  @Column({ nullable: true }) external_url: string;
+  /** Image URL for this product */
+  @Column({ nullable: true }) image_url: string;
   @Column({ nullable: true, type: 'jsonb' }) attributes: object;
   @Column({ default: true }) is_active: boolean;
   @CreateDateColumn() created_at: Date;
@@ -119,6 +123,8 @@ export class CatalogTile {
     unitCol: string;
     brandCol: string;
     etmCodeCol: string;
+    imageUrlCol: string;
+    externalUrlCol: string;
     accessoriesStartCol: string;
     filters: { col: string; label: string }[];
   };
@@ -145,6 +151,10 @@ export class TileProduct {
   @Column({ nullable: true }) brand: string;
   /** ETM internal code for direct API lookup (type=etm). Optional — falls back to article. */
   @Column({ nullable: true }) etm_code: string;
+  /** External URL to manufacturer/supplier page for this product */
+  @Column({ nullable: true }) external_url: string;
+  /** Image URL for this product */
+  @Column({ nullable: true }) image_url: string;
   @Column({ type: 'jsonb', default: '{}' }) attributes: Record<string, string>;
   @Column({ type: 'jsonb', default: '[]' }) accessories: { type: string; name: string; article: string; url: string }[];
 }

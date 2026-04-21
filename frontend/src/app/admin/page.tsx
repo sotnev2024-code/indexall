@@ -70,7 +70,7 @@ export default function AdminPage() {
   // Pricelists (Каталог: Прайс-листы)
   const [pricelists, setPricelists] = useState<any[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [mapping, setMapping] = useState({ firstRow: '2', g1: '', g2: '', g3: '', g4: '', g5: '', g6: '', nameCol: '', artCol: '', priceCol: '', etmCodeCol: '' });
+  const [mapping, setMapping] = useState({ firstRow: '2', g1: '', g2: '', g3: '', g4: '', g5: '', g6: '', nameCol: '', artCol: '', priceCol: '', etmCodeCol: '', imageUrlCol: '', externalUrlCol: '' });
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [replaceTarget, setReplaceTarget] = useState<number | null>(null);
@@ -116,7 +116,7 @@ export default function AdminPage() {
   const [tileDataModal, setTileDataModal] = useState<any | null>(null); // tile being configured
   const [tileFile, setTileFile] = useState<File | null>(null);
   const [tilePreview, setTilePreview] = useState<{ headers: string[]; rows: any[][] } | null>(null);
-  const [tileMapping, setTileMapping] = useState({ firstRow: '2', nameCol: '', articleCol: '', priceCol: '', unitCol: '', brandCol: '', etmCodeCol: '', accessoriesStartCol: '' });
+  const [tileMapping, setTileMapping] = useState({ firstRow: '2', nameCol: '', articleCol: '', priceCol: '', unitCol: '', brandCol: '', etmCodeCol: '', imageUrlCol: '', externalUrlCol: '', accessoriesStartCol: '' });
   const [tileFilterCols, setTileFilterCols] = useState<{ col: string; label: string }[]>([]);
   const [tileUploading, setTileUploading] = useState(false);
 
@@ -487,6 +487,8 @@ export default function AdminPage() {
       unitCol: tile.column_mapping?.unitCol || '',
       brandCol: tile.column_mapping?.brandCol || '',
       etmCodeCol: tile.column_mapping?.etmCodeCol || '',
+      imageUrlCol: tile.column_mapping?.imageUrlCol || '',
+      externalUrlCol: tile.column_mapping?.externalUrlCol || '',
       accessoriesStartCol: tile.column_mapping?.accessoriesStartCol || '',
     });
   }
@@ -526,6 +528,8 @@ export default function AdminPage() {
       if (tileMapping.unitCol) fd.append('unitCol', tileMapping.unitCol);
       if (tileMapping.brandCol) fd.append('brandCol', tileMapping.brandCol);
       if (tileMapping.etmCodeCol) fd.append('etmCodeCol', tileMapping.etmCodeCol);
+      if (tileMapping.imageUrlCol) fd.append('imageUrlCol', tileMapping.imageUrlCol);
+      if (tileMapping.externalUrlCol) fd.append('externalUrlCol', tileMapping.externalUrlCol);
       if (tileMapping.accessoriesStartCol) fd.append('accessoriesStartCol', tileMapping.accessoriesStartCol);
       fd.append('filters', JSON.stringify(tileFilterCols.filter(f => f.col && f.label)));
       const { data } = await catalogApi.uploadTileData(tileDataModal.id, fd);
@@ -575,7 +579,7 @@ export default function AdminPage() {
       await catalogApi.uploadPriceList(fd);
       toast.success('Загружено, обрабатывается…');
       setFile(null); setPreview(null);
-      setMapping({ firstRow: '2', g1: '', g2: '', g3: '', g4: '', g5: '', g6: '', nameCol: '', artCol: '', priceCol: '', etmCodeCol: '' });
+      setMapping({ firstRow: '2', g1: '', g2: '', g3: '', g4: '', g5: '', g6: '', nameCol: '', artCol: '', priceCol: '', etmCodeCol: '', imageUrlCol: '', externalUrlCol: '' });
       loadPricelists();
     } catch { toast.error('Ошибка загрузки'); }
     finally { setUploading(false); }
@@ -590,7 +594,7 @@ export default function AdminPage() {
       await catalogApi.replacePriceList(id, fd);
       toast.success('Прайс заменён, обрабатывается…');
       setReplaceTarget(null); setReplaceFile(null);
-      setMapping({ firstRow: '2', g1: '', g2: '', g3: '', g4: '', g5: '', g6: '', nameCol: '', artCol: '', priceCol: '', etmCodeCol: '' });
+      setMapping({ firstRow: '2', g1: '', g2: '', g3: '', g4: '', g5: '', g6: '', nameCol: '', artCol: '', priceCol: '', etmCodeCol: '', imageUrlCol: '', externalUrlCol: '' });
       loadPricelists();
     } catch { toast.error('Ошибка замены'); }
     finally { setUploading(false); }
@@ -1285,6 +1289,14 @@ export default function AdminPage() {
                     <label>Код ЭТМ</label>
                     <input value={mapping.etmCodeCol} onChange={e => setMapping(m => ({ ...m, etmCodeCol: normalizeCol(e.target.value) }))} placeholder="G или 7" />
                   </div>
+                  <div className="form-col">
+                    <label>Фото (URL)</label>
+                    <input value={mapping.imageUrlCol} onChange={e => setMapping(m => ({ ...m, imageUrlCol: normalizeCol(e.target.value) }))} placeholder="H или 8" />
+                  </div>
+                  <div className="form-col">
+                    <label>Ссылка</label>
+                    <input value={mapping.externalUrlCol} onChange={e => setMapping(m => ({ ...m, externalUrlCol: normalizeCol(e.target.value) }))} placeholder="I или 9" />
+                  </div>
                 </div>
                 <div className="categories-bg">
                   <div className="categories-bg-title">Столбцы категорий (плоский формат)</div>
@@ -1530,6 +1542,14 @@ export default function AdminPage() {
                 <label>Код ЭТМ</label>
                 <input value={mapping.etmCodeCol} onChange={e => setMapping(m => ({ ...m, etmCodeCol: normalizeCol(e.target.value) }))} placeholder="G или 7" />
               </div>
+              <div className="form-col">
+                <label>Фото (URL)</label>
+                <input value={mapping.imageUrlCol} onChange={e => setMapping(m => ({ ...m, imageUrlCol: normalizeCol(e.target.value) }))} placeholder="H или 8" />
+              </div>
+              <div className="form-col">
+                <label>Ссылка</label>
+                <input value={mapping.externalUrlCol} onChange={e => setMapping(m => ({ ...m, externalUrlCol: normalizeCol(e.target.value) }))} placeholder="I или 9" />
+              </div>
             </div>
             <div className="modal-actions">
               <button className="btn-cancel" onClick={() => setReplaceTarget(null)}>Отмена</button>
@@ -1770,6 +1790,16 @@ export default function AdminPage() {
                     <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Код ЭТМ</div>
                     <input className="admin-input" placeholder="напр. G" value={tileMapping.etmCodeCol}
                       onChange={e => setTileMapping(m => ({ ...m, etmCodeCol: normalizeCol(e.target.value) }))} style={{ width: '100%' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Фото (URL)</div>
+                    <input className="admin-input" placeholder="напр. H" value={tileMapping.imageUrlCol}
+                      onChange={e => setTileMapping(m => ({ ...m, imageUrlCol: normalizeCol(e.target.value) }))} style={{ width: '100%' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Ссылка</div>
+                    <input className="admin-input" placeholder="напр. I" value={tileMapping.externalUrlCol}
+                      onChange={e => setTileMapping(m => ({ ...m, externalUrlCol: normalizeCol(e.target.value) }))} style={{ width: '100%' }} />
                   </div>
                   <div>
                     <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Аксессуары с</div>
