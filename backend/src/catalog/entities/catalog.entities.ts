@@ -105,7 +105,12 @@ export class CatalogTile {
   @Column() name: string;
   @Column({ default: '⚡' }) icon: string;
   @Column({ nullable: true }) image_path: string;
+  /** Legacy flag — kept for backward compat; new code uses width/height */
   @Column({ default: false }) is_large: boolean;
+  /** Tile width in grid cells: 1 or 2. Combined with height for 1×1, 2×1, 1×2, 2×2 layouts. */
+  @Column({ default: 1 }) width: number;
+  /** Tile height in grid cells: 1 or 2 */
+  @Column({ default: 1 }) height: number;
   @Column({ default: 0 }) sort_order: number;
   @Column({ default: true }) is_active: boolean;
   @Column({ type: 'jsonb', default: '[]' }) filters: any[];

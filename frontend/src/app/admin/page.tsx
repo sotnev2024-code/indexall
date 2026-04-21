@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 import { catalogApi, adminApi, templatesApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
+import TilesManagerModal from '@/components/TilesManagerModal';
 
 type Tab = 'pricelists' | 'base' | 'templates' | 'users' | 'conversions' | 'tariffs' | 'stats' | 'tiles';
 
@@ -382,26 +383,18 @@ export default function AdminPage() {
     const slug = slugify(name);
     setManagedTiles(prev => [...prev, {
       _isNew: true, _tempId: Date.now(),
-      slug, name, icon: '', is_large: false, is_active: true,
+      slug, name, icon: '', width: 1, height: 1, is_large: false, is_active: true,
       sort_order: prev.length, products_count: 0,
     }]);
     setNewTileName('');
-  }
-
-  function moveTile(idx: number, dir: -1 | 1) {
-    const target = idx + dir;
-    if (target < 0 || target >= managedTiles.length) return;
-    const arr = [...managedTiles];
-    [arr[idx], arr[target]] = [arr[target], arr[idx]];
-    setManagedTiles(arr);
   }
 
   function removeManagedTile(idx: number) {
     setManagedTiles(prev => prev.filter((_, i) => i !== idx));
   }
 
-  function toggleManagedSize(idx: number) {
-    setManagedTiles(prev => prev.map((t, i) => i === idx ? { ...t, is_large: !t.is_large } : t));
+  function setManagedSize(idx: number, w: number, h: number) {
+    setManagedTiles(prev => prev.map((t, i) => i === idx ? { ...t, width: w, height: h, is_large: w === 2 && h === 1 } : t));
   }
 
   function toggleManagedActive(idx: number) {
@@ -412,13 +405,24 @@ export default function AdminPage() {
     setManagedTiles(prev => prev.map((t, i) => i === idx ? { ...t, name } : t));
   }
 
+  function reorderManagedTiles(fromIdx: number, toIdx: number) {
+    setManagedTiles(prev => {
+      const arr = [...prev];
+      const [moved] = arr.splice(fromIdx, 1);
+      arr.splice(toIdx, 0, moved);
+      return arr;
+    });
+  }
+
   async function saveTilesManager() {
     try {
       // Create new tiles
       for (const t of managedTiles.filter(t => t._isNew)) {
         await catalogApi.createTile({
           slug: t.slug, name: t.name, icon: t.icon || '',
-          is_large: t.is_large, is_active: t.is_active,
+          width: t.width ?? 1, height: t.height ?? 1,
+          is_large: (t.width === 2 && t.height === 1),
+          is_active: t.is_active,
           sort_order: managedTiles.indexOf(t), filters: [],
         });
       }
@@ -434,9 +438,19 @@ export default function AdminPage() {
         const t = managedTiles[i];
         if (t._isNew) continue;
         const orig = tiles.find(o => o.id === t.id);
-        if (!orig || orig.name !== t.name || orig.is_large !== t.is_large || orig.is_active !== t.is_active || orig.sort_order !== i) {
+        const w = t.width ?? 1;
+        const h = t.height ?? 1;
+        if (!orig
+          || orig.name !== t.name
+          || (orig.width ?? 1) !== w
+          || (orig.height ?? 1) !== h
+          || orig.is_active !== t.is_active
+          || orig.sort_order !== i
+        ) {
           await catalogApi.updateTile(t.id, {
-            name: t.name, is_large: t.is_large, is_active: t.is_active, sort_order: i,
+            name: t.name, width: w, height: h,
+            is_large: (w === 2 && h === 1),
+            is_active: t.is_active, sort_order: i,
             slug: t.slug, icon: t.icon,
           });
         }
@@ -1561,92 +1575,22 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* ── Modal: Tiles manager ── */}
+      {/* ── Modal: Tiles manager (drag-and-drop puzzle grid) ── */}
       {tilesManagerOpen && (
-        <div className="modal-overlay" onClick={() => setTilesManagerOpen(false)}>
-          <div className="modal-box" style={{ maxWidth: 600, width: '90vw', maxHeight: '85vh', overflowY: 'auto' }}
-            onClick={e => e.stopPropagation()}>
-            <div className="modal-title">Управление плитками</div>
-            <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
-              Добавляйте, удаляйте, меняйте порядок и размер плиток каталога.
-            </div>
-
-            {/* Tile list */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
-              {managedTiles.map((t, idx) => (
-                <div key={t.id || t._tempId} style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px',
-                  background: t.is_active ? '#fff' : '#f9f9f9',
-                  opacity: t.is_active ? 1 : 0.5,
-                }}>
-                  {/* Arrows */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <button onClick={() => moveTile(idx, -1)} disabled={idx === 0}
-                      style={{ background: 'none', border: 'none', cursor: idx === 0 ? 'default' : 'pointer', fontSize: 14, color: idx === 0 ? '#ddd' : '#666', padding: 0, lineHeight: 1 }}>
-                      ▲
-                    </button>
-                    <button onClick={() => moveTile(idx, 1)} disabled={idx === managedTiles.length - 1}
-                      style={{ background: 'none', border: 'none', cursor: idx === managedTiles.length - 1 ? 'default' : 'pointer', fontSize: 14, color: idx === managedTiles.length - 1 ? '#ddd' : '#666', padding: 0, lineHeight: 1 }}>
-                      ▼
-                    </button>
-                  </div>
-
-                  {/* Name (editable) */}
-                  <input className="admin-input" value={t.name} style={{ flex: 1, fontSize: 13, fontWeight: 600 }}
-                    onChange={e => updateManagedName(idx, e.target.value)} />
-
-                  {/* Size toggle */}
-                  <button onClick={() => toggleManagedSize(idx)}
-                    title={t.is_large ? 'Широкая плитка' : 'Обычная плитка'}
-                    style={{
-                      background: t.is_large ? '#f5c800' : '#eee', color: t.is_large ? '#fff' : '#999',
-                      border: 'none', borderRadius: 4, padding: '4px 8px', fontSize: 11,
-                      cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap',
-                    }}>
-                    {t.is_large ? 'Широкая' : 'Обычная'}
-                  </button>
-
-                  {/* Active toggle */}
-                  <button onClick={() => toggleManagedActive(idx)}
-                    style={{
-                      background: t.is_active ? '#22c55e' : '#ccc', color: '#fff',
-                      border: 'none', borderRadius: 4, padding: '4px 8px', fontSize: 11,
-                      cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap',
-                    }}>
-                    {t.is_active ? 'Видна' : 'Скрыта'}
-                  </button>
-
-                  {/* Delete */}
-                  <button onClick={() => removeManagedTile(idx)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: '#e55', padding: '0 4px' }}>
-                    ✕
-                  </button>
-                </div>
-              ))}
-              {managedTiles.length === 0 && (
-                <div style={{ textAlign: 'center', padding: 20, color: 'var(--muted)', fontSize: 13 }}>Нет плиток</div>
-              )}
-            </div>
-
-            {/* Add new */}
-            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-              <input className="admin-input" placeholder="Название новой плитки" value={newTileName}
-                onChange={e => setNewTileName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && addManagedTile()}
-                style={{ flex: 1 }} />
-              <button className="btn-primary" style={{ padding: '6px 16px', whiteSpace: 'nowrap' }}
-                onClick={addManagedTile} disabled={!newTileName.trim()}>
-                + Добавить
-              </button>
-            </div>
-
-            <div className="modal-actions">
-              <button className="btn-cancel" onClick={() => setTilesManagerOpen(false)}>Отмена</button>
-              <button className="btn-primary" onClick={saveTilesManager}>Сохранить</button>
-            </div>
-          </div>
-        </div>
+        <TilesManagerModal
+          tiles={managedTiles}
+          newTileName={newTileName}
+          setNewTileName={setNewTileName}
+          onAdd={addManagedTile}
+          onRemove={removeManagedTile}
+          onSetSize={setManagedSize}
+          onToggleActive={toggleManagedActive}
+          onUpdateName={updateManagedName}
+          onReorder={reorderManagedTiles}
+          onClose={() => setTilesManagerOpen(false)}
+          onSave={saveTilesManager}
+          onUploadImage={handleUploadTileImage}
+        />
       )}
 
       {/* ── Modal: Edit tile settings ── */}

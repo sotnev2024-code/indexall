@@ -81,6 +81,11 @@ export class CatalogService implements OnModuleInit {
       }
     }
 
+    // One-time migration: is_large=true → width=2, height=1 (for tiles created before width/height existed)
+    try {
+      await this.tileRepo.query(`UPDATE catalog_tiles SET width=2, height=1 WHERE is_large = true AND (width IS NULL OR width = 1) AND (height IS NULL OR height = 1)`);
+    } catch { /* columns may not exist yet on first run; synchronize will create them */ }
+
     // Create GIN index on tile_products.attributes for fast JSONB filtering
     try {
       await this.tileProductRepo.query(

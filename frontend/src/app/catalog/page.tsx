@@ -718,15 +718,20 @@ function CatalogPageInner() {
               </>
             ) : (
               <div className="category-tiles-ref" style={{ maxWidth: 900, margin: '0 auto' }}>
-                {tiles.map((tile, idx) => (
-                  <div key={tile.id} className={`category-tile-ref${tile.is_large || idx === 0 ? ' large' : ''}`}
-                    onClick={() => selectCategorySlug(tile.slug)}>
-                    {tile.image_path
-                      ? <img src={`${process.env.NEXT_PUBLIC_API_URL}/uploads/${tile.image_path.split(/[\\/]/).pop()}`} alt={tile.name} className="category-tile-img" />
-                      : <div className="category-tile-icon" style={{ fontSize: 36 }}>{tile.icon}</div>}
-                    <div className="category-tile-name-ref">{tile.name}</div>
-                  </div>
-                ))}
+                {tiles.map((tile) => {
+                  const w = tile.width ?? (tile.is_large ? 2 : 1);
+                  const h = tile.height ?? 1;
+                  return (
+                    <div key={tile.id} className="category-tile-ref"
+                      style={{ gridColumn: `span ${w}`, gridRow: `span ${h}`, aspectRatio: 'auto' }}
+                      onClick={() => selectCategorySlug(tile.slug)}>
+                      {tile.image_path
+                        ? <img src={`${process.env.NEXT_PUBLIC_API_URL}/uploads/${tile.image_path.split(/[\\/]/).pop()}`} alt={tile.name} className="category-tile-img" />
+                        : <div className="category-tile-icon" style={{ fontSize: 36 }}>{tile.icon}</div>}
+                      <div className="category-tile-name-ref">{tile.name}</div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -769,23 +774,28 @@ function CatalogPageInner() {
             {mode === 'filter' && (
               !selectedSlug ? (
                 <div className="category-tiles-ref">
-                  {tiles.map((tile, idx) => (
-                    <div
-                      key={tile.id}
-                      className={`category-tile-ref${tile.is_large || idx === 0 ? ' large' : ''}`}
-                      onClick={() => selectCategorySlug(tile.slug)}
-                    >
-                      {tile.image_path
-                        ? <img
-                            src={`${process.env.NEXT_PUBLIC_API_URL}/uploads/${tile.image_path.split(/[\\/]/).pop()}`}
-                            alt={tile.name}
-                            className="category-tile-img"
-                          />
-                        : <div className="category-tile-icon" style={{ fontSize: 36 }}>{tile.icon}</div>
-                      }
-                      <div className="category-tile-name-ref">{tile.name}</div>
-                    </div>
-                  ))}
+                  {tiles.map((tile) => {
+                    const w = tile.width ?? (tile.is_large ? 2 : 1);
+                    const h = tile.height ?? 1;
+                    return (
+                      <div
+                        key={tile.id}
+                        className="category-tile-ref"
+                        style={{ gridColumn: `span ${w}`, gridRow: `span ${h}`, aspectRatio: 'auto' }}
+                        onClick={() => selectCategorySlug(tile.slug)}
+                      >
+                        {tile.image_path
+                          ? <img
+                              src={`${process.env.NEXT_PUBLIC_API_URL}/uploads/${tile.image_path.split(/[\\/]/).pop()}`}
+                              alt={tile.name}
+                              className="category-tile-img"
+                            />
+                          : <div className="category-tile-icon" style={{ fontSize: 36 }}>{tile.icon}</div>
+                        }
+                        <div className="category-tile-name-ref">{tile.name}</div>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="filter-panel">
