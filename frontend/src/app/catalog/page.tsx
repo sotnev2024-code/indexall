@@ -65,8 +65,9 @@ function CatalogPageInner() {
   const [search, setSearch] = useState('');
   const [globalSearchResults, setGlobalSearchResults] = useState<any[]>([]);
   const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
-  // ETM prices for visible product rows (keyed by article)
-  const [rowEtmPrices, setRowEtmPrices] = useState<Record<string, number | null>>({});
+  // ETM data (price + term) for visible product rows, keyed by article/etm_code.
+  // Price comes from batch load (debounced); term is added when user expands the card.
+  const [rowEtmData, setRowEtmData] = useState<Record<string, { price: number | null; term: string | null }>>({});
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [showSelectSheet, setShowSelectSheet] = useState(false);
   const addingRef = useRef(false); // prevent double-click race
@@ -340,18 +341,24 @@ function CatalogPageInner() {
       .map(r => ({ article: r.article, etmCode: r.etm_code }))
       .filter(it => {
         const key = it.article || it.etmCode;
-        return key && rowEtmPrices[key] === undefined;
+        return key && rowEtmData[key] === undefined;
       });
     if (items.length === 0) return;
 
     const t = setTimeout(async () => {
       try {
         const { data } = await storesApi.getEtmPricesByItems(items);
-        setRowEtmPrices(prev => ({ ...prev, ...data }));
+        setRowEtmData(prev => {
+          const next = { ...prev };
+          for (const [k, price] of Object.entries(data)) {
+            next[k] = { price: price as number | null, term: next[k]?.term ?? null };
+          }
+          return next;
+        });
       } catch { /* silent — ETM may be unavailable */ }
     }, 3500);
     return () => clearTimeout(t);
-  }, [globalSearchResults, filterProducts, products, mode, search, rowEtmPrices]);
+  }, [globalSearchResults, filterProducts, products, mode, search, rowEtmData]);
 
   function getDisplayedFilterProducts() {
     // Parametric filtering is handled on the backend; here we only apply the text search bar
@@ -397,12 +404,19 @@ function CatalogPageInner() {
     setAccView('closed');
     setAccSelectedType(null);
     setAccEtm({});
-    if (!isToggleOff && p.article) {
+    const key = (p.article || p.etm_code || '').trim();
+    if (!isToggleOff && key) {
       setEtmLoading(true);
-      storesApi.getEtmPricesWithTerms([p.article])
+      storesApi.getEtmPricesWithTerms([p.article || p.etm_code])
         .then(({ data }) => {
-          const entry = data[p.article];
-          setEtmData(entry ? { price: entry.price, term: entry.term || '' } : null);
+          const entry = data[p.article || p.etm_code];
+          if (entry) {
+            setEtmData({ price: entry.price, term: entry.term || '' });
+            // Persist into row-level map so the collapsed row shows the same price+term
+            setRowEtmData(prev => ({ ...prev, [key]: { price: entry.price, term: entry.term || null } }));
+          } else {
+            setEtmData(null);
+          }
         })
         .catch(() => {})
         .finally(() => setEtmLoading(false));
@@ -477,7 +491,9 @@ function CatalogPageInner() {
     const pAttrs = p.attributes || {};
     const pAttrEntries = Object.entries(pAttrs).filter(([, v]) => v);
     const key = (p.article || p.etm_code || '').trim();
-    const etmPrice = key ? rowEtmPrices[key] : undefined;
+    const etmEntry = key ? rowEtmData[key] : undefined;
+    const etmPrice = etmEntry?.price;
+    const etmTerm = etmEntry?.term;
     return (
       <div key={`${keyPrefix}${p.id}-${i}`}>
         <div className={`product-item-ref${selectedProduct?.id === p.id ? ' selected' : ''}`} onClick={() => selectProduct(p)}>
@@ -503,10 +519,13 @@ function CatalogPageInner() {
               </div>
             )}
           </div>
-          {/* ETM price inline */}
+          {/* ETM price + term inline */}
           {etmPrice != null && etmPrice > 0 && (
-            <div style={{ fontSize: 13, fontWeight: 600, marginRight: 8, whiteSpace: 'nowrap', color: 'var(--text)' }}>
-              {etmPrice.toLocaleString('ru-RU')} ₽
+            <div style={{ marginRight: 8, whiteSpace: 'nowrap', textAlign: 'right', fontSize: 12, lineHeight: 1.3 }}>
+              <div style={{ fontWeight: 600, color: 'var(--text)' }}>Цена ЭТМ: {etmPrice.toLocaleString('ru-RU')} ₽</div>
+              {etmTerm && (
+                <div style={{ color: 'var(--muted)' }}>Срок: {etmTerm}</div>
+              )}
             </div>
           )}
           {/* External link */}
