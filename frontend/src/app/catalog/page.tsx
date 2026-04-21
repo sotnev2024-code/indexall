@@ -68,6 +68,10 @@ function CatalogPageInner() {
   // ETM data (price + term) for visible product rows, keyed by article/etm_code.
   // Price comes from batch load (debounced); term is added when user expands the card.
   const [rowEtmData, setRowEtmData] = useState<Record<string, { price: number | null; term: string | null }>>({});
+  // Ref mirror of rowEtmData so the debounced effect can read the latest state
+  // without having rowEtmData in deps (which would reset the timer on every fetch).
+  const rowEtmDataRef = useRef<Record<string, { price: number | null; term: string | null }>>({});
+  useEffect(() => { rowEtmDataRef.current = rowEtmData; }, [rowEtmData]);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [showSelectSheet, setShowSelectSheet] = useState(false);
   const addingRef = useRef(false); // prevent double-click race
@@ -328,6 +332,8 @@ function CatalogPageInner() {
   //   - filter mode    → tile products with active filters
   // ETM /price allows up to 50 articles per batch, so we cap at first 50.
   // 3.5s debounce: avoids firing on every keystroke, filter toggle, or folder click.
+  // Note: rowEtmData is intentionally NOT in deps — otherwise a completed fetch would
+  // clear the timer on the next render. We read it via ref at fire time instead.
   useEffect(() => {
     const rows =
       search.trim().length >= 2 ? globalSearchResults :
@@ -335,17 +341,20 @@ function CatalogPageInner() {
       filterProducts;
     if (!rows || rows.length === 0) return;
 
-    // Take first 50 rows that have an article/etm_code AND haven't been fetched yet
-    const items = rows
+    const allItems = rows
       .slice(0, 50)
       .map(r => ({ article: r.article, etmCode: r.etm_code }))
-      .filter(it => {
-        const key = it.article || it.etmCode;
-        return key && rowEtmData[key] === undefined;
-      });
-    if (items.length === 0) return;
+      .filter(it => it.article || it.etmCode);
+    if (allItems.length === 0) return;
 
     const t = setTimeout(async () => {
+      // At fire time, filter out items already fetched (via ref to get fresh state)
+      const current = rowEtmDataRef.current;
+      const items = allItems.filter(it => {
+        const key = it.article || it.etmCode;
+        return key && current[key] === undefined;
+      });
+      if (items.length === 0) return;
       try {
         const { data } = await storesApi.getEtmPricesByItems(items);
         setRowEtmData(prev => {
@@ -358,7 +367,7 @@ function CatalogPageInner() {
       } catch { /* silent — ETM may be unavailable */ }
     }, 3500);
     return () => clearTimeout(t);
-  }, [globalSearchResults, filterProducts, products, mode, search, rowEtmData]);
+  }, [globalSearchResults, filterProducts, products, mode, search]);
 
   function getDisplayedFilterProducts() {
     // Parametric filtering is handled on the backend; here we only apply the text search bar
