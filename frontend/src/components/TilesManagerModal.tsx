@@ -59,7 +59,7 @@ function SortableTile({
     gridColumn: `span ${w}`,
     gridRow: `span ${h}`,
     opacity: isDragging ? 0.5 : (tile.is_active ? 1 : 0.55),
-    zIndex: isDragging ? 100 : 1,
+    zIndex: isDragging ? 100 : 'auto',
   };
 
   const imgSrc = getImageUrl(tile.image_path);
@@ -77,8 +77,6 @@ function SortableTile({
         background: imgSrc ? '#fff' : '#eee',
         cursor: isDragging ? 'grabbing' : 'grab',
         boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,0.2)' : '0 1px 3px rgba(0,0,0,0.08)',
-        aspectRatio: w === h ? '1 / 1' : (w === 2 && h === 1) ? '2.1 / 1' : (w === 1 && h === 2) ? '1 / 2.1' : undefined,
-        minHeight: w === 1 && h === 1 ? 110 : undefined,
       }}
       className="tm-tile"
     >
@@ -248,12 +246,13 @@ export default function TilesManagerModal(props: Props) {
               <div style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(4, 1fr)',
-                gridAutoRows: '110px',
+                gridAutoRows: '130px',
+                gridAutoFlow: 'dense',
                 gap: 8,
                 background: '#E3E3E3',
                 padding: 12,
                 borderRadius: 8,
-                minHeight: 220,
+                minHeight: 260,
               }}>
                 {tiles.map((t, idx) => (
                   <SortableTile
