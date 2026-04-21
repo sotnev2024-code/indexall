@@ -320,24 +320,38 @@ function CatalogPageInner() {
     return () => clearTimeout(t);
   }, [search]);
 
-  // Fetch ETM prices for visible product rows (search results + filter products).
-  // Heavy debounce (2.5s) — don't hit ETM on every keystroke. Skips articles already fetched.
+  // Fetch ETM prices for the first 50 visible product rows after user stops interacting.
+  // Picks the correct row set based on current view:
+  //   - search active  → global search results
+  //   - manuf mode     → products of selected category
+  //   - filter mode    → tile products with active filters
+  // ETM /price allows up to 50 articles per batch, so we cap at first 50.
+  // 3.5s debounce: avoids firing on every keystroke, filter toggle, or folder click.
   useEffect(() => {
-    const rows = search.trim().length >= 2 ? globalSearchResults : filterProducts;
+    const rows =
+      search.trim().length >= 2 ? globalSearchResults :
+      mode === 'manuf' ? products :
+      filterProducts;
     if (!rows || rows.length === 0) return;
+
+    // Take first 50 rows that have an article/etm_code AND haven't been fetched yet
     const items = rows
+      .slice(0, 50)
       .map(r => ({ article: r.article, etmCode: r.etm_code }))
-      .filter(it => (it.article || it.etmCode) && rowEtmPrices[(it.article || it.etmCode)!] === undefined);
+      .filter(it => {
+        const key = it.article || it.etmCode;
+        return key && rowEtmPrices[key] === undefined;
+      });
     if (items.length === 0) return;
 
     const t = setTimeout(async () => {
       try {
-        const { data } = await storesApi.getEtmPrices(items.map(it => it.article || it.etmCode!).filter(Boolean));
+        const { data } = await storesApi.getEtmPricesByItems(items);
         setRowEtmPrices(prev => ({ ...prev, ...data }));
       } catch { /* silent — ETM may be unavailable */ }
-    }, 2500);
+    }, 3500);
     return () => clearTimeout(t);
-  }, [globalSearchResults, filterProducts, search, rowEtmPrices]);
+  }, [globalSearchResults, filterProducts, products, mode, search, rowEtmPrices]);
 
   function getDisplayedFilterProducts() {
     // Parametric filtering is handled on the backend; here we only apply the text search bar
