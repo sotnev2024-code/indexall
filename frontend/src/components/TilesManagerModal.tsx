@@ -4,12 +4,10 @@ import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragEn
 import { SortableContext, useSortable, rectSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
-function getBackendOrigin(): string {
-  try {
-    return new URL(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api').origin;
-  } catch {
-    return 'http://localhost:4000';
-  }
+function getImageUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const filename = String(path).split(/[\\/]/).pop();
+  return `${process.env.NEXT_PUBLIC_API_URL}/uploads/${filename}`;
 }
 
 interface Props {
@@ -64,9 +62,7 @@ function SortableTile({
     zIndex: isDragging ? 100 : 1,
   };
 
-  const imgSrc = tile.image_path
-    ? `${getBackendOrigin()}/api/uploads/${String(tile.image_path).split(/[\\/]/).pop()}`
-    : null;
+  const imgSrc = getImageUrl(tile.image_path);
 
   const isActiveSize = (sw: number, sh: number) => w === sw && h === sh;
 
