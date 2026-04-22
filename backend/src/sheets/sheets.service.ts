@@ -58,10 +58,15 @@ export class SheetsService {
   async getSheetWithRows(sheetId: number) {
     const sheet = await this.sheetsRepo.findOne({
       where: { id: sheetId },
-      relations: ['rows'],
     });
     if (!sheet) throw new NotFoundException('Лист не найден');
-    const total = (sheet.rows || []).reduce(
+    // Explicit ordering — TypeORM's eager `relations` fetch doesn't guarantee order,
+    // which caused rows to jump around between saves/reloads.
+    const rows = await this.rowsRepo.find({
+      where: { sheetId },
+      order: { sort_order: 'ASC', id: 'ASC' },
+    });
+    const total = rows.reduce(
       (sum, r) =>
         sum +
         parseFloat(r.price || '0') *
@@ -69,7 +74,7 @@ export class SheetsService {
           parseFloat(r.coef || '1'),
       0,
     );
-    return { ...sheet, total };
+    return { ...sheet, rows, total };
   }
 
   async updateSheet(sheetId: number, userId: number, data: Partial<Sheet>) {
@@ -134,8 +139,9 @@ export class SheetsService {
     await this.checkSheetOwner(sheetId, userId);
     await this.rowsRepo.delete({ sheetId });
     if (rows?.length) {
-      const toSave = rows.map((r) => ({
+      const toSave = rows.map((r, i) => ({
         sheetId,
+        sort_order: i,
         name: r.name || '',
         brand: r.brand || '',
         article: r.article || '',

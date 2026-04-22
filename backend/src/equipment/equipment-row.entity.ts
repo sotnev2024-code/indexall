@@ -21,6 +21,10 @@ export class EquipmentRow {
   @JoinColumn({ name: 'sheetId' })
   sheet: Sheet;
 
+  /** Position in the sheet — stable across saves/loads so rows don't jump around. */
+  @Column({ default: 0 })
+  sort_order: number;
+
   @Column()
   name: string;
 

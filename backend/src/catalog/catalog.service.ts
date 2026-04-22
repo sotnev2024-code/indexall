@@ -263,17 +263,36 @@ export class CatalogService implements OnModuleInit {
   }
 
   async replacePriceList(id: number, file: Express.Multer.File, mapping: PriceListMapping, uploadedBy: number) {
-    await this.plRepo.update(id, { status: PriceListStatus.ARCHIVE, archived_at: new Date() });
     const old = await this.plRepo.findOne({ where: { id } });
+    if (!old) throw new NotFoundException('Прайс-лист не найден');
+    const manufId = old.manufacturer_id;
+
+    // Delete all products belonging to old price list categories + uncategorized products
+    // of this manufacturer, otherwise re-uploading the same file creates duplicate rows.
+    const oldCats = await this.catRepo.find({ where: { price_list_id: id } });
+    if (oldCats.length > 0) {
+      const catIds = oldCats.map(c => c.id);
+      await this.prodRepo.delete({ category_id: In(catIds) });
+      await this.catRepo.delete({ price_list_id: id });
+    }
+    // Tree-format price lists store products with category_id=null — clean those too
+    await this.prodRepo.createQueryBuilder()
+      .delete()
+      .where('manufacturer_id = :manufId', { manufId })
+      .andWhere('category_id IS NULL')
+      .execute();
+
+    // Archive old record and create new one pointing to same manufacturer
+    await this.plRepo.update(id, { status: PriceListStatus.ARCHIVE, archived_at: new Date() });
     const pl = await this.plRepo.save({
-      manufacturer_id: old.manufacturer_id,
+      manufacturer_id: manufId,
       file_name: this.fixFilenameEncoding(file.originalname),
       file_path: file.path,
       status: PriceListStatus.PROCESSING,
       mapping,
       uploaded_by: uploadedBy,
     });
-    this.parseXlsxAsync(pl.id, file.path, mapping, old.manufacturer_id).catch(console.error);
+    this.parseXlsxAsync(pl.id, file.path, mapping, manufId).catch(console.error);
     return pl;
   }
 
@@ -639,7 +658,7 @@ export class CatalogService implements OnModuleInit {
       const price = rawPrice ? parseFloat(rawPrice) : null;
       const etmCode = etmCol >= 0 ? String(row[etmCol] || '').trim() : '';
       const imageUrl = imgCol >= 0 ? String(row[imgCol] || '').trim() : '';
-      const externalUrl = urlCol >= 0 ? String(row[urlCol] || '').trim() : '';
+      const externalUrl = urlCol >= 0 ? this.normalizeUrl(String(row[urlCol] || '')) : null;
       await this.prodRepo.save({
         manufacturer_id: manufacturerId,
         category_id: parentId,
@@ -681,7 +700,7 @@ export class CatalogService implements OnModuleInit {
       if (productName || article) {
         const price = rawPrice ? parseFloat(rawPrice) : null;
         const imageUrl = imgCol >= 0 ? String(row[imgCol] || '').trim() : '';
-        const externalUrl = urlCol >= 0 ? String(row[urlCol] || '').trim() : '';
+        const externalUrl = urlCol >= 0 ? this.normalizeUrl(String(row[urlCol] || '')) : null;
         await this.prodRepo.save({
           manufacturer_id: manufacturerId,
           category_id: currentCatId,
@@ -722,6 +741,19 @@ export class CatalogService implements OnModuleInit {
       currentCatId = catCache.get(categoryName)!;
     }
     console.log(`Parsed ${productCount} products, ${catCount} categories (tree format) for price list ${plId}`);
+  }
+
+  /** Normalize external URL from Excel. Prefix https:// when scheme missing.
+   *  Returns null if value is clearly not a URL (no dot, no slash, just random text). */
+  private normalizeUrl(raw: string): string | null {
+    const s = String(raw || '').trim();
+    if (!s) return null;
+    // Already has scheme
+    if (/^https?:\/\//i.test(s)) return s;
+    // Looks like a URL (has dot + no spaces) → assume https
+    if (/\./.test(s) && !/\s/.test(s)) return `https://${s}`;
+    // Not a URL — discard to prevent things like "info" being treated as a path
+    return null;
   }
 
   private buildTree(categories: CatalogCategory[], parentId: number | null): any[] {

@@ -453,16 +453,23 @@ function CatalogPageInner() {
         return;
       }
 
-      // Try to fetch live ETM price + delivery term
+      // Prefer already-loaded ETM data from the row list (avoids a redundant request).
+      // Fall back to a fresh lookup only when the row hasn't been fetched yet.
+      const etmKey = (article || product.etm_code || '').trim();
       let etmPrice: number | null = null;
       let etmTerm = 'нет';
-      if (article) {
+      const cached = etmKey ? rowEtmDataRef.current[etmKey] : undefined;
+      if (cached?.price != null && cached.price > 0) {
+        etmPrice = cached.price;
+        etmTerm = cached.term || 'нет';
+      } else if (etmKey) {
         try {
-          const { data: etm } = await storesApi.getEtmPricesWithTerms([article]);
-          const entry = etm[article];
+          const { data: etm } = await storesApi.getEtmPricesWithTerms([article || product.etm_code]);
+          const entry = etm[article || product.etm_code];
           if (entry) {
             etmPrice = entry.price;
             etmTerm = entry.term || 'нет';
+            setRowEtmData(prev => ({ ...prev, [etmKey]: { price: entry.price, term: entry.term || null } }));
           }
         } catch { /* silent — leave defaults */ }
       }
@@ -485,13 +492,41 @@ function CatalogPageInner() {
     finally { addingRef.current = false; }
   }
 
-  const filteredManufProducts = search
-    ? products.filter(p =>
-        p.name.toLowerCase().includes(search.toLowerCase()) ||
-        (p.article || '').toLowerCase().includes(search.toLowerCase()))
-    : products;
+  // Deduplicate by (article, brand) — duplicates occur when the same price list
+  // was uploaded twice or Excel has repeated rows. Prefer row with external_url set.
+  /** Return a safe absolute URL or null. Guards against stored paths like "info"
+   *  being resolved relatively (which would open service.indexall.ru/info). */
+  function safeUrl(raw: string | null | undefined): string | null {
+    const s = String(raw || '').trim();
+    if (!s) return null;
+    if (/^https?:\/\//i.test(s)) return s;
+    if (/\./.test(s) && !/\s/.test(s)) return `https://${s}`;
+    return null;
+  }
 
-  const displayedFilterProducts = getDisplayedFilterProducts();
+  function dedupeProducts(arr: any[]): any[] {
+    const seen = new Map<string, any>();
+    for (const p of arr) {
+      const key = `${(p.article || '').toLowerCase()}|${(p.manufacturer?.name || p.brand || '').toLowerCase()}`;
+      if (!key || key === '|') { seen.set(`noart-${p.id}`, p); continue; }
+      const existing = seen.get(key);
+      if (!existing) seen.set(key, p);
+      // If new copy has external_url/image_url and the existing one doesn't — prefer the new one
+      else if (!existing.external_url && p.external_url) seen.set(key, p);
+      else if (!existing.image_url && p.image_url) seen.set(key, p);
+    }
+    return [...seen.values()];
+  }
+
+  const filteredManufProducts = dedupeProducts(
+    search
+      ? products.filter(p =>
+          p.name.toLowerCase().includes(search.toLowerCase()) ||
+          (p.article || '').toLowerCase().includes(search.toLowerCase()))
+      : products
+  );
+
+  const displayedFilterProducts = dedupeProducts(getDisplayedFilterProducts());
   const selectedTile = tiles.find(t => t.slug === selectedSlug);
 
   // ── Inline product detail ──────────────────────────────────
@@ -538,17 +573,21 @@ function CatalogPageInner() {
             </div>
           )}
           {/* External link */}
-          {p.external_url && (
-            <a href={p.external_url} target="_blank" rel="noopener noreferrer"
-              onClick={e => e.stopPropagation()}
-              style={{
-                background: '#fff', color: '#1976d2', border: '1px solid #1976d2',
-                borderRadius: 4, padding: '4px 10px', fontSize: 12, fontWeight: 500,
-                textDecoration: 'none', marginRight: 6, whiteSpace: 'nowrap',
-              }}>
-              Сайт
-            </a>
-          )}
+          {(() => {
+            const href = safeUrl(p.external_url);
+            if (!href) return null;
+            return (
+              <a href={href} target="_blank" rel="noopener noreferrer"
+                onClick={e => e.stopPropagation()}
+                style={{
+                  background: '#fff', color: '#1976d2', border: '1px solid #1976d2',
+                  borderRadius: 4, padding: '4px 10px', fontSize: 12, fontWeight: 500,
+                  textDecoration: 'none', marginRight: 6, whiteSpace: 'nowrap',
+                }}>
+                Сайт
+              </a>
+            );
+          })()}
           <button className="btn-add-to-list" onClick={e => { e.stopPropagation(); addToSheet(p); }}>+ Добавить в лист</button>
         </div>
         {inlineDetail(p)}
@@ -577,17 +616,21 @@ function CatalogPageInner() {
           {selectedProduct.price && (
             <div>Цена каталога: <strong>{selectedProduct.price} ₽</strong></div>
           )}
-          {selectedProduct.external_url && (
-            <a href={selectedProduct.external_url} target="_blank" rel="noopener noreferrer"
-              onClick={e => e.stopPropagation()}
-              style={{
-                background: '#1976d2', color: '#fff', borderRadius: 4,
-                padding: '5px 12px', fontSize: 12, fontWeight: 500,
-                textDecoration: 'none', display: 'inline-block', width: 'fit-content', marginTop: 2,
-              }}>
-              Открыть на сайте →
-            </a>
-          )}
+          {(() => {
+            const href = safeUrl(selectedProduct.external_url);
+            if (!href) return null;
+            return (
+              <a href={href} target="_blank" rel="noopener noreferrer"
+                onClick={e => e.stopPropagation()}
+                style={{
+                  background: '#1976d2', color: '#fff', borderRadius: 4,
+                  padding: '5px 12px', fontSize: 12, fontWeight: 500,
+                  textDecoration: 'none', display: 'inline-block', width: 'fit-content', marginTop: 2,
+                }}>
+                Открыть на сайте →
+              </a>
+            );
+          })()}
           {selectedProduct.unit && (
             <div>Ед. изм.: {selectedProduct.unit}</div>
           )}
@@ -756,7 +799,7 @@ function CatalogPageInner() {
                 <div className="catalog-breadcrumb-ref" style={{ marginBottom: 12 }}>Поиск: «{search.trim()}»</div>
                 {globalSearchLoading && <div style={{ padding: 20, color: 'var(--muted)', fontSize: 13 }}>Поиск…</div>}
                 {!globalSearchLoading && globalSearchResults.length === 0 && <div className="empty-state">Ничего не найдено</div>}
-                {!globalSearchLoading && globalSearchResults.map((p, i) => renderProductRow(p, i, 'gs-'))}
+                {!globalSearchLoading && dedupeProducts(globalSearchResults).map((p, i) => renderProductRow(p, i, 'gs-'))}
               </>
             ) : (
               <div className="category-tiles-ref" style={{ maxWidth: 900, margin: '0 auto' }}>

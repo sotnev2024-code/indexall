@@ -257,8 +257,21 @@ export class EtmService {
     }
     const row = Array.isArray(json.data.rows) ? json.data.rows[0] : json.data;
     const p = row?.pricewnds ?? row?.price ?? 0;
+    // Diagnostic: log all price fields ETM returned. Helps distinguish:
+    //   - individual price (price/pricewnds > 0, differ from retail)
+    //   - retail only (price=0, price_retail > 0) → account needs setup with ETM manager
+    //   - no prices at all (all 0) → "price on request" per ETM docs
     if (!(Number(p) > 0)) {
-      this.logger.warn(`ETM ${codeType}=${code}: price=0 — товар с индивидуальной ценой`);
+      this.logger.warn(
+        `ETM ${codeType}=${code}: price=0 | returned fields: ` +
+        `price=${row?.price ?? '-'} pricewnds=${row?.pricewnds ?? '-'} ` +
+        `price_tarif=${row?.price_tarif ?? '-'} price_retail=${row?.price_retail ?? '-'}`,
+      );
+    } else if (row?.price_retail && row?.price && Number(row.price) >= Number(row.price_retail)) {
+      this.logger.warn(
+        `ETM ${codeType}=${code}: individual price equals or exceeds retail ` +
+        `(${row.price} vs retail ${row.price_retail}) — ETM account may not have individual pricing enabled`,
+      );
     }
     return Number(p) > 0 ? Number(p) : null;
   }
