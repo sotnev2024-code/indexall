@@ -367,7 +367,10 @@ function CatalogPageInner() {
       } catch { /* silent — ETM may be unavailable */ }
     }, 3500);
     return () => clearTimeout(t);
-  }, [globalSearchResults, filterProducts, products, mode, search]);
+    // `search` is intentionally omitted — globalSearchResults already settles
+    // 300ms after typing stops, so watching it is enough. Including `search` would
+    // reset the 3.5s price timer on every keystroke and prices would never load.
+  }, [globalSearchResults, filterProducts, products, mode]);
 
   function getDisplayedFilterProducts() {
     // Parametric filtering is handled on the backend; here we only apply the text search bar
@@ -415,20 +418,37 @@ function CatalogPageInner() {
     setAccEtm({});
     const key = (p.article || p.etm_code || '').trim();
     if (!isToggleOff && key) {
-      setEtmLoading(true);
-      storesApi.getEtmPricesWithTerms([p.article || p.etm_code])
-        .then(({ data }) => {
-          const entry = data[p.article || p.etm_code];
-          if (entry) {
-            setEtmData({ price: entry.price, term: entry.term || '' });
-            // Persist into row-level map so the collapsed row shows the same price+term
-            setRowEtmData(prev => ({ ...prev, [key]: { price: entry.price, term: entry.term || null } }));
-          } else {
-            setEtmData(null);
-          }
-        })
-        .catch(() => {})
-        .finally(() => setEtmLoading(false));
+      const cached = rowEtmDataRef.current[key];
+      // Price already known from batch load — only fetch the delivery term
+      if (cached?.price != null && cached.price > 0) {
+        setEtmData({ price: cached.price, term: cached.term || '' });
+        if (!cached.term) {
+          setEtmLoading(true);
+          storesApi.getEtmTerm(p.article || '', p.etm_code)
+            .then(({ data }) => {
+              const term = data?.term || '';
+              setEtmData(prev => prev ? { ...prev, term } : prev);
+              setRowEtmData(prev => ({ ...prev, [key]: { price: cached.price, term } }));
+            })
+            .catch(() => {})
+            .finally(() => setEtmLoading(false));
+        }
+      } else {
+        // No cached price — fetch both price and term together
+        setEtmLoading(true);
+        storesApi.getEtmPricesWithTerms([p.article || p.etm_code])
+          .then(({ data }) => {
+            const entry = data[p.article || p.etm_code];
+            if (entry) {
+              setEtmData({ price: entry.price, term: entry.term || '' });
+              setRowEtmData(prev => ({ ...prev, [key]: { price: entry.price, term: entry.term || null } }));
+            } else {
+              setEtmData(null);
+            }
+          })
+          .catch(() => {})
+          .finally(() => setEtmLoading(false));
+      }
     }
     setTimeout(() => detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
   }

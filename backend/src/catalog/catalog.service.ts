@@ -607,9 +607,9 @@ export class CatalogService implements OnModuleInit {
       const isTreeFormat = groupCols.length === 0;
 
       if (isTreeFormat) {
-        await this.parseTreeFormat(plId, rows, firstRow, nameCol, artCol, priceCol, etmCol, imgCol, urlCol, manufacturerId);
+        await this.parseTreeFormat(plId, sheet, rows, firstRow, nameCol, artCol, priceCol, etmCol, imgCol, urlCol, manufacturerId);
       } else {
-        await this.parseFlatFormat(plId, rows, firstRow, groupCols, nameCol, artCol, priceCol, etmCol, imgCol, urlCol, manufacturerId);
+        await this.parseFlatFormat(plId, sheet, rows, firstRow, groupCols, nameCol, artCol, priceCol, etmCol, imgCol, urlCol, manufacturerId);
       }
 
       await this.plRepo.update(plId, { status: PriceListStatus.ACTIVE });
@@ -621,7 +621,7 @@ export class CatalogService implements OnModuleInit {
 
   /** Flat format parser: group columns g1-g6 define category hierarchy per row */
   private async parseFlatFormat(
-    plId: number, rows: any[][], firstRow: number,
+    plId: number, sheet: any, rows: any[][], firstRow: number,
     groupCols: number[], nameCol: number, artCol: number, priceCol: number,
     etmCol: number, imgCol: number, urlCol: number, manufacturerId: number,
   ) {
@@ -657,8 +657,8 @@ export class CatalogService implements OnModuleInit {
       const rawPrice = priceCol >= 0 ? String(row[priceCol] || '').replace(/\s/g, '').replace(',', '.') : '';
       const price = rawPrice ? parseFloat(rawPrice) : null;
       const etmCode = etmCol >= 0 ? String(row[etmCol] || '').trim() : '';
-      const imageUrl = imgCol >= 0 ? String(row[imgCol] || '').trim() : '';
-      const externalUrl = urlCol >= 0 ? this.normalizeUrl(String(row[urlCol] || '')) : null;
+      const imageUrl = this.readCellUrl(sheet, i, imgCol);
+      const externalUrl = this.readCellUrl(sheet, i, urlCol);
       await this.prodRepo.save({
         manufacturer_id: manufacturerId,
         category_id: parentId,
@@ -680,7 +680,7 @@ export class CatalogService implements OnModuleInit {
    *  All categories are flat (one level) — each category row becomes a direct child of root.
    *  Products after a category row belong to that category. */
   private async parseTreeFormat(
-    plId: number, rows: any[][], firstRow: number,
+    plId: number, sheet: any, rows: any[][], firstRow: number,
     nameCol: number, artCol: number, priceCol: number, etmCol: number,
     imgCol: number, urlCol: number, manufacturerId: number,
   ) {
@@ -699,8 +699,8 @@ export class CatalogService implements OnModuleInit {
       // If product name column OR article column has text → it's a product
       if (productName || article) {
         const price = rawPrice ? parseFloat(rawPrice) : null;
-        const imageUrl = imgCol >= 0 ? String(row[imgCol] || '').trim() : '';
-        const externalUrl = urlCol >= 0 ? this.normalizeUrl(String(row[urlCol] || '')) : null;
+        const imageUrl = this.readCellUrl(sheet, i, imgCol);
+        const externalUrl = this.readCellUrl(sheet, i, urlCol);
         await this.prodRepo.save({
           manufacturer_id: manufacturerId,
           category_id: currentCatId,
@@ -754,6 +754,20 @@ export class CatalogService implements OnModuleInit {
     if (/\./.test(s) && !/\s/.test(s)) return `https://${s}`;
     // Not a URL — discard to prevent things like "info" being treated as a path
     return null;
+  }
+
+  /** Read a URL from an Excel cell. Prefers hyperlink target over display text
+   *  (so cells styled as hyperlinks like "Подробнее" → actual URL get the URL). */
+  private readCellUrl(sheet: any, rowIdx: number, colIdx: number): string | null {
+    if (colIdx < 0) return null;
+    const addr = XLSX.utils.encode_cell({ r: rowIdx, c: colIdx });
+    const cell = sheet[addr];
+    if (!cell) return null;
+    // Hyperlink embedded in cell
+    const target = cell.l?.Target;
+    if (target) return this.normalizeUrl(String(target));
+    // Plain text
+    return this.normalizeUrl(String(cell.v ?? ''));
   }
 
   private buildTree(categories: CatalogCategory[], parentId: number | null): any[] {
@@ -885,8 +899,9 @@ export class CatalogService implements OnModuleInit {
 
       const article = artIdx >= 0 ? String(row[artIdx] || '').trim() : '';
       const etmCode = etmCodeIdx >= 0 ? String(row[etmCodeIdx] || '').trim() : '';
-      const imageUrl = imageUrlIdx >= 0 ? String(row[imageUrlIdx] || '').trim() : '';
-      const externalUrl = externalUrlIdx >= 0 ? String(row[externalUrlIdx] || '').trim() : '';
+      // image/URL columns may contain hyperlinks — prefer the link target over display text
+      const imageUrl = this.readCellUrl(sheet, i, imageUrlIdx);
+      const externalUrl = this.readCellUrl(sheet, i, externalUrlIdx);
       const rawPrice = priceIdx >= 0 ? String(row[priceIdx] || '').replace(/\s/g, '').replace(',', '.') : '';
       const price = rawPrice ? parseFloat(rawPrice) : null;
       const unit = unitIdx >= 0 ? String(row[unitIdx] || '').trim() : '';
