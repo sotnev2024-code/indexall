@@ -7,10 +7,19 @@ export class EmailService {
   private transporter: nodemailer.Transporter;
 
   constructor() {
+    // Host/port/secure are configurable — different providers (Yandex, reg.ru,
+    // Mail.ru, custom) use different endpoints. Defaults to Yandex for backward
+    // compatibility; override via SMTP_HOST / SMTP_PORT / SMTP_SECURE.
+    const host = process.env.SMTP_HOST || 'smtp.yandex.ru';
+    const port = Number(process.env.SMTP_PORT) || 465;
+    const secure = process.env.SMTP_SECURE
+      ? process.env.SMTP_SECURE === 'true'
+      : port === 465; // SSL on 465, STARTTLS on 587
+
     this.transporter = nodemailer.createTransport({
-      host: 'smtp.yandex.ru',
-      port: 465,
-      secure: true,           // SSL on 465
+      host,
+      port,
+      secure,
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
@@ -20,7 +29,10 @@ export class EmailService {
       greetingTimeout: 10_000,
       socketTimeout: 15_000,
     });
-    this.logger.log(`EmailService init: user=${process.env.SMTP_USER}, pass_len=${(process.env.SMTP_PASS || '').length}`);
+    this.logger.log(
+      `EmailService init: host=${host}:${port} secure=${secure} ` +
+      `user=${process.env.SMTP_USER} pass_len=${(process.env.SMTP_PASS || '').length}`,
+    );
   }
 
   async sendConfirmation(email: string, token: string): Promise<void> {
