@@ -271,13 +271,30 @@ export default function SpecPageClient() {
   const currentIdRef = useRef(Number(_routeId));
   useEffect(() => { currentIdRef.current = currentId; }, [currentId]);
 
-  // Normalize decimal separators (comma→dot) in numeric fields before saving
-  const normRowForSave = (r: any) => ({
-    ...r,
-    qty:   String(r.qty   ?? '').replace(',', '.'),
-    price: String(r.price ?? '').replace(',', '.'),
-    coef:  String(r.coef  ?? '1').replace(',', '.'),
-  });
+  // Normalize decimal separators (comma→dot) in numeric fields before saving.
+  // Drop `id` and relation fields — backend uses (sheetId, sort_order) and
+  // keeping the loaded id around risks UPSERT-style surprises later.
+  const normRowForSave = (r: any) => {
+    const { id, sheet, createdAt, updatedAt, ...rest } = r || {};
+    return {
+      ...rest,
+      qty:   String(r.qty   ?? '').replace(',', '.'),
+      price: String(r.price ?? '').replace(',', '.'),
+      coef:  String(r.coef  ?? '1').replace(',', '.'),
+    };
+  };
+
+  // Serialize saveRows calls: concurrent calls used to race on the backend
+  // (DELETE+INSERT interleave) which could double rows. Every save goes through
+  // this chain so a later save always waits for the prior one to finish.
+  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const queueSaveRows = useCallback((sheetId: number, toSave: any[]) => {
+    const next = saveChainRef.current
+      .catch(() => undefined)
+      .then(() => sheetsApi.saveRows(sheetId, toSave));
+    saveChainRef.current = next;
+    return next;
+  }, []);
 
   const setUnsaved = useCallback((v: boolean) => {
     _setUnsaved(v);
@@ -286,15 +303,20 @@ export default function SpecPageClient() {
       if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
       autoSaveTimer.current = setTimeout(async () => {
         if (!hasUnsavedRef.current) return;
+        const sid = currentIdRef.current;
         const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
         try {
-          await sheetsApi.saveRows(currentIdRef.current, toSave);
-          hasUnsavedRef.current = false;
-          _setUnsaved(false);
+          await queueSaveRows(sid, toSave);
+          // Only clear the unsaved flag if no new edits landed in the meantime
+          // (currentIdRef still on the same sheet, no newer setUnsaved queued).
+          if (currentIdRef.current === sid) {
+            hasUnsavedRef.current = false;
+            _setUnsaved(false);
+          }
         } catch { /* silent */ }
       }, 3000);
     }
-  }, [_setUnsaved]);
+  }, [_setUnsaved, queueSaveRows]);
 
   const [sheet, setSheet] = useState<any>(null);
   const [project, setProject] = useState<any>(null);
@@ -469,11 +491,14 @@ export default function SpecPageClient() {
   useEffect(() => {
     async function autoSaveNow() {
       if (!hasUnsavedRef.current) return;
+      const sid = currentIdRef.current;
       const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
       try {
-        await sheetsApi.saveRows(currentIdRef.current, toSave);
-        hasUnsavedRef.current = false;
-        _setUnsaved(false);
+        await queueSaveRows(sid, toSave);
+        if (currentIdRef.current === sid) {
+          hasUnsavedRef.current = false;
+          _setUnsaved(false);
+        }
       } catch { /* silent */ }
     }
     const handleVisibility = () => { if (document.visibilityState === 'hidden') autoSaveNow(); };
@@ -492,7 +517,7 @@ export default function SpecPageClient() {
       window.removeEventListener('beforeunload', handleUnload);
       if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     };
-  }, [_setUnsaved]);
+  }, [_setUnsaved, queueSaveRows]);
 
   // ── Load data on sheet change ─────────────────────────────────
   useEffect(() => {
@@ -1089,9 +1114,10 @@ export default function SpecPageClient() {
 
   async function saveRows() {
     try {
+      const sid = currentIdRef.current;
       const toSave = rows.filter(r => r.name || r.article).map(normRowForSave);
-      await sheetsApi.saveRows(currentIdRef.current, toSave);
-      setUnsaved(false);
+      await queueSaveRows(sid, toSave);
+      if (currentIdRef.current === sid) setUnsaved(false);
       toast.success('Сохранено');
     } catch { toast.error('Ошибка сохранения'); }
   }
@@ -2031,17 +2057,19 @@ export default function SpecPageClient() {
                       style={{ cursor: 'pointer' }}
                       onClick={async () => {
                         if (currentId === s.id) return;
+                        // Cancel any pending debounced autosave — we either save now or discard.
+                        if (autoSaveTimer.current) { clearTimeout(autoSaveTimer.current); autoSaveTimer.current = null; }
                         if (hasUnsavedRef.current) {
                           const shouldSave = confirm('В текущем листе есть несохранённые изменения.\nСохранить перед переходом?');
                           if (shouldSave) {
+                            const sid = currentIdRef.current;
                             const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
-                            try { await sheetsApi.saveRows(currentIdRef.current, toSave); hasUnsavedRef.current = false; _setUnsaved(false); } catch { toast.error('Ошибка сохранения'); }
+                            try { await queueSaveRows(sid, toSave); hasUnsavedRef.current = false; _setUnsaved(false); } catch { toast.error('Ошибка сохранения'); }
                           } else {
                             hasUnsavedRef.current = false;
                             _setUnsaved(false);
                           }
                         }
-                        if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
                         setCurrentId(s.id);
                         if (activeProjectId) setActive(activeProjectId, s.id);
                         window.history.replaceState(null, '', `/spec/${s.id}`);
