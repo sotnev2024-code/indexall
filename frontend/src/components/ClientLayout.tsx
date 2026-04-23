@@ -9,17 +9,22 @@ import NavigationProgress from '@/components/NavigationProgress';
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
 function AuthHydrator() {
-  const { user, setAuth, clearAuth } = useAppStore();
+  const { setAuth, setAuthReady, clearAuth } = useAppStore();
   useEffect(() => {
+    // Always refresh on page load — cached `user` in localStorage goes stale
+    // whenever admin/trial changes the plan, leading to paywall redirects that
+    // only clear after logout+login.
     const token = localStorage.getItem('token');
-    if (token && !user) {
-      axios.get(`${API_BASE}/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-        withCredentials: true,
-      })
-        .then(({ data }: any) => setAuth(data, token))
-        .catch(() => clearAuth());
-    }
+    if (!token) { setAuthReady(true); return; }
+    axios.get(`${API_BASE}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+      withCredentials: true,
+    })
+      .then(({ data }: any) => setAuth(data, token))
+      .catch((err: any) => {
+        if (err?.response?.status === 401) clearAuth();
+        else setAuthReady(true);
+      });
   }, []);
   return null;
 }

@@ -12,7 +12,12 @@ export interface User {
 interface AppStore {
   user: User | null;
   token: string | null;
+  /** True once AuthHydrator has finished the initial /auth/me round-trip.
+   *  RequireSubscription uses this to avoid flashing the paywall while
+   *  the cached (possibly stale) user is being refreshed from the server. */
+  authReady: boolean;
   setAuth: (user: User, token: string) => void;
+  setAuthReady: (v: boolean) => void;
   clearAuth: () => void;
   activeProjectId: number | null;
   activeSheetId: number | null;
@@ -29,15 +34,17 @@ function loadStoredUser(): User | null {
 export const useAppStore = create<AppStore>((set) => ({
   user: loadStoredUser(),
   token: typeof window !== 'undefined' ? localStorage.getItem('token') : null,
+  authReady: false,
   setAuth: (user, token) => {
     localStorage.setItem('token', token);
     localStorage.setItem('user', JSON.stringify(user));
-    set({ user, token });
+    set({ user, token, authReady: true });
   },
+  setAuthReady: (v) => set({ authReady: v }),
   clearAuth: () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    set({ user: null, token: null });
+    set({ user: null, token: null, authReady: true });
   },
   activeProjectId: typeof window !== 'undefined' ? (Number(localStorage.getItem('activeProjectId')) || null) : null,
   activeSheetId:   typeof window !== 'undefined' ? (Number(localStorage.getItem('activeSheetId'))   || null) : null,
