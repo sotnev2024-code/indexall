@@ -10,6 +10,7 @@ out/
 build/
 
 # Environment variables — NEVER commit secrets
+.env
 backend/.env
 frontend/.env
 frontend/.env.local
