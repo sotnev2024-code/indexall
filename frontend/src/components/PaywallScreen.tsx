@@ -61,9 +61,12 @@ export default function PaywallScreen() {
     }
     setLoading('trial');
     try {
+      // Backend returns the updated user directly (not wrapped in { user: ... }) —
+      // using data.user here used to silently drop the update, which is why the
+      // new tariff only appeared after a logout/login cycle.
       const { data } = await paymentsApi.activateTrial();
       const token = localStorage.getItem('token') || '';
-      if (data?.user) setAuth(data.user, token);
+      if (data?.id) setAuth(data, token);
       toast.success('Пробный период активирован на 7 дней');
       router.push('/projects');
     } catch (e: any) {

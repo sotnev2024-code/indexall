@@ -3,12 +3,14 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import axios from 'axios';
+import { useAppStore } from '@/store/app.store';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
 function ConfirmContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { setAuth } = useAppStore();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -22,9 +24,19 @@ function ConfirmContent() {
 
     axios
       .get(`${API_URL}/auth/confirm`, { params: { token } })
-      .then(res => {
+      .then(async res => {
         if (res.data.accessToken) {
-          localStorage.setItem('token', res.data.accessToken);
+          const jwt = res.data.accessToken;
+          localStorage.setItem('token', jwt);
+          // Hydrate user into the store so any stale `user` from a previous
+          // session is overwritten — otherwise the profile page keeps the old
+          // plan until manual logout/login.
+          try {
+            const { data: me } = await axios.get(`${API_URL}/auth/me`, {
+              headers: { Authorization: `Bearer ${jwt}` },
+            });
+            setAuth(me, jwt);
+          } catch { /* AuthHydrator will retry on next render */ }
           setStatus('success');
           setTimeout(() => router.replace('/projects'), 1500);
         } else {
@@ -38,7 +50,7 @@ function ConfirmContent() {
           err.response?.data?.message || 'Ссылка недействительна или устарела'
         );
       });
-  }, [searchParams, router]);
+  }, [searchParams, router, setAuth]);
 
   return (
     <>

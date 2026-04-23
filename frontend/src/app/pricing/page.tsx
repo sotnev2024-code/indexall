@@ -47,7 +47,7 @@ function SuccessHandler() {
 
 function PricingContent() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { user, setAuth } = useAppStore();
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
   const [plans, setPlans] = useState<Record<string, TariffConfig>>({});
@@ -93,7 +93,11 @@ function PricingContent() {
     if (!token) { router.push('/auth/login?redirect=/pricing'); return; }
     setLoading('trial');
     try {
-      await paymentsApi.activateTrial();
+      // Backend returns the updated user directly (plan='trial' + subscriptionExpiresAt).
+      // Push it into the store immediately so Header/Profile show the new tariff
+      // without requiring a logout/login cycle.
+      const { data } = await paymentsApi.activateTrial();
+      if (data?.id) setAuth(data, token);
       toast.success('Пробный тариф активирован на 7 дней!');
       router.push('/projects');
     } catch (e: any) {
