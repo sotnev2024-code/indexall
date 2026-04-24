@@ -570,7 +570,32 @@ function CatalogPageInner() {
             <div style={{ width: 40, height: 40, marginRight: 8, background: '#f5f5f5', borderRadius: 4, flexShrink: 0 }} />
           )}
           <div className="product-info">
-            <div className="product-name">{p.name}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <div className="product-name">{p.name}</div>
+              {p.accessories?.length > 0 && (
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    // Open the product if not already open, then jump straight
+                    // to the accessories category list.
+                    if (selectedProduct?.id !== p.id) selectProduct(p);
+                    setAccView('types');
+                  }}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    background: '#fff', color: 'var(--text)',
+                    border: '1px solid var(--border)', borderRadius: 6,
+                    padding: '3px 10px', fontSize: 12, fontWeight: 500,
+                    cursor: 'pointer', whiteSpace: 'nowrap',
+                  }}
+                >
+                  Аксессуары ({p.accessories.length})
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+              )}
+            </div>
             <div className="product-article">
               {p.article && <span>Артикул {p.article}</span>}
               {p.manufacturer?.name && <span style={{ marginLeft: 8, color: 'var(--muted)' }}>{p.manufacturer.name}</span>}
