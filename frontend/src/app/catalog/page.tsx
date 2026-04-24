@@ -680,15 +680,26 @@ function CatalogPageInner() {
             </div>
           )}
           {/* Accessories */}
-          {selectedProduct.accessories?.length > 0 && (() => {
-            const accs: any[] = selectedProduct.accessories;
+          {(() => {
+            const accs: any[] = selectedProduct.accessories || [];
+            if (accs.length === 0) {
+              return (
+                <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 8, fontSize: 12, color: 'var(--muted)' }}>
+                  Аксессуаров нет
+                </div>
+              );
+            }
             const types = [...new Set(accs.map((a: any) => a.type).filter(Boolean))];
             return (
               <div style={{ marginTop: 8, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
                 {accView === 'closed' && (
-                  <button className="btn-outline" style={{ fontSize: 12, padding: '5px 12px' }}
+                  <button className="btn-outline"
+                    style={{ fontSize: 12, padding: '5px 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
                     onClick={e => { e.stopPropagation(); setAccView('types'); }}>
                     Аксессуары ({accs.length})
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
                   </button>
                 )}
 
