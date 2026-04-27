@@ -602,9 +602,35 @@ export class CatalogService implements OnModuleInit {
       const imgCol = mapping.imageUrlCol ? XLSX.utils.decode_col(mapping.imageUrlCol.toUpperCase()) : -1;
       const urlCol = mapping.externalUrlCol ? XLSX.utils.decode_col(mapping.externalUrlCol.toUpperCase()) : -1;
 
+      // Diagnostic: column mapping the admin form actually sent to the parser.
+      // If `price` / `image_url` / `external_url` ends up empty in the catalog
+      // it almost always means the mapping field was left blank in the upload UI.
+      console.log(
+        `[priceList ${plId}] mapping: name=${mapping.nameCol} art=${mapping.artCol} ` +
+        `price=${mapping.priceCol || '(none)'} etm=${mapping.etmCodeCol || '(none)'} ` +
+        `image=${mapping.imageUrlCol || '(none)'} url=${mapping.externalUrlCol || '(none)'} ` +
+        `firstRow=${mapping.firstRow}`,
+      );
+
       // Auto-detect tree format: no group columns AND file has category rows
       // (rows where nameCol has text but artCol is empty)
       const isTreeFormat = groupCols.length === 0;
+
+      // Diagnostic: dump the first 3 data rows so we can see what's actually
+      // in the cells the parser reads (catches empty / shifted / merged columns).
+      for (let i = firstRow; i < Math.min(firstRow + 3, rows.length); i++) {
+        const r = rows[i];
+        const priceCell = priceCol >= 0 ? r[priceCol] : '(unmapped)';
+        const urlCell = urlCol >= 0 ? r[urlCol] : '(unmapped)';
+        const imgCell = imgCol >= 0 ? r[imgCol] : '(unmapped)';
+        const urlAddr = urlCol >= 0 ? sheet[XLSX.utils.encode_cell({ r: i, c: urlCol })]?.l?.Target : null;
+        const imgAddr = imgCol >= 0 ? sheet[XLSX.utils.encode_cell({ r: i, c: imgCol })]?.l?.Target : null;
+        console.log(
+          `[priceList ${plId}] row ${i}: art="${r[artCol] ?? ''}" ` +
+          `price="${priceCell}" url-text="${urlCell}" url-hyperlink="${urlAddr || ''}" ` +
+          `img-text="${imgCell}" img-hyperlink="${imgAddr || ''}"`,
+        );
+      }
 
       if (isTreeFormat) {
         await this.parseTreeFormat(plId, sheet, rows, firstRow, nameCol, artCol, priceCol, etmCol, imgCol, urlCol, manufacturerId);
@@ -627,6 +653,7 @@ export class CatalogService implements OnModuleInit {
   ) {
     const catCache: Map<string, number> = new Map();
     let productCount = 0;
+    let withPrice = 0, withUrl = 0, withImage = 0;
 
     for (let i = firstRow; i < rows.length; i++) {
       const row = rows[i];
@@ -659,6 +686,9 @@ export class CatalogService implements OnModuleInit {
       const etmCode = etmCol >= 0 ? String(row[etmCol] || '').trim() : '';
       const imageUrl = this.readCellUrl(sheet, i, imgCol);
       const externalUrl = this.readCellUrl(sheet, i, urlCol);
+      if (price && !isNaN(price) && price > 0) withPrice++;
+      if (externalUrl) withUrl++;
+      if (imageUrl) withImage++;
       await this.prodRepo.save({
         manufacturer_id: manufacturerId,
         category_id: parentId,
@@ -672,7 +702,10 @@ export class CatalogService implements OnModuleInit {
       });
       productCount++;
     }
-    console.log(`Parsed ${productCount} products (flat format) for price list ${plId}`);
+    console.log(
+      `Parsed ${productCount} products (flat format) for price list ${plId} ` +
+      `[withPrice=${withPrice} withUrl=${withUrl} withImage=${withImage}]`,
+    );
   }
 
   /** Tree format parser: category = row where mapped product columns (name, article, price)
@@ -687,6 +720,7 @@ export class CatalogService implements OnModuleInit {
     let currentCatId: number | null = null;
     let productCount = 0;
     let catCount = 0;
+    let withPrice = 0, withUrl = 0, withImage = 0;
     const catCache: Map<string, number> = new Map();
 
     for (let i = firstRow; i < rows.length; i++) {
@@ -701,6 +735,9 @@ export class CatalogService implements OnModuleInit {
         const price = rawPrice ? parseFloat(rawPrice) : null;
         const imageUrl = this.readCellUrl(sheet, i, imgCol);
         const externalUrl = this.readCellUrl(sheet, i, urlCol);
+        if (price && !isNaN(price) && price > 0) withPrice++;
+        if (externalUrl) withUrl++;
+        if (imageUrl) withImage++;
         await this.prodRepo.save({
           manufacturer_id: manufacturerId,
           category_id: currentCatId,
@@ -740,7 +777,10 @@ export class CatalogService implements OnModuleInit {
       }
       currentCatId = catCache.get(categoryName)!;
     }
-    console.log(`Parsed ${productCount} products, ${catCount} categories (tree format) for price list ${plId}`);
+    console.log(
+      `Parsed ${productCount} products, ${catCount} categories (tree format) for price list ${plId} ` +
+      `[withPrice=${withPrice} withUrl=${withUrl} withImage=${withImage}]`,
+    );
   }
 
   /** Normalize external URL from Excel. Prefix https:// when scheme missing.
