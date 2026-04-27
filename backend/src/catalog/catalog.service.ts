@@ -588,6 +588,13 @@ export class CatalogService implements OnModuleInit {
   private async parseXlsxAsync(plId: number, filePath: string, mapping: PriceListMapping, manufacturerId: number) {
     try {
       const workbook = XLSX.readFile(filePath);
+      // Diagnostic: workbooks often have multiple sheets (cover, instructions,
+      // products, archive) and we always read the first one. Log all sheets so
+      // we can tell if products are on a different one.
+      console.log(
+        `[priceList ${plId}] workbook sheets: ${JSON.stringify(workbook.SheetNames)} ` +
+        `(parser uses the first one: "${workbook.SheetNames[0]}")`,
+      );
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
@@ -617,18 +624,19 @@ export class CatalogService implements OnModuleInit {
       const isTreeFormat = groupCols.length === 0;
 
       // Diagnostic: dump the first 3 data rows so we can see what's actually
-      // in the cells the parser reads (catches empty / shifted / merged columns).
+      // in the cells the parser reads (catches empty / shifted / merged columns,
+      // HYPERLINK() formulas with hidden URLs, image-link cells with no .l.Target).
       for (let i = firstRow; i < Math.min(firstRow + 3, rows.length); i++) {
         const r = rows[i];
         const priceCell = priceCol >= 0 ? r[priceCol] : '(unmapped)';
         const urlCell = urlCol >= 0 ? r[urlCol] : '(unmapped)';
         const imgCell = imgCol >= 0 ? r[imgCol] : '(unmapped)';
-        const urlAddr = urlCol >= 0 ? sheet[XLSX.utils.encode_cell({ r: i, c: urlCol })]?.l?.Target : null;
-        const imgAddr = imgCol >= 0 ? sheet[XLSX.utils.encode_cell({ r: i, c: imgCol })]?.l?.Target : null;
+        const urlObj = urlCol >= 0 ? sheet[XLSX.utils.encode_cell({ r: i, c: urlCol })] : null;
+        const imgObj = imgCol >= 0 ? sheet[XLSX.utils.encode_cell({ r: i, c: imgCol })] : null;
         console.log(
-          `[priceList ${plId}] row ${i}: art="${r[artCol] ?? ''}" ` +
-          `price="${priceCell}" url-text="${urlCell}" url-hyperlink="${urlAddr || ''}" ` +
-          `img-text="${imgCell}" img-hyperlink="${imgAddr || ''}"`,
+          `[priceList ${plId}] row ${i}: art="${r[artCol] ?? ''}" price="${priceCell}" ` +
+          `url-text="${urlCell}" url-link="${urlObj?.l?.Target || ''}" url-formula="${urlObj?.f || ''}" ` +
+          `img-text="${imgCell}" img-link="${imgObj?.l?.Target || ''}" img-formula="${imgObj?.f || ''}"`,
         );
       }
 
@@ -796,17 +804,27 @@ export class CatalogService implements OnModuleInit {
     return null;
   }
 
-  /** Read a URL from an Excel cell. Prefers hyperlink target over display text
-   *  (so cells styled as hyperlinks like "Подробнее" → actual URL get the URL). */
+  /** Read a URL from an Excel cell. Three sources, in priority order:
+   *   1. cell.l.Target — clicked-style hyperlinks (Insert → Link in Excel UI)
+   *   2. =HYPERLINK("url", "label") formula — read from cell.f, very common in
+   *      manufacturer price lists where the visible text is "инфо"/"Подробнее"
+   *      and the URL lives only in the formula. SheetJS does NOT promote these
+   *      to cell.l, so the previous version silently dropped them.
+   *   3. cell.v — plain-text URL pasted into the cell. */
   private readCellUrl(sheet: any, rowIdx: number, colIdx: number): string | null {
     if (colIdx < 0) return null;
     const addr = XLSX.utils.encode_cell({ r: rowIdx, c: colIdx });
     const cell = sheet[addr];
     if (!cell) return null;
-    // Hyperlink embedded in cell
+    // 1. cell-level hyperlink
     const target = cell.l?.Target;
     if (target) return this.normalizeUrl(String(target));
-    // Plain text
+    // 2. HYPERLINK formula — extract the first quoted argument
+    if (cell.f) {
+      const m = String(cell.f).match(/HYPERLINK\s*\(\s*"([^"]+)"/i);
+      if (m) return this.normalizeUrl(m[1]);
+    }
+    // 3. plain text
     return this.normalizeUrl(String(cell.v ?? ''));
   }
 
