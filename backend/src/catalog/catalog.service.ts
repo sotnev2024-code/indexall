@@ -804,28 +804,34 @@ export class CatalogService implements OnModuleInit {
     return null;
   }
 
-  /** Read a URL from an Excel cell. Three sources, in priority order:
-   *   1. cell.l.Target — clicked-style hyperlinks (Insert → Link in Excel UI)
-   *   2. =HYPERLINK("url", "label") formula — read from cell.f, very common in
-   *      manufacturer price lists where the visible text is "инфо"/"Подробнее"
-   *      and the URL lives only in the formula. SheetJS does NOT promote these
-   *      to cell.l, so the previous version silently dropped them.
-   *   3. cell.v — plain-text URL pasted into the cell. */
+  /** Read a URL from an Excel cell. Sources, in priority order:
+   *   1. cell.v if it is itself an http(s) URL — the value the admin sees in
+   *      the column is what they intend to publish. IEK price lists store a
+   *      visible link like https://qr.iek.group/<art> while cell.l.Target
+   *      points to a stale internal redirect (api-02.iek.ru/.../qr-redirect/);
+   *      preferring cell.l there sent users to a half-broken URL.
+   *   2. cell.l.Target — clicked-style hyperlinks (Insert → Link in Excel)
+   *      when the visible text is non-URL filler like "инфо"/"Подробнее".
+   *   3. =HYPERLINK("url", "label") formula — read from cell.f for files
+   *      where SheetJS doesn't promote the formula's URL into cell.l. */
   private readCellUrl(sheet: any, rowIdx: number, colIdx: number): string | null {
     if (colIdx < 0) return null;
     const addr = XLSX.utils.encode_cell({ r: rowIdx, c: colIdx });
     const cell = sheet[addr];
     if (!cell) return null;
-    // 1. cell-level hyperlink
+    // 1. visible value, if it's already a URL
+    const text = String(cell.v ?? '').trim();
+    if (/^https?:\/\//i.test(text)) return this.normalizeUrl(text);
+    // 2. cell-level hyperlink
     const target = cell.l?.Target;
     if (target) return this.normalizeUrl(String(target));
-    // 2. HYPERLINK formula — extract the first quoted argument
+    // 3. HYPERLINK formula — extract the first quoted argument
     if (cell.f) {
       const m = String(cell.f).match(/HYPERLINK\s*\(\s*"([^"]+)"/i);
       if (m) return this.normalizeUrl(m[1]);
     }
-    // 3. plain text
-    return this.normalizeUrl(String(cell.v ?? ''));
+    // 4. plain text that may still look url-ish (e.g. "qr.iek.group/...")
+    return this.normalizeUrl(text);
   }
 
   private buildTree(categories: CatalogCategory[], parentId: number | null): any[] {
