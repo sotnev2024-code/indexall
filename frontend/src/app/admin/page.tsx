@@ -145,6 +145,16 @@ export default function AdminPage() {
     else if (tab === 'tiles') loadTiles();
   }, [tab]);
 
+  // While any price list is parsing on the server, refresh the table every
+  // 3 seconds so the admin sees "Обработка…" flip to "виден" + товары появятся
+  // в счётчике без ручного F5. Stops on its own once nothing is processing.
+  useEffect(() => {
+    if (tab !== 'pricelists') return;
+    if (!pricelists.some((p: any) => p.status === 'processing')) return;
+    const t = setInterval(loadPricelists, 3000);
+    return () => clearInterval(t);
+  }, [tab, pricelists]);
+
   async function loadPricelists() {
     try { const { data } = await adminApi.getPricelists(); setPricelists(data); }
     catch { toast.error('Ошибка загрузки прайс-листов'); }
@@ -1347,13 +1357,20 @@ export default function AdminPage() {
                 </thead>
                 <tbody>
                   {pricelists.map(pl => (
-                    <tr key={pl.id}>
+                    <tr key={pl.id} style={pl.status === 'processing' ? { background: '#fffbe6' } : undefined}>
                       <td><strong>{pl.manufacturer?.name || '—'}</strong></td>
                       <td style={{ fontSize: 12 }}>{fmtDate(pl.uploaded_at)}</td>
                       <td style={{ fontSize: 12 }}>{extractActuality(pl.file_name)}</td>
                       <td>
                         {pl.status === 'processing' ? (
-                          <span className="badge badge-yellow">Обработка…</span>
+                          <span className="badge badge-yellow" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{
+                              display: 'inline-block', width: 10, height: 10,
+                              border: '2px solid currentColor', borderTopColor: 'transparent',
+                              borderRadius: '50%', animation: 'spin 0.8s linear infinite',
+                            }} />
+                            Обработка…
+                          </span>
                         ) : (pl.status === 'active' || pl.status === 'inactive') ? (
                           <button
                             onClick={() => handleToggleStatus(pl)}
@@ -1543,8 +1560,30 @@ export default function AdminPage() {
 
       {/* ── Modal: Replace pricelist ── */}
       {replaceTarget !== null && (
-        <div className="modal-overlay" onClick={() => setReplaceTarget(null)}>
+        <div className="modal-overlay" onClick={() => { if (!uploading) setReplaceTarget(null); }}>
           <div className="modal-box" style={{ maxWidth: 520, width: '90vw' }} onClick={e => e.stopPropagation()}>
+            {uploading ? (
+              // Big files (50k+ rows) take a while to upload + clean old products;
+              // a disabled button alone left admins thinking the page froze.
+              <div style={{ padding: '40px 20px', textAlign: 'center' }}>
+                <div style={{
+                  display: 'inline-block', width: 48, height: 48,
+                  border: '4px solid var(--border)', borderTopColor: '#1a1a1a',
+                  borderRadius: '50%', animation: 'spin 0.9s linear infinite',
+                  marginBottom: 16,
+                }} />
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>
+                  Загружаем файл и удаляем старые данные…
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', maxWidth: 380, margin: '0 auto' }}>
+                  Не закрывайте окно. Для больших прайсов (десятки тысяч строк)
+                  это занимает до минуты. После загрузки файл продолжит обрабатываться
+                  в фоне — следите за статусом «Обработка…» в таблице.
+                </div>
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              </div>
+            ) : (
+              <>
             <div className="modal-title">Заменить прайс-лист</div>
             <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
               Загрузите новый .xlsx файл. Структура должна совпадать с предыдущим.
@@ -1603,9 +1642,11 @@ export default function AdminPage() {
             <div className="modal-actions">
               <button className="btn-cancel" onClick={() => setReplaceTarget(null)}>Отмена</button>
               <button className="btn-primary" onClick={() => handleReplace(replaceTarget!)} disabled={!replaceFile || uploading}>
-                {uploading ? 'Загружается…' : 'Заменить'}
+                Заменить
               </button>
             </div>
+              </>
+            )}
           </div>
         </div>
       )}
