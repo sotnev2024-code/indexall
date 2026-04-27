@@ -1373,7 +1373,27 @@ export default function AdminPage() {
                           <button
                             className="btn-outline"
                             style={{ fontSize: 12, padding: '4px 10px' }}
-                            onClick={() => { setReplaceTarget(pl.id); setReplaceFile(null); }}
+                            onClick={() => {
+                              // Pre-fill mapping with the values stored on the
+                              // price list itself — otherwise the admin sees an
+                              // empty form, types only the columns visible in
+                              // the modal, and group columns (g1..g6) silently
+                              // get wiped, dropping the catalog hierarchy.
+                              const m = (pl.mapping || {}) as Record<string, any>;
+                              setMapping({
+                                firstRow: m.firstRow != null ? String(m.firstRow) : '2',
+                                g1: m.g1 || '', g2: m.g2 || '', g3: m.g3 || '',
+                                g4: m.g4 || '', g5: m.g5 || '', g6: m.g6 || '',
+                                nameCol: m.nameCol || '',
+                                artCol: m.artCol || '',
+                                priceCol: m.priceCol || '',
+                                etmCodeCol: m.etmCodeCol || '',
+                                imageUrlCol: m.imageUrlCol || '',
+                                externalUrlCol: m.externalUrlCol || '',
+                              });
+                              setReplaceTarget(pl.id);
+                              setReplaceFile(null);
+                            }}
                           >
                             заменить
                           </button>
@@ -1564,6 +1584,21 @@ export default function AdminPage() {
                 <label>Ссылка</label>
                 <input value={mapping.externalUrlCol} onChange={e => setMapping(m => ({ ...m, externalUrlCol: normalizeCol(e.target.value) }))} placeholder="I или 9" />
               </div>
+            </div>
+            <div style={{ marginTop: 12, fontSize: 12, color: 'var(--muted)' }}>
+              Группы / подгруппы (для плоского формата). Оставьте пустыми для tree-формата.
+            </div>
+            <div className="form-row" style={{ gap: 8, marginTop: 4 }}>
+              {(['g1','g2','g3','g4','g5','g6'] as const).map((k, idx) => (
+                <div key={k} className="form-col">
+                  <label>{`Группа ${idx + 1}`}</label>
+                  <input
+                    value={(mapping as any)[k]}
+                    onChange={e => setMapping(m => ({ ...m, [k]: normalizeCol(e.target.value) }))}
+                    placeholder={String.fromCharCode(64 + idx + 9)}
+                  />
+                </div>
+              ))}
             </div>
             <div className="modal-actions">
               <button className="btn-cancel" onClick={() => setReplaceTarget(null)}>Отмена</button>
