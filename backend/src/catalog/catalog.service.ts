@@ -806,14 +806,16 @@ export class CatalogService implements OnModuleInit {
 
   /** Read a URL from an Excel cell. Sources, in priority order:
    *   1. cell.v if it is itself an http(s) URL — the value the admin sees in
-   *      the column is what they intend to publish. IEK price lists store a
+   *      the column is what they intend to publish. IEK price lists store the
    *      visible link like https://qr.iek.group/<art> while cell.l.Target
    *      points to a stale internal redirect (api-02.iek.ru/.../qr-redirect/);
    *      preferring cell.l there sent users to a half-broken URL.
-   *   2. cell.l.Target — clicked-style hyperlinks (Insert → Link in Excel)
-   *      when the visible text is non-URL filler like "инфо"/"Подробнее".
-   *   3. =HYPERLINK("url", "label") formula — read from cell.f for files
-   *      where SheetJS doesn't promote the formula's URL into cell.l. */
+   *   2. =HYPERLINK("target", "label") — when SheetJS hasn't evaluated the
+   *      formula, prefer the *label* if it is a URL (admin's visible intent),
+   *      fall back to the target otherwise.
+   *   3. cell.l.Target — clicked-style hyperlinks (Insert → Link in Excel UI)
+   *      for cells whose visible text is non-URL filler like "инфо"/"Подробнее".
+   *   4. plain text that's still vaguely url-ish ("qr.iek.group/..."). */
   private readCellUrl(sheet: any, rowIdx: number, colIdx: number): string | null {
     if (colIdx < 0) return null;
     const addr = XLSX.utils.encode_cell({ r: rowIdx, c: colIdx });
@@ -822,15 +824,20 @@ export class CatalogService implements OnModuleInit {
     // 1. visible value, if it's already a URL
     const text = String(cell.v ?? '').trim();
     if (/^https?:\/\//i.test(text)) return this.normalizeUrl(text);
-    // 2. cell-level hyperlink
+    // 2. HYPERLINK formula — prefer label when it's a URL, else target
+    if (cell.f) {
+      const m = String(cell.f).match(/HYPERLINK\s*\(\s*"([^"]+)"\s*(?:,\s*"([^"]+)")?/i);
+      if (m) {
+        const target = m[1];
+        const label = m[2];
+        if (label && /^https?:\/\//i.test(label)) return this.normalizeUrl(label);
+        return this.normalizeUrl(target);
+      }
+    }
+    // 3. cell-level hyperlink
     const target = cell.l?.Target;
     if (target) return this.normalizeUrl(String(target));
-    // 3. HYPERLINK formula — extract the first quoted argument
-    if (cell.f) {
-      const m = String(cell.f).match(/HYPERLINK\s*\(\s*"([^"]+)"/i);
-      if (m) return this.normalizeUrl(m[1]);
-    }
-    // 4. plain text that may still look url-ish (e.g. "qr.iek.group/...")
+    // 4. plain text that may still look url-ish
     return this.normalizeUrl(text);
   }
 
