@@ -805,16 +805,15 @@ export class CatalogService implements OnModuleInit {
   }
 
   /** Read a URL from an Excel cell. Sources, in priority order:
-   *   1. cell.v if it is itself an http(s) URL — the value the admin sees in
-   *      the column is what they intend to publish. IEK price lists store the
-   *      visible link like https://qr.iek.group/<art> while cell.l.Target
-   *      points to a stale internal redirect (api-02.iek.ru/.../qr-redirect/);
-   *      preferring cell.l there sent users to a half-broken URL.
-   *   2. =HYPERLINK("target", "label") — when SheetJS hasn't evaluated the
-   *      formula, prefer the *label* if it is a URL (admin's visible intent),
-   *      fall back to the target otherwise.
-   *   3. cell.l.Target — clicked-style hyperlinks (Insert → Link in Excel UI)
-   *      for cells whose visible text is non-URL filler like "инфо"/"Подробнее".
+   *   1. cell.v if it is itself an http(s) URL — the admin's visible intent.
+   *   2. HYPERLINK formula:
+   *      a. `HYPERLINK("base" & <CellRef>, "label")` — IEK pattern.
+   *         Resolves <CellRef> against the sheet to build the full URL.
+   *      b. `HYPERLINK("target", "label")` — static form. Prefers the label
+   *         when it's a URL (some manufacturers put the working public URL
+   *         in the label and a stale redirect in the target).
+   *   3. cell.l.Target — Excel "Insert → Link" style hyperlinks for cells
+   *      whose visible text is non-URL filler like "инфо"/"Подробнее".
    *   4. plain text that's still vaguely url-ish ("qr.iek.group/..."). */
   private readCellUrl(sheet: any, rowIdx: number, colIdx: number): string | null {
     if (colIdx < 0) return null;
@@ -824,12 +823,25 @@ export class CatalogService implements OnModuleInit {
     // 1. visible value, if it's already a URL
     const text = String(cell.v ?? '').trim();
     if (/^https?:\/\//i.test(text)) return this.normalizeUrl(text);
-    // 2. HYPERLINK formula — prefer label when it's a URL, else target
+    // 2. HYPERLINK formula
     if (cell.f) {
-      const m = String(cell.f).match(/HYPERLINK\s*\(\s*"([^"]+)"\s*(?:,\s*"([^"]+)")?/i);
-      if (m) {
-        const target = m[1];
-        const label = m[2];
+      const fStr = String(cell.f);
+      // 2a. Concatenation: HYPERLINK("base" & A8, "label")
+      // Resolve the cell reference (e.g. A8) and append its value.
+      const concat = fStr.match(/HYPERLINK\s*\(\s*"([^"]*)"\s*&\s*([A-Z]+)(\d+)/i);
+      if (concat) {
+        const base = concat[1];
+        const refCol = XLSX.utils.decode_col(concat[2]);
+        const refRow = parseInt(concat[3], 10) - 1; // Excel rows are 1-indexed
+        const refCell = sheet[XLSX.utils.encode_cell({ r: refRow, c: refCol })];
+        const refVal = String(refCell?.v ?? '').trim();
+        if (refVal) return this.normalizeUrl(base + refVal);
+      }
+      // 2b. Static form: HYPERLINK("target", "label")
+      const stat = fStr.match(/HYPERLINK\s*\(\s*"([^"]+)"\s*(?:,\s*"([^"]+)")?\s*\)/i);
+      if (stat) {
+        const target = stat[1];
+        const label = stat[2];
         if (label && /^https?:\/\//i.test(label)) return this.normalizeUrl(label);
         return this.normalizeUrl(target);
       }
