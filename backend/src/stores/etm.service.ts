@@ -241,8 +241,10 @@ export class EtmService {
   /**
    * Fetch single price by code+type. type='mnf' for articles, 'etm' for ETM codes.
    * Returns price (number) or null. Throws SESSION_EXPIRED on auth failure.
+   * `useRetail`: when true, return price_retail (для всех) instead of pricewnds
+   * (личная цена авторизованного клиента ЭТМ). Used for users without ETM integration.
    */
-  private async fetchSinglePrice(code: string, session: string, codeType: 'mnf' | 'etm' = 'mnf'): Promise<number | null> {
+  private async fetchSinglePrice(code: string, session: string, codeType: 'mnf' | 'etm' = 'mnf', useRetail = false): Promise<number | null> {
     const url =
       `https://${this.host}/api/v1/goods/${encodeURIComponent(code)}/price` +
       `?type=${codeType}&sessionid=${encodeURIComponent(session)}`;
@@ -266,35 +268,28 @@ export class EtmService {
       return null;
     }
     const row = Array.isArray(json.data.rows) ? json.data.rows[0] : json.data;
-    // Pick the first non-zero price field. Old code used `??` which falls
-    // through ONLY on null/undefined, so `pricewnds=0` blocked the fallback
-    // to `price` and we returned null even when `price` was set.
-    const p = this.pickPrice(row);
-    // Diagnostic: log all price fields ETM returned. Helps distinguish:
-    //   - individual price (price/pricewnds > 0, differ from retail)
-    //   - retail only (price=0, price_retail > 0) → account needs setup with ETM manager
-    //   - no prices at all (all 0) → "price on request" per ETM docs
+    const p = this.pickPrice(row, useRetail);
+    // Diagnostic: log all price fields ETM returned for empty results.
     if (!(p > 0)) {
       this.logger.warn(
-        `ETM ${codeType}=${code}: price=0 | returned fields: ` +
+        `ETM ${codeType}=${code} (${useRetail ? 'retail' : 'personal'}): price=0 | returned fields: ` +
         `price=${row?.price ?? '-'} pricewnds=${row?.pricewnds ?? '-'} ` +
         `price_tarif=${row?.price_tarif ?? '-'} price_retail=${row?.price_retail ?? '-'}`,
-      );
-    } else if (row?.price_retail && row?.price && Number(row.price) >= Number(row.price_retail)) {
-      this.logger.warn(
-        `ETM ${codeType}=${code}: individual price equals or exceeds retail ` +
-        `(${row.price} vs retail ${row.price_retail}) — ETM account may not have individual pricing enabled`,
       );
     }
     return p > 0 ? p : null;
   }
 
-  /** Pick the most reasonable price from an ETM /price response row. Prefers
-   *  pricewnds (с НДС) but falls through on 0/missing because some products
-   *  expose only `price` even when pricewnds is reported as 0. */
-  private pickPrice(row: any): number {
+  /** Pick the most reasonable price from an ETM /price response row.
+   *  - useRetail=true (юзер без интеграции): берём price_retail (цена для всех).
+   *  - useRetail=false (есть интеграция): pricewnds (личная цена с НДС),
+   *    fallback на price/price_retail если pricewnds==0/missing. */
+  private pickPrice(row: any, useRetail = false): number {
     if (!row) return 0;
-    for (const f of ['pricewnds', 'price']) {
+    const fields = useRetail
+      ? ['price_retail', 'pricewnds', 'price']
+      : ['pricewnds', 'price', 'price_retail'];
+    for (const f of fields) {
       const v = Number(row[f]);
       if (Number.isFinite(v) && v > 0) return v;
     }
@@ -304,18 +299,19 @@ export class EtmService {
   /**
    * Batch fetch prices — up to 50 codes in one request.
    * codeType determines whether codes are articles (mnf) or ETM internal codes (etm).
+   * `useRetail` selects price_retail (юзеры без интеграции) instead of pricewnds.
    * Returns map: code → price | null.
    * Throws 'SESSION_EXPIRED' if session is invalid.
    * If batch response row count doesn't match input → fallback to per-code fetch.
    */
-  private async fetchPricesBatch(codes: string[], session: string, codeType: 'mnf' | 'etm' = 'mnf'): Promise<Record<string, number | null>> {
+  private async fetchPricesBatch(codes: string[], session: string, codeType: 'mnf' | 'etm' = 'mnf', useRetail = false): Promise<Record<string, number | null>> {
     const articles = codes; // backwards-compat var name in body below
     const result: Record<string, number | null> = {};
     if (articles.length === 0) return result;
 
     // Single article — use direct endpoint
     if (articles.length === 1) {
-      result[articles[0]] = await this.fetchSinglePrice(articles[0], session, codeType);
+      result[articles[0]] = await this.fetchSinglePrice(articles[0], session, codeType, useRetail);
       return result;
     }
 
@@ -332,7 +328,7 @@ export class EtmService {
       this.logger.warn(`ETM batch price error: ${e?.message}`);
       // Fallback: fetch each article individually
       for (const a of articles) {
-        try { result[a] = await this.fetchSinglePrice(a, session, codeType); }
+        try { result[a] = await this.fetchSinglePrice(a, session, codeType, useRetail); }
         catch (ex: any) { if (ex?.message === 'SESSION_EXPIRED') throw ex; result[a] = null; }
       }
       return result;
@@ -354,7 +350,7 @@ export class EtmService {
     // If row count matches input — assume order preserved (most likely case)
     if (rows.length === articles.length) {
       for (let i = 0; i < articles.length; i++) {
-        const p = this.pickPrice(rows[i]);
+        const p = this.pickPrice(rows[i], useRetail);
         result[articles[i]] = p > 0 ? p : null;
       }
       return result;
@@ -364,7 +360,7 @@ export class EtmService {
     // Fall back to single-fetch for each article so we get reliable per-article results.
     this.logger.warn(`ETM batch row count mismatch: requested ${articles.length}, got ${rows.length}. Falling back to single fetches.`);
     for (const a of articles) {
-      try { result[a] = await this.fetchSinglePrice(a, session, codeType); }
+      try { result[a] = await this.fetchSinglePrice(a, session, codeType, useRetail); }
       catch (ex: any) { if (ex?.message === 'SESSION_EXPIRED') throw ex; result[a] = null; }
     }
     return result;
@@ -494,13 +490,26 @@ export class EtmService {
     const result: Record<string, number | null> = {};
     if (!items.length) return result;
 
+    // Two flows:
+    //  1. User configured ETM integration → use their session + return pricewnds
+    //     (личная цена авторизованного клиента ЭТМ).
+    //  2. No integration → fall back to the shared env-level account and return
+    //     price_retail (цена для всех). Without this branch users without
+    //     credentials saw "цена не определена" on every product.
     let session = await this.getUserSession(userId, false);
+    let useRetail = false;
     if (!session) {
-      for (const it of items) {
-        const key = (it.article || it.etmCode || '').trim();
-        if (key) result[key] = null;
+      try {
+        session = await this.getSession();
+        useRetail = true;
+      } catch (e: any) {
+        this.logger.warn(`ETM: no per-user creds and shared session unavailable: ${e?.message}`);
+        for (const it of items) {
+          const key = (it.article || it.etmCode || '').trim();
+          if (key) result[key] = null;
+        }
+        return result;
       }
-      return result;
     }
 
     // Split into two groups: by ETM code (type=etm) and by article (type=mnf).
@@ -530,11 +539,12 @@ export class EtmService {
       for (let i = 0; i < group.length; i += 50) {
         const slice = group.slice(i, i + 50);
         try {
-          const prices = await this.fetchPricesBatch(slice.map(g => g.code), session, type);
+          const prices = await this.fetchPricesBatch(slice.map(g => g.code), session, type, useRetail);
           for (const g of slice) result[g.key] = prices[g.code] ?? null;
         } catch (e: any) {
           if (e?.message === 'SESSION_EXPIRED' && !sessionRefreshed) {
-            const ns = await this.getUserSession(userId, true);
+            // Refresh whichever session we're using (per-user or shared).
+            const ns = useRetail ? await this.authenticate() : await this.getUserSession(userId, true);
             if (ns) { session = ns; sessionRefreshed = true; i -= 50; continue; }
           }
           for (const g of slice) result[g.key] = null;
