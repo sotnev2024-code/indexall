@@ -13,10 +13,11 @@ const PAID_PLANS = new Set(['trial', 'base', 'pro', 'admin']);
 
 /**
  * Feature flag: paid subscription purchase via YooKassa.
- * Currently disabled — test ЮKassa shop is configured, real payments would fail.
- * Set to `true` once the production ЮKassa shop credentials are deployed.
+ * Enabled — webhook https://service.indexall.ru/api/payments/webhook tested
+ * (returns 200), shop configured in production .env. Flip back to false only
+ * if YooKassa credentials get reset.
  */
-export const PAYMENTS_ENABLED = false;
+export const PAYMENTS_ENABLED = true;
 
 interface UserLike {
   plan?: string | null;
