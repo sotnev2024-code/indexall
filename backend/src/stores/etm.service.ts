@@ -568,20 +568,34 @@ export class EtmService {
   /**
    * Fetch fresh delivery term for a single item.
    * Uses ETM code (type=etm) if provided, otherwise article (type=mnf).
-   * Returns term string or null.
+   * Returns term string or null. Mirrors the fallback logic of
+   * getPricesForItems: if the user has no integration, use the shared
+   * env-level session so users without their own credentials still see
+   * delivery times next to the retail price.
    */
   async getTermForItem(item: { article?: string; etmCode?: string }, userId: number): Promise<string | null> {
     const code = (item.etmCode || '').trim() || (item.article || '').trim();
     if (!code) return null;
     const codeType: 'etm' | 'mnf' = item.etmCode?.trim() ? 'etm' : 'mnf';
+
     let session = await this.getUserSession(userId, false);
-    if (!session) return null;
+    let usingShared = false;
+    if (!session) {
+      try {
+        session = await this.getSession();
+        usingShared = true;
+      } catch {
+        return null;
+      }
+    }
 
     try {
       return await this.fetchRemains(code, session, codeType);
     } catch (e: any) {
       if (e?.message === 'SESSION_EXPIRED') {
-        const newSession = await this.getUserSession(userId, true);
+        const newSession = usingShared
+          ? await this.authenticate()
+          : await this.getUserSession(userId, true);
         if (newSession) {
           try { return await this.fetchRemains(code, newSession, codeType); } catch { return null; }
         }
