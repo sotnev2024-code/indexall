@@ -162,7 +162,17 @@ export class EtmService {
     }
 
     try {
-      return JSON.parse(stdout || '{}');
+      const parsed = JSON.parse(stdout || '{}');
+      // Log non-200 ETM responses so we can tell apart "session expired",
+      // "article not in catalog", "rate-limited" without ssh-ing into the box.
+      const code = parsed?.status?.code;
+      if (code !== undefined && code !== 200) {
+        const safeUrl = url.replace(/sessionid=[^&]+/i, 'sessionid=***');
+        this.logger.warn(
+          `ETM non-200: code=${code} msg="${parsed?.status?.message || ''}" url=${safeUrl}`,
+        );
+      }
+      return parsed;
     } catch {
       throw new Error(`Invalid JSON from ETM: ${stdout?.slice(0, 200)}`);
     }
@@ -256,12 +266,15 @@ export class EtmService {
       return null;
     }
     const row = Array.isArray(json.data.rows) ? json.data.rows[0] : json.data;
-    const p = row?.pricewnds ?? row?.price ?? 0;
+    // Pick the first non-zero price field. Old code used `??` which falls
+    // through ONLY on null/undefined, so `pricewnds=0` blocked the fallback
+    // to `price` and we returned null even when `price` was set.
+    const p = this.pickPrice(row);
     // Diagnostic: log all price fields ETM returned. Helps distinguish:
     //   - individual price (price/pricewnds > 0, differ from retail)
     //   - retail only (price=0, price_retail > 0) → account needs setup with ETM manager
     //   - no prices at all (all 0) → "price on request" per ETM docs
-    if (!(Number(p) > 0)) {
+    if (!(p > 0)) {
       this.logger.warn(
         `ETM ${codeType}=${code}: price=0 | returned fields: ` +
         `price=${row?.price ?? '-'} pricewnds=${row?.pricewnds ?? '-'} ` +
@@ -273,7 +286,19 @@ export class EtmService {
         `(${row.price} vs retail ${row.price_retail}) — ETM account may not have individual pricing enabled`,
       );
     }
-    return Number(p) > 0 ? Number(p) : null;
+    return p > 0 ? p : null;
+  }
+
+  /** Pick the most reasonable price from an ETM /price response row. Prefers
+   *  pricewnds (с НДС) but falls through on 0/missing because some products
+   *  expose only `price` even when pricewnds is reported as 0. */
+  private pickPrice(row: any): number {
+    if (!row) return 0;
+    for (const f of ['pricewnds', 'price']) {
+      const v = Number(row[f]);
+      if (Number.isFinite(v) && v > 0) return v;
+    }
+    return 0;
   }
 
   /**
@@ -329,9 +354,8 @@ export class EtmService {
     // If row count matches input — assume order preserved (most likely case)
     if (rows.length === articles.length) {
       for (let i = 0; i < articles.length; i++) {
-        const row = rows[i];
-        const p = row ? (row.pricewnds ?? row.price ?? 0) : 0;
-        result[articles[i]] = Number(p) > 0 ? Number(p) : null;
+        const p = this.pickPrice(rows[i]);
+        result[articles[i]] = p > 0 ? p : null;
       }
       return result;
     }

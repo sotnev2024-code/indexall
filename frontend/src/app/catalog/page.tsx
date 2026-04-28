@@ -826,7 +826,7 @@ function CatalogPageInner() {
               {mode === 'filter' ? ' Подбор по категориям' : ' Выбор по фильтрам'}
             </button>
             <button className={`toggle-btn${mode === 'manuf' ? ' active' : ''}`} onClick={() => switchMode('manuf')}>
-              Каталоги производителей
+              Прайс-листы производителей
             </button>
           </div>
           <div className="catalog-search">
