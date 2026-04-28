@@ -118,8 +118,14 @@ export class AuthController {
   async activateTrial(@Request() req) {
     const user = await this.usersRepo.findOne({ where: { id: req.user.userId } });
     if (!user) throw new BadRequestException('Пользователь не найден');
-    if (user.plan !== UserPlan.FREE) throw new BadRequestException('Пробный тариф доступен только для бесплатного плана');
     if (user.trialUsed) throw new BadRequestException('Пробный тариф уже был использован');
+    // Only block when there's an actually-active paid subscription. Old logic
+    // checked plan===FREE strictly, which rejected legacy users whose plan
+    // stayed as 'pro'/'trial' but whose expiry was already in the past — they
+    // could never get a trial because the row was never reset back to FREE.
+    const hasActive = user.subscriptionExpiresAt &&
+      new Date(user.subscriptionExpiresAt).getTime() > Date.now();
+    if (hasActive) throw new BadRequestException('У вас уже есть активная подписка');
 
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);
