@@ -39,6 +39,22 @@ export class CatalogController {
     return { source, id, row, etm };
   }
 
+  /** Admin-only: free-form ETM lookup by article (or ETM code). Used by the
+   *  «ЭТМ-проверка» button in the header — admin types an article and gets
+   *  back the raw /price + /remains response with all four price fields, no
+   *  filtering or fallbacks. Same shape as adminProductInfo's `etm` block. */
+  @Get('admin/etm-lookup')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  async adminEtmLookup(
+    @Query('article') article?: string,
+    @Query('etm_code') etmCode?: string,
+  ) {
+    return this.etmService.getAdminDebugInfo(
+      (article || '').trim() || null,
+      (etmCode || '').trim() || null,
+    );
+  }
+
   /** Admin: force refresh the in-memory bot DB cache */
   @Post('bot-cache/refresh')
   @UseGuards(JwtAuthGuard, AdminGuard)

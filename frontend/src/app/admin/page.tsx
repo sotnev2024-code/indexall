@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx';
 import { catalogApi, adminApi, templatesApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 import TilesManagerModal from '@/components/TilesManagerModal';
+import AdminEtmLookup from '@/components/AdminEtmLookup';
 
 type Tab = 'pricelists' | 'base' | 'templates' | 'users' | 'conversions' | 'tariffs' | 'stats' | 'tiles';
 
@@ -110,6 +111,7 @@ export default function AdminPage() {
   const [tiles, setTiles] = useState<any[]>([]);
   const [editTile, setEditTile] = useState<any | null>(null);
   const [tilesManagerOpen, setTilesManagerOpen] = useState(false);
+  const [etmLookupOpen, setEtmLookupOpen] = useState(false);
   const [managedTiles, setManagedTiles] = useState<any[]>([]);
   const [newTileName, setNewTileName] = useState('');
 
@@ -675,7 +677,26 @@ export default function AdminPage() {
           </svg>
         </div>
         <span className="admin-header-title">INDEXALL — Администратор</span>
+        <button
+          onClick={() => setEtmLookupOpen(true)}
+          title="ЭТМ-проверка артикула"
+          style={{
+            marginLeft: 'auto',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            background: '#fff', color: '#1976d2',
+            border: '1px solid #1976d2', borderRadius: 6,
+            padding: '5px 10px', fontSize: 12, fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          ЭТМ
+        </button>
       </header>
+      {etmLookupOpen && <AdminEtmLookup onClose={() => setEtmLookupOpen(false)} />}
 
       <div className="admin-layout">
         <div className="admin-sidebar">

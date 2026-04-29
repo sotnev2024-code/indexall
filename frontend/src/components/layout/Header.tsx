@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app.store';
 import toast from 'react-hot-toast';
+import AdminEtmLookup from '@/components/AdminEtmLookup';
 
 interface HeaderProps {
   breadcrumb?: string;
@@ -20,6 +21,7 @@ export default function Header({ breadcrumb = 'Проекты', projectCost, sho
   const router = useRouter();
   const { user, clearAuth, hasUnsaved } = useAppStore();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [etmLookupOpen, setEtmLookupOpen] = useState(false);
 
   function logout() {
     clearAuth();
@@ -90,6 +92,27 @@ export default function Header({ breadcrumb = 'Проекты', projectCost, sho
         )}
         {projectCost && <span className="project-cost">{projectCost}</span>}
 
+        {/* Admin-only: open the global ETM lookup modal from any page. */}
+        {isAdmin && (
+          <button
+            onClick={() => setEtmLookupOpen(true)}
+            title="ЭТМ-проверка артикула (видно только администратору)"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              background: '#fff', color: '#1976d2',
+              border: '1px solid #1976d2', borderRadius: 6,
+              padding: '5px 10px', fontSize: 12, fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="7"/>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            ЭТМ
+          </button>
+        )}
+
         {/* User menu */}
         <div className="user-menu-wrap">
           <button className="user-btn" onClick={() => setMenuOpen(v => !v)}>
@@ -114,6 +137,7 @@ export default function Header({ breadcrumb = 'Проекты', projectCost, sho
           )}
         </div>
       </div>
+      {etmLookupOpen && <AdminEtmLookup onClose={() => setEtmLookupOpen(false)} />}
     </header>
   );
 }
