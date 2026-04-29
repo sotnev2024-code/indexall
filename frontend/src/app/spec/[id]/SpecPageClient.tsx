@@ -674,36 +674,56 @@ export default function SpecPageClient() {
     if (!article) return;
     if (!allowStores) return; // Free plan: no live ETM lookups
     try {
-      const { data } = await storesApi.getEtmPricesWithTerms([article]);
-      const entry = data[article];
-      const price = entry?.price ?? null;
-      const term = entry?.term || 'нет';
+      const { data: prices } = await storesApi.getEtmPricesByItems([{ article }]);
+      const etmPrice = prices[article];
+      let term = '';
+      if (etmPrice != null && etmPrice > 0) {
+        const tr = await storesApi.getEtmTerm(article).catch(() => null);
+        term = tr?.data?.term || 'нет';
+      }
       setRows(prev => {
         const next = [...prev];
         for (let j = 0; j < next.length; j++) {
-          if (next[j].article === article && next[j].store === 'ЭТМ') {
-            const priceStr = price != null ? String(price) : '';
-            const q = next[j].qty || '1';
-            const c = next[j].coef || '1';
+          // Match by article. Touch rows whose store is "ЭТМ" or "—" (we set
+          // those tentatively in applyProduct/addProductFromSearch). Don't
+          // overwrite rows where the user picked a different store explicitly.
+          if (next[j].article !== article) continue;
+          if (next[j].store && !['ЭТМ', '—', ''].includes(next[j].store)) continue;
+          const q = next[j].qty || '1';
+          const c = next[j].coef || '1';
+          if (etmPrice != null && etmPrice > 0) {
+            // ETM has the price — it wins over catalog.
+            const priceStr = String(etmPrice);
             next[j] = {
               ...next[j],
               price: priceStr,
+              store: 'ЭТМ',
               deadline: term,
               qty: q,
               coef: c,
               total: calcTotal(priceStr, q, c),
+            };
+          } else {
+            // ETM doesn't have it — keep whatever catalog price was already
+            // there; flip store to "—" so the column tells the truth.
+            next[j] = {
+              ...next[j],
+              store: next[j].price ? '—' : '—',
+              deadline: '',
+              qty: q,
+              coef: c,
             };
           }
         }
         return next;
       });
     } catch {
-      // Silent fail — leave price empty, set deadline to "нет"
+      // Silent fail — keep catalog price (if any), mark store as "—".
       setRows(prev => {
         const next = [...prev];
         for (let j = 0; j < next.length; j++) {
-          if (next[j].article === article && next[j].store === 'ЭТМ' && !next[j].price) {
-            next[j] = { ...next[j], deadline: 'нет' };
+          if (next[j].article === article && next[j].store === 'ЭТМ') {
+            next[j] = { ...next[j], store: next[j].price ? '—' : 'ЭТМ', deadline: '' };
           }
         }
         return next;
@@ -734,6 +754,8 @@ export default function SpecPageClient() {
             if (!r || r.article !== article) return prev;
             const q = r.qty || '1';
             const c = r.coef || '1';
+            // Catalog hit: fill in the catalog price as a fallback. The
+            // upcoming fetchEtmForArticle call wins if ETM has a price.
             const priceStr = hasCatalogPrice
               ? (r.price || String(exact.price))
               : (r.price || '');
@@ -746,8 +768,11 @@ export default function SpecPageClient() {
               price: priceStr,
               qty: q || '1',
               coef: c,
-              store: r.store || 'ЭТМ',
-              auto_price: !hasCatalogPrice,
+              // If user hasn't picked a store yet: tentatively "—" when we
+              // already have a catalog price, "ЭТМ" otherwise (will be
+              // confirmed/cleared by fetchEtmForArticle).
+              store: r.store || (hasCatalogPrice ? '—' : 'ЭТМ'),
+              auto_price: true,
               total: calcTotal(priceStr, q || '1', c),
             };
             return next;
@@ -767,6 +792,8 @@ export default function SpecPageClient() {
     const article = p.article || '';
     const mfr = p.manufacturer?.name || p.brand || '';
     const hasCatalogPrice = p.price && Number(p.price) > 0;
+    // Tentative state: catalog price + dash store. fetchEtmForArticle will
+    // overwrite with ETM price if it finds one (priority ETM > catalog).
     setRows((prev) => {
       const next = [...prev];
       const q = next[i].qty || '1';
@@ -779,8 +806,8 @@ export default function SpecPageClient() {
         etm_code: p.etm_code || next[i].etm_code || '',
         unit: p.unit || next[i].unit || 'шт',
         price: hasCatalogPrice ? String(p.price) : '',
-        store: 'ЭТМ',
-        auto_price: !hasCatalogPrice,
+        store: hasCatalogPrice ? '—' : 'ЭТМ',
+        auto_price: true,
         qty: q,
         coef: c,
         total: calcTotal(hasCatalogPrice ? String(p.price) : '', q, c),
@@ -789,8 +816,10 @@ export default function SpecPageClient() {
     });
     setAcDrops(null);
     setUnsaved(true);
-    // Fetch live ETM data if store is ЭТМ
-    if (!hasCatalogPrice && article) fetchEtmForArticle(article);
+    // ETM has priority — always fetch when an article exists, even if catalog
+    // already provided a price. fetchEtmForArticle will keep catalog price as
+    // fallback if ETM has nothing.
+    if (article) fetchEtmForArticle(article);
   }, [pushHistorySnapshot, setUnsaved, fetchEtmForArticle]);
 
   const addProductFromSearch = useCallback((p: any) => {
@@ -815,18 +844,22 @@ export default function SpecPageClient() {
       const targetIdx = emptyIdx >= 0 ? emptyIdx : next.length - 1;
       const q = next[targetIdx].qty || '1';
       const c = next[targetIdx].coef || '1';
+      const hasCatalogPrice = p.price && Number(p.price) > 0;
       next[targetIdx] = {
         ...next[targetIdx],
         name: p.name,
         brand: p.manufacturer?.name || p.brand || '',
         article,
         unit: p.unit || next[targetIdx].unit || 'шт',
-        price: p.price ? String(p.price) : '',
-        store: 'ЭТМ',
+        price: hasCatalogPrice ? String(p.price) : '',
+        // ETM gets priority and will overwrite via fetchEtmForArticle below;
+        // until then mark catalog-price rows with "—" so the column doesn't
+        // lie about the source.
+        store: hasCatalogPrice ? '—' : 'ЭТМ',
         auto_price: true,
         qty: q,
         coef: c,
-        total: calcTotal(p.price ? String(p.price) : '', q, c),
+        total: calcTotal(hasCatalogPrice ? String(p.price) : '', q, c),
       };
       return next;
     });

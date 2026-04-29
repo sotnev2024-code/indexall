@@ -87,13 +87,21 @@ export class AdminController implements OnModuleInit {
       .addSelect('COUNT(p.id)', 'projects')
       .groupBy('p.userId')
       .getRawMany();
-    const sheetCounts = await this.sheetsRepo
-      .createQueryBuilder('s')
-      .innerJoin('s.project', 'p')
-      .select('p.userId', 'userId')
-      .addSelect('COUNT(s.id)', 'sheets')
-      .groupBy('p.userId')
-      .getRawMany();
+    // A sheet can belong to a user via 3 paths: direct owner_id, through a
+    // project (legacy), or through a folder (new model). Old query only
+    // covered the project path, so админ-статистика занижала листы у тех,
+    // кто работал в папках. Union them and count distinct sheet ids.
+    const sheetCounts: { userId: number; sheets: string }[] = await this.sheetsRepo.manager.query(`
+      SELECT uid AS "userId", COUNT(DISTINCT sid)::int AS sheets
+      FROM (
+        SELECT id AS sid, owner_id AS uid FROM sheets WHERE owner_id IS NOT NULL
+        UNION
+        SELECT s.id AS sid, p."userId" AS uid FROM sheets s JOIN projects p ON p.id = s."projectId" WHERE s."projectId" IS NOT NULL
+        UNION
+        SELECT s.id AS sid, f.owner_id AS uid FROM sheets s JOIN folders f ON f.id = s.folder_id WHERE s.folder_id IS NOT NULL
+      ) x
+      GROUP BY uid
+    `);
     const projectMap = Object.fromEntries(counts.map(r => [r.userId, Number(r.projects)]));
     const sheetMap = Object.fromEntries(sheetCounts.map(r => [r.userId, Number(r.sheets)]));
 
@@ -179,13 +187,19 @@ export class AdminController implements OnModuleInit {
       .getRawMany();
     const pMap = Object.fromEntries(projectCounts.map(r => [r.userId, Number(r.cnt)]));
 
-    const sheetCounts = await this.sheetsRepo
-      .createQueryBuilder('s')
-      .innerJoin('s.project', 'p')
-      .select('p.userId', 'userId')
-      .addSelect('COUNT(s.id)', 'cnt')
-      .groupBy('p.userId')
-      .getRawMany();
+    // Same triple-source counting as in getUsers — listов в папках раньше
+    // не было видно, потому что считали только через projects-join.
+    const sheetCounts: { userId: number; cnt: string }[] = await this.sheetsRepo.manager.query(`
+      SELECT uid AS "userId", COUNT(DISTINCT sid)::int AS cnt
+      FROM (
+        SELECT id AS sid, owner_id AS uid FROM sheets WHERE owner_id IS NOT NULL
+        UNION
+        SELECT s.id AS sid, p."userId" AS uid FROM sheets s JOIN projects p ON p.id = s."projectId" WHERE s."projectId" IS NOT NULL
+        UNION
+        SELECT s.id AS sid, f.owner_id AS uid FROM sheets s JOIN folders f ON f.id = s.folder_id WHERE s.folder_id IS NOT NULL
+      ) x
+      GROUP BY uid
+    `);
     const sMap = Object.fromEntries(sheetCounts.map(r => [r.userId, Number(r.cnt)]));
 
     const templateCounts = await this.templatesRepo
