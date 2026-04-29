@@ -689,15 +689,13 @@ export default function SpecPageClient() {
       setRows(prev => {
         const next = [...prev];
         for (let j = 0; j < next.length; j++) {
-          // Match by article. Touch rows whose store is "ЭТМ" or "—" (we set
-          // those tentatively in applyProduct/addProductFromSearch). Don't
-          // overwrite rows where the user picked a different store explicitly.
+          // Only touch rows that explicitly opt into ETM updates (store='ЭТМ').
+          // store='' is the user's «—» = «keep my price, don't auto-update».
           if (next[j].article !== article) continue;
-          if (next[j].store && !['ЭТМ', ''].includes(next[j].store)) continue;
+          if (next[j].store !== 'ЭТМ') continue;
           const q = next[j].qty || '1';
           const c = next[j].coef || '1';
           if (etmPrice != null && etmPrice > 0) {
-            // ETM has the price — it wins over catalog.
             const priceStr = String(etmPrice);
             next[j] = {
               ...next[j],
@@ -708,31 +706,14 @@ export default function SpecPageClient() {
               coef: c,
               total: calcTotal(priceStr, q, c),
             };
-          } else {
-            // ETM doesn't have it — keep whatever catalog price was already
-            // there; flip store to "—" so the column tells the truth.
-            next[j] = {
-              ...next[j],
-              store: '',
-              deadline: '',
-              qty: q,
-              coef: c,
-            };
           }
+          // ETM didn't return a price — leave the row as is (price + store
+          // unchanged). User can switch the source manually if they want.
         }
         return next;
       });
     } catch {
-      // Silent fail — keep catalog price (if any), mark store as "—".
-      setRows(prev => {
-        const next = [...prev];
-        for (let j = 0; j < next.length; j++) {
-          if (next[j].article === article && next[j].store === 'ЭТМ') {
-            next[j] = { ...next[j], store: next[j].price ? '' : 'ЭТМ', deadline: '' };
-          }
-        }
-        return next;
-      });
+      // Network / auth error — leave rows untouched.
     }
   }, [allowStores]);
 
@@ -776,7 +757,7 @@ export default function SpecPageClient() {
               // If user hasn't picked a store yet: tentatively "—" when we
               // already have a catalog price, "ЭТМ" otherwise (will be
               // confirmed/cleared by fetchEtmForArticle).
-              store: r.store || (hasCatalogPrice ? '' : 'ЭТМ'),
+              store: r.store || 'ЭТМ',
               auto_price: true,
               total: calcTotal(priceStr, q || '1', c),
             };
@@ -811,7 +792,7 @@ export default function SpecPageClient() {
         etm_code: p.etm_code || next[i].etm_code || '',
         unit: p.unit || next[i].unit || 'шт',
         price: hasCatalogPrice ? String(p.price) : '',
-        store: hasCatalogPrice ? '' : 'ЭТМ',
+        store: 'ЭТМ',
         auto_price: true,
         qty: q,
         coef: c,
@@ -860,7 +841,7 @@ export default function SpecPageClient() {
         // ETM gets priority and will overwrite via fetchEtmForArticle below;
         // until then mark catalog-price rows with "—" so the column doesn't
         // lie about the source.
-        store: hasCatalogPrice ? '' : 'ЭТМ',
+        store: 'ЭТМ',
         auto_price: true,
         qty: q,
         coef: c,
@@ -1788,9 +1769,11 @@ export default function SpecPageClient() {
   // ETM lookup is keyed strictly on `article` (per spec 28.04). Rows without
   // an mnf article are skipped — etm_code alone caused false matches with
   // other manufacturers' products under the same numeric code.
+  // Only rows with store='ЭТМ' are eligible. store='' («—») means the user
+  // explicitly chose «keep my price, don't auto-update from ETM».
   function getEtmTargets() {
     const targets = rowsRef.current
-      .filter((r) => r.article && r.article.trim() && (!r.store || r.store === 'ЭТМ' || r.store.toUpperCase() === 'ETM'));
+      .filter((r) => r.article && r.article.trim() && (r.store === 'ЭТМ' || (r.store || '').toUpperCase() === 'ETM'));
     const itemMap = new Map<string, { article?: string; etmCode?: string }>();
     for (const r of targets) {
       const key = (r.article || '').trim();
@@ -1834,7 +1817,8 @@ export default function SpecPageClient() {
           const r = next[i];
           const key = rowKey(r);
           if (!key) continue;
-          if (r.store && r.store !== 'ЭТМ' && r.store.toUpperCase() !== 'ETM') continue;
+          // store='' («—») = user opted out, do not overwrite their price.
+          if (r.store !== 'ЭТМ' && (r.store || '').toUpperCase() !== 'ETM') continue;
           const price = prices[key];
           if (price != null && price > 0) {
             const priceStr = String(price);
@@ -1875,7 +1859,7 @@ export default function SpecPageClient() {
     // Mark target rows with placeholder
     setRows(prev => prev.map(r => {
       const key = rowKey(r);
-      if (withPrice.includes(key) && (r.store === 'ЭТМ' || !r.store)) return { ...r, deadline: '...' };
+      if (withPrice.includes(key) && r.store === 'ЭТМ') return { ...r, deadline: '...' };
       return r;
     }));
 
