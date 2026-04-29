@@ -70,6 +70,56 @@ export class EtmService {
     return !!(this.login && this.pwd);
   }
 
+  /**
+   * Admin-only diagnostic: fetch unfiltered ETM /price and /remains responses
+   * for an article OR an ETM code. Returns the raw JSON exactly as ETM
+   * returned it (all price fields, status codes, error messages) so the admin
+   * can compare with what the platform displays. No caching, no `pickPrice`,
+   * no fallbacks — straight passthrough.
+   */
+  async getAdminDebugInfo(article: string | null, etmCode: string | null) {
+    const code = (etmCode || '').trim() || (article || '').trim();
+    if (!code) return { error: 'No article or etm_code on this product' };
+    const codeType: 'mnf' | 'etm' = (etmCode || '').trim() ? 'etm' : 'mnf';
+
+    if (!this.login || !this.pwd) {
+      return { error: 'ETM_LOGIN/ETM_PASSWORD not set in .env' };
+    }
+
+    let session: string;
+    try {
+      session = await this.getSession();
+    } catch (e: any) {
+      return { error: `ETM login failed: ${e?.message}` };
+    }
+
+    const priceUrl =
+      `https://${this.host}/api/v1/goods/${encodeURIComponent(code)}/price?type=${codeType}&sessionid=${encodeURIComponent(session)}`;
+    const remainsUrl =
+      `https://${this.host}/api/v1/goods/${encodeURIComponent(code)}/remains?type=${codeType}&sessionid=${encodeURIComponent(session)}`;
+
+    const safeUrl = (u: string) => u.replace(/sessionid=[^&]+/i, 'sessionid=***');
+
+    const [priceRaw, remainsRaw] = await Promise.all([
+      this.enqueue(() => this.curlRequest(priceUrl, 'GET')).catch((e: any) => ({ error: e?.message })),
+      this.enqueue(() => this.curlRequest(remainsUrl, 'GET')).catch((e: any) => ({ error: e?.message })),
+    ]);
+
+    return {
+      request: {
+        article: article || null,
+        etm_code: etmCode || null,
+        codeUsed: code,
+        codeType,
+        sessionType: 'shared (env)',
+        priceUrl: safeUrl(priceUrl),
+        remainsUrl: safeUrl(remainsUrl),
+      },
+      priceResponse: priceRaw,
+      remainsResponse: remainsRaw,
+    };
+  }
+
   async saveCredentials(userId: number, login: string, password: string): Promise<void> {
     const password_enc = this.encryptPassword(password);
     await this.credRepo.save({ user_id: userId, login, password_enc, session_key: null, session_expires_at: null });

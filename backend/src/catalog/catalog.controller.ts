@@ -9,6 +9,7 @@ import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { CatalogService } from './catalog.service';
 import { BotDbService } from './bot-db.service';
+import { EtmService } from '../stores/etm.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 
@@ -22,7 +23,21 @@ export class CatalogController {
   constructor(
     private readonly service: CatalogService,
     private readonly botDb: BotDbService,
+    private readonly etmService: EtmService,
   ) {}
+
+  /** Admin-only diagnostic: full row data + raw ETM responses for one product. */
+  @Get('admin/product-info/:source/:id')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  async adminProductInfo(
+    @Param('source') source: 'tile' | 'catalog',
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const row = await this.service.getProductRowForAdmin(source, id);
+    if (!row) return { error: 'product not found', source, id };
+    const etm = await this.etmService.getAdminDebugInfo(row.article || null, row.etm_code || null);
+    return { source, id, row, etm };
+  }
 
   /** Admin: force refresh the in-memory bot DB cache */
   @Post('bot-cache/refresh')

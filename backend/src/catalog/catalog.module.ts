@@ -5,11 +5,13 @@ import { Manufacturer, PriceList, CatalogCategory, CatalogProduct, ProductAnalog
 import { CatalogService } from './catalog.service';
 import { CatalogController } from './catalog.controller';
 import { BotDbService } from './bot-db.service';
+import { StoresModule } from '../stores/stores.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Manufacturer, PriceList, CatalogCategory, CatalogProduct, ProductAnalog, ProductAccessory, CatalogTile, TileProduct]),
     MulterModule.register({ dest: process.env.UPLOAD_DIR || './uploads' }),
+    StoresModule,
   ],
   providers: [CatalogService, BotDbService],
   controllers: [CatalogController],

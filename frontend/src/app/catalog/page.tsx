@@ -29,7 +29,27 @@ export default function CatalogPage() {
 
 function CatalogPageInner() {
   const router = useRouter();
-  const { activeSheetId } = useAppStore();
+  const { activeSheetId, user } = useAppStore();
+  const isAdmin = user?.plan === 'admin';
+  const [adminInfo, setAdminInfo] = useState<{ loading: boolean; data: any | null; productName: string } | null>(null);
+
+  async function openAdminInfo(p: any) {
+    // Search results carry _source; for tile/manuf views infer from current mode.
+    const source = p._source === 'tile'
+      ? 'tile'
+      : (p._source === 'catalog' ? 'catalog' : (mode === 'filter' ? 'tile' : 'catalog'));
+    setAdminInfo({ loading: true, data: null, productName: p.name || '' });
+    try {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || '/api'}/catalog/admin/product-info/${source}/${p.id}`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` } },
+      );
+      const data = await res.json();
+      setAdminInfo({ loading: false, data, productName: p.name || '' });
+    } catch (e: any) {
+      setAdminInfo({ loading: false, data: { error: e?.message || 'Ошибка запроса' }, productName: p.name || '' });
+    }
+  }
 
   // ── Restore persisted state (sync, before first render) ───
   const saved = (() => { try { return loadSavedState(); } catch { return null; } })();
@@ -341,22 +361,21 @@ function CatalogPageInner() {
       filterProducts;
     if (!rows || rows.length === 0) return;
 
-    // ETM lookup is keyed strictly on `article`. Items without an mnf article
-    // are NOT fetched: the ETM internal code (etm_code) on its own can match a
-    // completely different product when sent as type=mnf, which used to surface
-    // ghost prices like 193,41 ₽ in the list for cables that don't actually
-    // exist in ETM under that identifier.
+    // ETM lookup keys: prefer `article` (sent as type=mnf), fall back to
+    // `etm_code` (sent as type=etm — ETM's own internal code, unambiguous).
+    // The earlier "article-only" rule starved cable price lists where the
+    // article column is empty but every row carries a unique etm_code.
     const allItems = rows
       .slice(0, 50)
       .map(r => ({ article: r.article, etmCode: r.etm_code }))
-      .filter(it => it.article && it.article.trim());
+      .filter(it => (it.article && it.article.trim()) || (it.etmCode && it.etmCode.trim()));
     if (allItems.length === 0) return;
 
     const t = setTimeout(async () => {
       // At fire time, filter out items already fetched (via ref to get fresh state)
       const current = rowEtmDataRef.current;
       const items = allItems.filter(it => {
-        const key = it.article;
+        const key = (it.article || it.etmCode || '').trim();
         return key && current[key] === undefined;
       });
       if (items.length === 0) return;
@@ -832,13 +851,27 @@ function CatalogPageInner() {
           })()}
         </div>
         </div>
-        <button
-          className="btn-add-to-list"
-          style={{ marginTop: 10, alignSelf: 'flex-start' }}
-          onClick={e => { e.stopPropagation(); addToSheet(selectedProduct); }}
-        >
-          + Добавить в лист
-        </button>
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, alignItems: 'center' }}>
+          <button
+            className="btn-add-to-list"
+            style={{ alignSelf: 'flex-start' }}
+            onClick={e => { e.stopPropagation(); addToSheet(selectedProduct); }}
+          >
+            + Добавить в лист
+          </button>
+          {isAdmin && (
+            <button
+              onClick={e => { e.stopPropagation(); openAdminInfo(selectedProduct); }}
+              style={{
+                background: '#fff', color: '#1976d2', border: '1px solid #1976d2',
+                borderRadius: 6, padding: '7px 14px', fontSize: 13, fontWeight: 500, cursor: 'pointer',
+              }}
+              title="Сравнить данные из загруженного прайса с ответом ETM (видно только администратору)"
+            >
+              Информация
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -1083,6 +1116,80 @@ function CatalogPageInner() {
               <button className="btn-primary" onClick={() => { setShowSelectSheet(false); router.push('/projects'); }}>
                 К проектам
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin-only debug modal: row data from DB + raw ETM API responses */}
+      {adminInfo && (
+        <div className="modal-overlay" onClick={() => setAdminInfo(null)}>
+          <div className="modal-box" style={{ maxWidth: 900, width: '95vw', maxHeight: '90vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-title">Информация о товаре (админ)</div>
+            <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16, lineHeight: 1.4 }}>
+              {adminInfo.productName}
+            </p>
+            {adminInfo.loading && <div style={{ padding: 24, textAlign: 'center' }}>Загрузка…</div>}
+            {!adminInfo.loading && adminInfo.data && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                {/* DB row */}
+                <section>
+                  <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>
+                    Строка из загруженного прайса
+                    <span style={{ marginLeft: 8, color: 'var(--muted)', fontWeight: 400, fontSize: 12 }}>
+                      ({adminInfo.data.source === 'tile' ? 'tile_products' : 'catalog_products'})
+                    </span>
+                  </h3>
+                  {adminInfo.data.row ? (
+                    <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                      <tbody>
+                        {Object.entries(adminInfo.data.row).map(([k, v]) => (
+                          <tr key={k} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                            <td style={{ padding: '6px 8px', color: 'var(--muted)', fontWeight: 500, width: 180, verticalAlign: 'top' }}>{k}</td>
+                            <td style={{ padding: '6px 8px', wordBreak: 'break-all', fontFamily: 'monospace' }}>
+                              {v === null || v === undefined ? <span style={{ color: '#bbb' }}>null</span>
+                                : typeof v === 'object' ? JSON.stringify(v, null, 2)
+                                : String(v)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : <p style={{ color: 'var(--muted)' }}>Запись не найдена</p>}
+                </section>
+
+                {/* ETM raw response */}
+                <section>
+                  <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Ответ ETM (raw)</h3>
+                  {adminInfo.data.etm?.error ? (
+                    <div style={{ padding: 12, background: '#fef2f2', color: '#991b1b', borderRadius: 6, fontSize: 12 }}>
+                      {adminInfo.data.etm.error}
+                    </div>
+                  ) : (
+                    <>
+                      {adminInfo.data.etm?.request && (
+                        <div style={{ marginBottom: 10, fontSize: 12, color: 'var(--muted)' }}>
+                          <div>Артикул в строке: <strong style={{ color: 'var(--text)' }}>{adminInfo.data.etm.request.article || '—'}</strong></div>
+                          <div>ETM-код в строке: <strong style={{ color: 'var(--text)' }}>{adminInfo.data.etm.request.etm_code || '—'}</strong></div>
+                          <div>Тип запроса: <strong style={{ color: 'var(--text)' }}>{adminInfo.data.etm.request.codeType}</strong> = {adminInfo.data.etm.request.codeUsed}</div>
+                          <div>Сессия: <strong style={{ color: 'var(--text)' }}>{adminInfo.data.etm.request.sessionType}</strong></div>
+                        </div>
+                      )}
+                      <h4 style={{ fontSize: 12, fontWeight: 600, marginTop: 12, marginBottom: 4 }}>/price</h4>
+                      <pre style={{ background: '#f8f9fa', padding: 10, borderRadius: 6, fontSize: 11, overflow: 'auto', maxHeight: 200, margin: 0 }}>
+                        {JSON.stringify(adminInfo.data.etm?.priceResponse, null, 2)}
+                      </pre>
+                      <h4 style={{ fontSize: 12, fontWeight: 600, marginTop: 12, marginBottom: 4 }}>/remains</h4>
+                      <pre style={{ background: '#f8f9fa', padding: 10, borderRadius: 6, fontSize: 11, overflow: 'auto', maxHeight: 200, margin: 0 }}>
+                        {JSON.stringify(adminInfo.data.etm?.remainsResponse, null, 2)}
+                      </pre>
+                    </>
+                  )}
+                </section>
+              </div>
+            )}
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button className="btn-cancel" onClick={() => setAdminInfo(null)}>Закрыть</button>
             </div>
           </div>
         </div>

@@ -462,6 +462,16 @@ export class CatalogService implements OnModuleInit {
    *
    * Results from all tiers are merged, deduplicated by article, and ranked.
    */
+  /** Admin-only: return raw row from the chosen product table. */
+  async getProductRowForAdmin(source: 'tile' | 'catalog', id: number): Promise<any> {
+    if (source === 'tile') {
+      const row = await this.tileProductRepo.findOne({ where: { id } });
+      return row || null;
+    }
+    const row = await this.prodRepo.findOne({ where: { id }, relations: ['manufacturer'] });
+    return row || null;
+  }
+
   async searchProducts(q: string, limit = 100) {
     if (!q || q.trim().length < 2) return [];
     const ql = q.trim().toLowerCase();
