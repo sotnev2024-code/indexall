@@ -463,19 +463,39 @@ export class CatalogService implements OnModuleInit {
    * Results from all tiers are merged, deduplicated by article, and ranked.
    */
   async searchProducts(q: string, limit = 100) {
-    if (!q || q.length < 2) return [];
+    if (!q || q.trim().length < 2) return [];
     const ql = q.trim().toLowerCase();
 
-    // ── Search catalog_products ─────────────────────────────────
+    // Cached brand list — used to recognise tokens like "Алюр", "Кабэкс",
+    // "IEK" inside the search query so we can boost rows that match the
+    // brand and avoid surfacing other manufacturers' products.
+    const allBrands = await this.manufRepo.find({ select: ['name'] }).catch(() => []);
+    const brandSet = new Set(allBrands.map(b => b.name.trim().toLowerCase()));
+
+    // ── Tokenize query ──────────────────────────────────────────
+    // Strip parens/brackets that are noise for matching, keep digits/letters/-.
+    const tokens = ql
+      .split(/[\s,;]+/)
+      .map(t => t.replace(/[()\[\]<>]/g, ''))
+      .filter(t => t.length >= 2);
+
+    let brandToken: string | null = null;
+    const otherTokens: string[] = [];
+    for (const t of tokens) {
+      if (!brandToken && brandSet.has(t)) brandToken = t;
+      else otherTokens.push(t);
+    }
+
+    // ── Search both product tables ──────────────────────────────
     const fromPriceLists = await this.searchInTable(
-      'catalog_products', 'p', ql, limit,
+      'catalog_products', 'p', ql, otherTokens, brandToken, limit,
       (qb) => qb.leftJoinAndSelect('p.manufacturer', 'm').andWhere('p.is_active = true'),
     );
+    const fromTilesRaw = await this.searchInTable(
+      'tile_products', 'tp', ql, otherTokens, brandToken, limit,
+    );
 
-    // ── Search tile_products ────────────────────────────────────
-    const fromTilesRaw = await this.searchInTable('tile_products', 'tp', ql, limit);
-
-    // Normalize tile products to same shape
+    // Normalize tile products to the same shape
     const fromTiles = fromTilesRaw.map((tp: any) => ({
       id: tp.id,
       name: tp.name,
@@ -506,82 +526,125 @@ export class CatalogService implements OnModuleInit {
     return merged.slice(0, limit);
   }
 
+  /** Escape characters that have meaning in PostgreSQL POSIX regex. */
+  private escapeRegex(s: string): string {
+    return s.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+  }
+
   /**
-   * 3-tier search within a single table:
-   *  1. Exact/prefix article match
-   *  2. Full-text search (Russian morphology via to_tsquery)
-   *  3. pg_trgm fuzzy fallback (typo tolerance)
+   * Rank-based search within a single table.
+   *
+   * Score components per row:
+   *   • +1000 — article exactly equals the full query
+   *   • +500  — article starts with the full query
+   *   • +200  — article exactly equals one of the query tokens
+   *   • +100  — brand-token matches m.name (or tp.brand)
+   *   • +30   — every "other" token matched as a word in the name
+   *             (uses `\m<token>` regex so "провод" doesn't match "шинопровод")
+   *   • +5×   — trigram similarity to the whole query (tiebreaker)
+   *
+   * A row is returned only if it scored at least once on a non-trivial signal —
+   * pure trigram noise (similarity 0.05) does NOT qualify. This kills the case
+   * where typing "Провод ПуГВнг..." returned шинопроводы.
    */
   private async searchInTable(
     table: string,
     alias: string,
-    q: string,
+    qFull: string,
+    nameTokens: string[],
+    brandToken: string | null,
     limit: number,
     customize?: (qb: any) => void,
   ): Promise<any[]> {
     const repo = table === 'tile_products' ? this.tileProductRepo : this.prodRepo;
-    const like = `%${q}%`;
-    // Normalized query: strip spaces, dashes, dots for loose article matching
-    // e.g. "1C2" matches "1P-C-2A" because normalized both become substrings
-    const qNorm = q.replace(/[\s\-\.\/]/g, '');
-    const likeNorm = `%${qNorm}%`;
+    const brandColumn = table === 'tile_products' ? `${alias}.brand` : `m.name`;
 
-    // Tier 1: exact/prefix article match + substring LIKE on name + normalized article LIKE
-    const qb1 = repo.createQueryBuilder(alias)
-      .where(`(
-        LOWER(${alias}.article) = :q
-        OR LOWER(${alias}.article) LIKE :prefix
-        OR LOWER(${alias}.name) LIKE :like
-        OR LOWER(REPLACE(REPLACE(REPLACE(REPLACE(${alias}.article, '-', ''), ' ', ''), '.', ''), '/', '')) LIKE :likeNorm
-      )`, { q, prefix: `${q}%`, like, likeNorm })
-      .orderBy(`CASE WHEN LOWER(${alias}.article) = :q THEN 0 WHEN LOWER(${alias}.article) LIKE :prefix THEN 1 ELSE 2 END`)
-      .setParameters({ q, prefix: `${q}%` })
+    const params: Record<string, any> = { qFull, qPrefix: `${qFull}%` };
+    const tokenScoreParts: string[] = [];
+    const tokenWhereParts: string[] = [`LOWER(${alias}.article) = :qFull`, `LOWER(${alias}.article) LIKE :qPrefix`];
+
+    nameTokens.forEach((t, i) => {
+      const tokenLower = t.toLowerCase();
+      const re = `\\m${this.escapeRegex(tokenLower)}`;
+      params[`tok${i}`] = re;
+      params[`tokExact${i}`] = tokenLower;
+      // Each token: word-boundary match in name OR exact article.
+      tokenScoreParts.push(`(CASE WHEN LOWER(${alias}.name) ~* :tok${i} THEN 30 ELSE 0 END)`);
+      tokenScoreParts.push(`(CASE WHEN LOWER(${alias}.article) = :tokExact${i} THEN 200 ELSE 0 END)`);
+      tokenWhereParts.push(`LOWER(${alias}.name) ~* :tok${i}`);
+      tokenWhereParts.push(`LOWER(${alias}.article) = :tokExact${i}`);
+    });
+
+    if (brandToken) {
+      params.brandTok = brandToken;
+      tokenScoreParts.push(`(CASE WHEN LOWER(${brandColumn}) = :brandTok THEN 100 ELSE 0 END)`);
+    }
+
+    // Always add exact-article and prefix scores
+    tokenScoreParts.push(`(CASE WHEN LOWER(${alias}.article) = :qFull THEN 1000 ELSE 0 END)`);
+    tokenScoreParts.push(`(CASE WHEN LOWER(${alias}.article) LIKE :qPrefix THEN 500 ELSE 0 END)`);
+
+    // Trigram similarity tiebreaker (small weight). Wrap in a try since
+    // pg_trgm is optional.
+    let withTrigram = true;
+    let scoreExpr = tokenScoreParts.join(' + ');
+    try {
+      // Probe: this throws if pg_trgm is missing.
+      await repo.manager.query(`SELECT similarity('a','a')`);
+      scoreExpr += ` + (similarity(${alias}.name, :qFull) * 5)`;
+    } catch {
+      withTrigram = false;
+    }
+
+    const whereClause = tokenWhereParts.length > 0
+      ? tokenWhereParts.join(' OR ')
+      : `LOWER(${alias}.article) = :qFull OR LOWER(${alias}.article) LIKE :qPrefix`;
+
+    let qb = repo.createQueryBuilder(alias)
+      .addSelect(scoreExpr, 'rank_score')
+      .where(`(${whereClause})`, params)
+      .orderBy('rank_score', 'DESC')
+      .setParameters(params)
       .limit(limit);
-    if (customize) customize(qb1);
-    const tier1 = await qb1.getMany();
+    if (customize) customize(qb);
 
-    if (tier1.length >= limit) return tier1;
+    let rows: any[] = [];
+    try {
+      const { entities, raw } = await qb.getRawAndEntities();
+      // getRawAndEntities returns parallel arrays — attach the score and
+      // re-sort defensively to ensure server ordering wins.
+      const scored = entities.map((e: any, i: number) => {
+        const score = Number(raw[i]?.rank_score ?? 0);
+        return { entity: e, score };
+      });
+      scored.sort((a, b) => b.score - a.score);
+      rows = scored.map(s => s.entity);
+    } catch {
+      // Regex syntax error — fall back to simple substring search so the user
+      // at least gets *something* relevant.
+      const fb = repo.createQueryBuilder(alias)
+        .where(`LOWER(${alias}.name) LIKE :sub OR LOWER(${alias}.article) LIKE :sub`, { sub: `%${qFull}%` })
+        .limit(limit);
+      if (customize) customize(fb);
+      rows = await fb.getMany();
+    }
 
-    // Tier 2: Full-text search with Russian morphology
-    // Convert query to tsquery: split words, join with & (AND), add :* for prefix matching
-    const tsWords = q.split(/\s+/).filter(w => w.length >= 2).map(w => `${w}:*`).join(' & ');
-    let tier2: any[] = [];
-    if (tsWords) {
+    // Add trigram fuzzy fallback ONLY if we got too few results AND
+    // pg_trgm is available — for typo tolerance.
+    if (rows.length < 5 && withTrigram) {
       try {
-        const qb2 = repo.createQueryBuilder(alias)
-          .where(`to_tsvector('russian', coalesce(${alias}.name, '') || ' ' || coalesce(${alias}.article, '')) @@ to_tsquery('russian', :tsq)`, { tsq: tsWords })
-          .orderBy(`ts_rank(to_tsvector('russian', coalesce(${alias}.name, '') || ' ' || coalesce(${alias}.article, '')), to_tsquery('russian', :tsq))`, 'DESC')
-          .setParameters({ tsq: tsWords })
-          .limit(limit);
-        if (customize) customize(qb2);
-        tier2 = await qb2.getMany();
-      } catch { /* tsquery syntax error — skip FTS tier */ }
+        const seen = new Set(rows.map(r => r.id));
+        const fuzzy = repo.createQueryBuilder(alias)
+          .where(`similarity(${alias}.name, :qFull) > 0.35 OR similarity(${alias}.article, :qFull) > 0.4`, { qFull })
+          .orderBy(`GREATEST(similarity(${alias}.name, :qFull), similarity(${alias}.article, :qFull))`, 'DESC')
+          .limit(limit - rows.length);
+        if (customize) customize(fuzzy);
+        const extras = (await fuzzy.getMany()).filter((r: any) => !seen.has(r.id));
+        rows.push(...extras);
+      } catch { /* pg_trgm missing — already handled above */ }
     }
 
-    // Tier 3: pg_trgm fuzzy search (catches typos)
-    const existingIds = new Set([...tier1, ...tier2].map((r: any) => r.id));
-    let tier3: any[] = [];
-    if (tier1.length + tier2.length < limit) {
-      try {
-        const qb3 = repo.createQueryBuilder(alias)
-          .where(`(similarity(${alias}.name, :q) > 0.15 OR similarity(${alias}.article, :q) > 0.3)`, { q })
-          .orderBy(`GREATEST(similarity(${alias}.name, :q), similarity(${alias}.article, :q))`, 'DESC')
-          .setParameters({ q })
-          .limit(limit);
-        if (customize) customize(qb3);
-        tier3 = (await qb3.getMany()).filter((r: any) => !existingIds.has(r.id));
-      } catch { /* pg_trgm not available — skip */ }
-    }
-
-    // Merge all tiers: tier1 (exact) → tier2 (FTS) → tier3 (fuzzy), deduplicated
-    const allIds = new Set<number>();
-    const result: any[] = [];
-    for (const r of [...tier1, ...tier2, ...tier3]) {
-      if (allIds.has(r.id)) continue;
-      allIds.add(r.id);
-      result.push(r);
-    }
-    return result.slice(0, limit);
+    return rows;
   }
 
   // ── xlsx parser ───────────────────────────────────────────
