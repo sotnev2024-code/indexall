@@ -1130,64 +1130,88 @@ function CatalogPageInner() {
               {adminInfo.productName}
             </p>
             {adminInfo.loading && <div style={{ padding: 24, textAlign: 'center' }}>Загрузка…</div>}
-            {!adminInfo.loading && adminInfo.data && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-                {/* DB row */}
-                <section>
-                  <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>
-                    Строка из загруженного прайса
-                    <span style={{ marginLeft: 8, color: 'var(--muted)', fontWeight: 400, fontSize: 12 }}>
-                      ({adminInfo.data.source === 'tile' ? 'tile_products' : 'catalog_products'})
-                    </span>
-                  </h3>
-                  {adminInfo.data.row ? (
-                    <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+            {!adminInfo.loading && adminInfo.data && (() => {
+              const row = adminInfo.data.row || {};
+              const etm = adminInfo.data.etm || {};
+              const summary = etm.summary || {};
+              const catalogPrice = row.price && Number(row.price) > 0 ? Number(row.price) : null;
+              // Resolve final values exactly as addToSheet would: ETM personal first, then catalog.
+              const finalPrice = summary.personal != null ? summary.personal
+                               : summary.retail   != null ? summary.retail
+                               : catalogPrice     != null ? catalogPrice
+                               : null;
+              const finalSource = summary.personal != null || summary.retail != null ? 'ЭТМ' : '—';
+              const finalDeadline = (summary.personal != null || summary.retail != null) && summary.date ? summary.date : '';
+              const fmtPrice = (v: number | null) => v != null ? `${v.toLocaleString('ru-RU')} ₽` : '—';
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                  {/* What gets pulled into the spec sheet */}
+                  <section>
+                    <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: '#1a1a1a' }}>
+                      Что попадёт в лист спецификации
+                    </h3>
+                    <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', background: '#f8f9fa', borderRadius: 6 }}>
                       <tbody>
-                        {Object.entries(adminInfo.data.row).map(([k, v]) => (
-                          <tr key={k} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                            <td style={{ padding: '6px 8px', color: 'var(--muted)', fontWeight: 500, width: 180, verticalAlign: 'top' }}>{k}</td>
-                            <td style={{ padding: '6px 8px', wordBreak: 'break-all', fontFamily: 'monospace' }}>
-                              {v === null || v === undefined ? <span style={{ color: '#bbb' }}>null</span>
-                                : typeof v === 'object' ? JSON.stringify(v, null, 2)
-                                : String(v)}
-                            </td>
+                        {[
+                          ['Название', row.name || '—'],
+                          ['Бренд', row.brand || row.manufacturer?.name || '—'],
+                          ['Артикул', row.article || '—'],
+                          ['ETM-код', row.etm_code || '—'],
+                          ['Цена', fmtPrice(finalPrice)],
+                          ['Источник', finalSource],
+                          ['Срок', finalDeadline || '—'],
+                        ].map(([label, value]) => (
+                          <tr key={label} style={{ borderBottom: '1px solid #eee' }}>
+                            <td style={{ padding: '8px 12px', color: 'var(--muted)', width: 140 }}>{label}</td>
+                            <td style={{ padding: '8px 12px', fontWeight: 600, color: '#1a1a1a' }}>{value}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
-                  ) : <p style={{ color: 'var(--muted)' }}>Запись не найдена</p>}
-                </section>
+                  </section>
 
-                {/* ETM raw response */}
-                <section>
-                  <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Ответ ETM (raw)</h3>
-                  {adminInfo.data.etm?.error ? (
-                    <div style={{ padding: 12, background: '#fef2f2', color: '#991b1b', borderRadius: 6, fontSize: 12 }}>
-                      {adminInfo.data.etm.error}
-                    </div>
-                  ) : (
-                    <>
-                      {adminInfo.data.etm?.request && (
-                        <div style={{ marginBottom: 10, fontSize: 12, color: 'var(--muted)' }}>
-                          <div>Артикул в строке: <strong style={{ color: 'var(--text)' }}>{adminInfo.data.etm.request.article || '—'}</strong></div>
-                          <div>ETM-код в строке: <strong style={{ color: 'var(--text)' }}>{adminInfo.data.etm.request.etm_code || '—'}</strong></div>
-                          <div>Тип запроса: <strong style={{ color: 'var(--text)' }}>{adminInfo.data.etm.request.codeType}</strong> = {adminInfo.data.etm.request.codeUsed}</div>
-                          <div>Сессия: <strong style={{ color: 'var(--text)' }}>{adminInfo.data.etm.request.sessionType}</strong></div>
-                        </div>
-                      )}
-                      <h4 style={{ fontSize: 12, fontWeight: 600, marginTop: 12, marginBottom: 4 }}>/price</h4>
-                      <pre style={{ background: '#f8f9fa', color: '#1a1a1a', padding: 10, borderRadius: 6, fontSize: 11, overflow: 'auto', maxHeight: 200, margin: 0 }}>
-                        {JSON.stringify(adminInfo.data.etm?.priceResponse, null, 2)}
-                      </pre>
-                      <h4 style={{ fontSize: 12, fontWeight: 600, marginTop: 12, marginBottom: 4 }}>/remains</h4>
-                      <pre style={{ background: '#f8f9fa', color: '#1a1a1a', padding: 10, borderRadius: 6, fontSize: 11, overflow: 'auto', maxHeight: 200, margin: 0 }}>
-                        {JSON.stringify(adminInfo.data.etm?.remainsResponse, null, 2)}
-                      </pre>
-                    </>
-                  )}
-                </section>
-              </div>
-            )}
+                  {/* Source-of-price comparison */}
+                  <section>
+                    <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: '#1a1a1a' }}>
+                      Источники цены
+                    </h3>
+                    <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', background: '#f8f9fa', borderRadius: 6 }}>
+                      <tbody>
+                        <tr style={{ borderBottom: '1px solid #eee' }}>
+                          <td style={{ padding: '8px 12px', color: 'var(--muted)', width: 200 }}>Каталожная цена (из прайса)</td>
+                          <td style={{ padding: '8px 12px', fontWeight: 600, color: catalogPrice != null ? '#1a1a1a' : '#aaa' }}>
+                            {fmtPrice(catalogPrice)}
+                          </td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid #eee' }}>
+                          <td style={{ padding: '8px 12px', color: 'var(--muted)' }}>Личная цена ЭТМ</td>
+                          <td style={{ padding: '8px 12px', fontWeight: 600, color: summary.personal != null ? '#1a1a1a' : '#aaa' }}>
+                            {fmtPrice(summary.personal ?? null)}
+                          </td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid #eee' }}>
+                          <td style={{ padding: '8px 12px', color: 'var(--muted)' }}>Ритейл цена ЭТМ</td>
+                          <td style={{ padding: '8px 12px', fontWeight: 600, color: summary.retail != null ? '#1a1a1a' : '#aaa' }}>
+                            {fmtPrice(summary.retail ?? null)}
+                          </td>
+                        </tr>
+                        <tr>
+                          <td style={{ padding: '8px 12px', color: 'var(--muted)' }}>Срок ЭТМ</td>
+                          <td style={{ padding: '8px 12px', fontWeight: 600, color: summary.date ? '#1a1a1a' : '#aaa' }}>
+                            {summary.date || '—'}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    {etm?.error && (
+                      <div style={{ marginTop: 8, padding: 10, background: '#fef2f2', color: '#991b1b', borderRadius: 6, fontSize: 12 }}>
+                        {etm.error}
+                      </div>
+                    )}
+                  </section>
+                </div>
+              );
+            })()}
             <div className="modal-actions" style={{ marginTop: 16 }}>
               <button className="btn-cancel" onClick={() => setAdminInfo(null)}>Закрыть</button>
             </div>

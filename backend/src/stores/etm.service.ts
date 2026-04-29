@@ -71,11 +71,12 @@ export class EtmService {
   }
 
   /**
-   * Admin-only diagnostic: fetch unfiltered ETM /price and /remains responses
-   * for an article OR an ETM code. Returns the raw JSON exactly as ETM
-   * returned it (all price fields, status codes, error messages) so the admin
-   * can compare with what the platform displays. No caching, no `pickPrice`,
-   * no fallbacks — straight passthrough.
+   * Admin-only diagnostic: fetch ETM /price and /remains and return a
+   * compact shape with the three values the UI cares about: личная цена
+   * (pricewnds), ритейл цена (price_retail), дата (delivery term as the
+   * platform would resolve it via parseRemainsRow). Bypasses cache and our
+   * pickPrice fallbacks — straight passthrough so the admin can compare
+   * with what gets stored in the spec.
    */
   async getAdminDebugInfo(article: string | null, etmCode: string | null) {
     const code = (etmCode || '').trim() || (article || '').trim();
@@ -98,12 +99,24 @@ export class EtmService {
     const remainsUrl =
       `https://${this.host}/api/v1/goods/${encodeURIComponent(code)}/remains?type=${codeType}&sessionid=${encodeURIComponent(session)}`;
 
-    const safeUrl = (u: string) => u.replace(/sessionid=[^&]+/i, 'sessionid=***');
-
     const [priceRaw, remainsRaw] = await Promise.all([
       this.enqueue(() => this.curlRequest(priceUrl, 'GET')).catch((e: any) => ({ error: e?.message })),
       this.enqueue(() => this.curlRequest(remainsUrl, 'GET')).catch((e: any) => ({ error: e?.message })),
     ]);
+
+    // Extract the three numbers the UI shows. Same priority order
+    // (personal → retail) we use for the user-facing «Цена ЭТМ» field.
+    const priceRow = Array.isArray(priceRaw?.data?.rows) ? priceRaw.data.rows[0] : priceRaw?.data;
+    const num = (v: any) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    };
+    const personal = num(priceRow?.pricewnds);
+    const retail = num(priceRow?.price_retail);
+    const date = this.parseRemainsRow(remainsRaw?.data) || null;
+
+    const priceErr = priceRaw?.error || (priceRaw?.status?.code !== 200 ? priceRaw?.status?.message : null);
+    const remainsErr = remainsRaw?.error || (remainsRaw?.status?.code !== 200 ? remainsRaw?.status?.message : null);
 
     return {
       request: {
@@ -111,12 +124,14 @@ export class EtmService {
         etm_code: etmCode || null,
         codeUsed: code,
         codeType,
-        sessionType: 'shared (env)',
-        priceUrl: safeUrl(priceUrl),
-        remainsUrl: safeUrl(remainsUrl),
       },
-      priceResponse: priceRaw,
-      remainsResponse: remainsRaw,
+      summary: {
+        personal,
+        retail,
+        date,
+        priceError: priceErr || null,
+        remainsError: remainsErr || null,
+      },
     };
   }
 

@@ -2,11 +2,9 @@
 import { useState } from 'react';
 
 /**
- * Admin-only floating helper: enter an article (or ETM code) and see the raw
- * ETM /price + /remains response side-by-side. Lets the admin verify what
- * ETM is actually returning for any SKU without having to find that product
- * in the catalog UI first. Reuses the same backend handler as the per-card
- * «Информация» button.
+ * Admin-only ETM lookup. Enter article (or ETM code) → see exactly what gets
+ * pulled into the spec from ETM: личная цена, ритейл цена, дата (срок).
+ * No raw JSON — just the three fields the platform actually uses.
  */
 export default function AdminEtmLookup({ onClose }: { onClose: () => void }) {
   const [article, setArticle] = useState('');
@@ -41,19 +39,19 @@ export default function AdminEtmLookup({ onClose }: { onClose: () => void }) {
     <div className="modal-overlay" onClick={onClose}>
       <div
         className="modal-box"
-        style={{ maxWidth: 900, width: '95vw', maxHeight: '90vh', overflowY: 'auto' }}
+        style={{ maxWidth: 520, width: '95vw' }}
         onClick={e => e.stopPropagation()}
       >
-        <div className="modal-title">ЭТМ-проверка артикула (админ)</div>
+        <div className="modal-title">ЭТМ-проверка артикула</div>
         <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
-          Прямой запрос к ETM iPRO без кэша и без логики приложения. Показывает
-          все поля цены и наличия как их вернул ЭТМ.
+          Прямой запрос к ETM без кэша. Показывает личную цену, ритейл и срок —
+          то, что реально подтянется в лист.
         </p>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
           <div>
             <label style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>
-              Артикул производителя (type=mnf)
+              Артикул производителя
             </label>
             <input
               className="input-field"
@@ -67,7 +65,7 @@ export default function AdminEtmLookup({ onClose }: { onClose: () => void }) {
           </div>
           <div>
             <label style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>
-              ETM-код (type=etm) — необязательно
+              ETM-код (необязательно)
             </label>
             <input
               className="input-field"
@@ -105,46 +103,51 @@ export default function AdminEtmLookup({ onClose }: { onClose: () => void }) {
         </div>
 
         {result && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {result.error ? (
-              <div style={{ padding: 12, background: '#fef2f2', color: '#991b1b', borderRadius: 6, fontSize: 12 }}>
-                {result.error}
-              </div>
-            ) : (
-              <>
-                {result.request && (
-                  <div style={{ fontSize: 12, color: '#555', background: '#f8f9fa', padding: 10, borderRadius: 6 }}>
-                    <div>Артикул: <strong style={{ color: '#1a1a1a' }}>{result.request.article || '—'}</strong></div>
-                    <div>ETM-код: <strong style={{ color: '#1a1a1a' }}>{result.request.etm_code || '—'}</strong></div>
-                    <div>
-                      Тип запроса: <strong style={{ color: '#1a1a1a' }}>{result.request.codeType}</strong>
-                      {' → '}
-                      <span style={{ fontFamily: 'monospace', color: '#1a1a1a' }}>{result.request.codeUsed}</span>
-                    </div>
-                    <div>Сессия: <strong style={{ color: '#1a1a1a' }}>{result.request.sessionType}</strong></div>
-                  </div>
-                )}
-                <section>
-                  <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, color: '#1a1a1a' }}>/price</h4>
-                  <pre style={{ background: '#f8f9fa', color: '#1a1a1a', padding: 10, borderRadius: 6, fontSize: 11, overflow: 'auto', maxHeight: 260, margin: 0 }}>
-                    {JSON.stringify(result.priceResponse, null, 2)}
-                  </pre>
-                </section>
-                <section>
-                  <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, color: '#1a1a1a' }}>/remains</h4>
-                  <pre style={{ background: '#f8f9fa', color: '#1a1a1a', padding: 10, borderRadius: 6, fontSize: 11, overflow: 'auto', maxHeight: 260, margin: 0 }}>
-                    {JSON.stringify(result.remainsResponse, null, 2)}
-                  </pre>
-                </section>
-              </>
-            )}
-          </div>
+          result.error ? (
+            <div style={{ padding: 12, background: '#fef2f2', color: '#991b1b', borderRadius: 6, fontSize: 12 }}>
+              {result.error}
+            </div>
+          ) : (
+            <EtmSummaryBlock summary={result.summary} />
+          )
         )}
 
         <div className="modal-actions" style={{ marginTop: 16 }}>
           <button className="btn-cancel" onClick={onClose}>Закрыть</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Renders the three fields we actually pull into the spec. Reused by the
+ *  product-card «Информация» modal so both views look identical. */
+export function EtmSummaryBlock({ summary }: { summary: any }) {
+  if (!summary) return null;
+  const fmt = (v: number | null) => v != null ? `${v.toLocaleString('ru-RU')} ₽` : '—';
+  const rows: { label: string; value: string; muted?: boolean }[] = [
+    { label: 'Личная цена', value: fmt(summary.personal), muted: summary.personal == null },
+    { label: 'Ритейл цена', value: fmt(summary.retail), muted: summary.retail == null },
+    { label: 'Дата (срок)', value: summary.date || '—', muted: !summary.date },
+  ];
+  return (
+    <div style={{ background: '#f8f9fa', borderRadius: 6, padding: 12 }}>
+      <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.label} style={{ borderBottom: '1px solid #eee' }}>
+              <td style={{ padding: '8px 4px', color: 'var(--muted)', width: 140 }}>{r.label}</td>
+              <td style={{ padding: '8px 4px', fontWeight: 600, color: r.muted ? '#aaa' : '#1a1a1a' }}>{r.value}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {(summary.priceError || summary.remainsError) && (
+        <div style={{ fontSize: 11, color: '#991b1b', marginTop: 8 }}>
+          {summary.priceError && <div>Цена: {summary.priceError}</div>}
+          {summary.remainsError && <div>Срок: {summary.remainsError}</div>}
+        </div>
+      )}
     </div>
   );
 }
