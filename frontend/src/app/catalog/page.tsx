@@ -550,8 +550,17 @@ function CatalogPageInner() {
   function dedupeProducts(arr: any[]): any[] {
     const seen = new Map<string, any>();
     for (const p of arr) {
-      const key = `${(p.article || '').toLowerCase()}|${(p.manufacturer?.name || p.brand || '').toLowerCase()}`;
-      if (!key || key === '|') { seen.set(`noart-${p.id}`, p); continue; }
+      const article = (p.article || '').trim().toLowerCase();
+      const etmCode = (p.etm_code || '').trim().toLowerCase();
+      const brand   = (p.manufacturer?.name || p.brand || '').trim().toLowerCase();
+      // Identifier preference: explicit article → ETM code → unique product id.
+      // The old logic keyed only on article+brand, so price lists without
+      // article column (like Алюр / ЭлПром) collapsed all 3000 cables into a
+      // single row per brand because every entry hashed to "|<brand>" and
+      // only the first one was kept. Falling through to etm_code keeps wires
+      // that differ by colour/section/length distinct.
+      const idPart = article || etmCode || `id-${p.id}`;
+      const key = `${idPart}|${brand}`;
       const existing = seen.get(key);
       if (!existing) seen.set(key, p);
       // If new copy has external_url/image_url and the existing one doesn't — prefer the new one
