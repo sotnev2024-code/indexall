@@ -57,6 +57,7 @@ export default function AdminEtmLookup({ onClose }: { onClose: () => void }) {
             </label>
             <input
               className="input-field"
+              style={{ color: '#1a1a1a', background: '#fff' }}
               value={article}
               onChange={e => setArticle(e.target.value)}
               placeholder="например, mcb47100-4-16C-pro"
@@ -70,6 +71,7 @@ export default function AdminEtmLookup({ onClose }: { onClose: () => void }) {
             </label>
             <input
               className="input-field"
+              style={{ color: '#1a1a1a', background: '#fff' }}
               value={etmCode}
               onChange={e => setEtmCode(e.target.value)}
               placeholder="например, 7687607"
@@ -111,26 +113,26 @@ export default function AdminEtmLookup({ onClose }: { onClose: () => void }) {
             ) : (
               <>
                 {result.request && (
-                  <div style={{ fontSize: 12, color: 'var(--muted)', background: '#f8f9fa', padding: 10, borderRadius: 6 }}>
-                    <div>Артикул: <strong style={{ color: 'var(--text)' }}>{result.request.article || '—'}</strong></div>
-                    <div>ETM-код: <strong style={{ color: 'var(--text)' }}>{result.request.etm_code || '—'}</strong></div>
+                  <div style={{ fontSize: 12, color: '#555', background: '#f8f9fa', padding: 10, borderRadius: 6 }}>
+                    <div>Артикул: <strong style={{ color: '#1a1a1a' }}>{result.request.article || '—'}</strong></div>
+                    <div>ETM-код: <strong style={{ color: '#1a1a1a' }}>{result.request.etm_code || '—'}</strong></div>
                     <div>
-                      Тип запроса: <strong style={{ color: 'var(--text)' }}>{result.request.codeType}</strong>
+                      Тип запроса: <strong style={{ color: '#1a1a1a' }}>{result.request.codeType}</strong>
                       {' → '}
-                      <span style={{ fontFamily: 'monospace' }}>{result.request.codeUsed}</span>
+                      <span style={{ fontFamily: 'monospace', color: '#1a1a1a' }}>{result.request.codeUsed}</span>
                     </div>
-                    <div>Сессия: <strong style={{ color: 'var(--text)' }}>{result.request.sessionType}</strong></div>
+                    <div>Сессия: <strong style={{ color: '#1a1a1a' }}>{result.request.sessionType}</strong></div>
                   </div>
                 )}
                 <section>
-                  <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>/price</h4>
-                  <pre style={{ background: '#f8f9fa', padding: 10, borderRadius: 6, fontSize: 11, overflow: 'auto', maxHeight: 260, margin: 0 }}>
+                  <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, color: '#1a1a1a' }}>/price</h4>
+                  <pre style={{ background: '#f8f9fa', color: '#1a1a1a', padding: 10, borderRadius: 6, fontSize: 11, overflow: 'auto', maxHeight: 260, margin: 0 }}>
                     {JSON.stringify(result.priceResponse, null, 2)}
                   </pre>
                 </section>
                 <section>
-                  <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>/remains</h4>
-                  <pre style={{ background: '#f8f9fa', padding: 10, borderRadius: 6, fontSize: 11, overflow: 'auto', maxHeight: 260, margin: 0 }}>
+                  <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, color: '#1a1a1a' }}>/remains</h4>
+                  <pre style={{ background: '#f8f9fa', color: '#1a1a1a', padding: 10, borderRadius: 6, fontSize: 11, overflow: 'auto', maxHeight: 260, margin: 0 }}>
                     {JSON.stringify(result.remainsResponse, null, 2)}
                   </pre>
                 </section>

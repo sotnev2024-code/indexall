@@ -682,17 +682,12 @@ export default function AdminPage() {
           title="ЭТМ-проверка артикула"
           style={{
             marginLeft: 'auto',
-            display: 'inline-flex', alignItems: 'center', gap: 6,
             background: '#fff', color: '#1976d2',
             border: '1px solid #1976d2', borderRadius: 6,
-            padding: '5px 10px', fontSize: 12, fontWeight: 600,
+            padding: '5px 12px', fontSize: 12, fontWeight: 600,
             cursor: 'pointer',
           }}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <circle cx="11" cy="11" r="7"/>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-          </svg>
           ЭТМ
         </button>
       </header>

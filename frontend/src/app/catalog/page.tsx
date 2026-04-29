@@ -1176,11 +1176,11 @@ function CatalogPageInner() {
                         </div>
                       )}
                       <h4 style={{ fontSize: 12, fontWeight: 600, marginTop: 12, marginBottom: 4 }}>/price</h4>
-                      <pre style={{ background: '#f8f9fa', padding: 10, borderRadius: 6, fontSize: 11, overflow: 'auto', maxHeight: 200, margin: 0 }}>
+                      <pre style={{ background: '#f8f9fa', color: '#1a1a1a', padding: 10, borderRadius: 6, fontSize: 11, overflow: 'auto', maxHeight: 200, margin: 0 }}>
                         {JSON.stringify(adminInfo.data.etm?.priceResponse, null, 2)}
                       </pre>
                       <h4 style={{ fontSize: 12, fontWeight: 600, marginTop: 12, marginBottom: 4 }}>/remains</h4>
-                      <pre style={{ background: '#f8f9fa', padding: 10, borderRadius: 6, fontSize: 11, overflow: 'auto', maxHeight: 200, margin: 0 }}>
+                      <pre style={{ background: '#f8f9fa', color: '#1a1a1a', padding: 10, borderRadius: 6, fontSize: 11, overflow: 'auto', maxHeight: 200, margin: 0 }}>
                         {JSON.stringify(adminInfo.data.etm?.remainsResponse, null, 2)}
                       </pre>
                     </>
