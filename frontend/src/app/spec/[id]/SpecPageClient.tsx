@@ -907,12 +907,13 @@ export default function SpecPageClient() {
   async function searchCatalog(q: string, rowIdx: number, field: string, el: HTMLInputElement) {
     if (!q || q.length < 3) { setAcDrops(null); return; }
     const { data } = await catalogApi.search(q);
-    let results = data as any[];
-    if (brandFilter !== 'all') {
-      results = results.filter((p: any) =>
-        (p.manufacturer?.name || p.brand || '').toLowerCase() === brandFilter.toLowerCase()
-      );
-    }
+    const results = data as any[];
+    // The brand-filter chips at the top of the spec are about the catalog
+    // view, not the row autocomplete. Filtering this dropdown by them used
+    // to silently hide matches: typing КВТ article 40883 with the IEK chip
+    // active returned 0 → no dropdown, while pressing Enter (handleArticleBlur,
+    // no filter) pulled the product in. Now the dropdown always shows what
+    // the search returned, regardless of the chip selection.
     if (results.length === 0) { setAcDrops(null); return; }
     setAcDrops({ rowIdx, field, results, rect: el.getBoundingClientRect() });
     setAcFocus(-1);
@@ -921,7 +922,7 @@ export default function SpecPageClient() {
   const debouncedSearch = useCallback((q: string, rowIdx: number, field: string, el: HTMLInputElement) => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(() => searchCatalog(q, rowIdx, field, el), 300);
-  }, [brandFilter]);
+  }, []);
 
   async function handleGlobalSearch(q: string) {
     setGlobalSearch(q);
