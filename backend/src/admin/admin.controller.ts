@@ -81,12 +81,18 @@ export class AdminController implements OnModuleInit {
   @Get('users')
   async getUsers() {
     const users = await this.usersRepo.find({ order: { createdAt: 'DESC' } });
-    const counts = await this.projectsRepo
-      .createQueryBuilder('p')
-      .select('p.userId', 'userId')
-      .addSelect('COUNT(p.id)', 'projects')
-      .groupBy('p.userId')
-      .getRawMany();
+    // Projects on the user's "All projects" page are now stored in two tables:
+    // legacy `projects` and the new `folders` with type='projects'. Counting
+    // only `projects` was understating real numbers (Максим увидел 3 вместо 7).
+    const counts: { userId: number; projects: string }[] = await this.projectsRepo.manager.query(`
+      SELECT uid AS "userId", COUNT(DISTINCT pid)::int AS projects
+      FROM (
+        SELECT id AS pid, "userId" AS uid FROM projects
+        UNION
+        SELECT id AS pid, owner_id AS uid FROM folders WHERE type = 'projects'
+      ) x
+      GROUP BY uid
+    `);
     // A sheet can belong to a user via 3 paths: direct owner_id, through a
     // project (legacy), or through a folder (new model). Old query only
     // covered the project path, so админ-статистика занижала листы у тех,
@@ -179,12 +185,18 @@ export class AdminController implements OnModuleInit {
   async getConversions() {
     const users = await this.usersRepo.find({ order: { createdAt: 'DESC' } });
 
-    const projectCounts = await this.projectsRepo
-      .createQueryBuilder('p')
-      .select('p.userId', 'userId')
-      .addSelect('COUNT(p.id)', 'cnt')
-      .groupBy('p.userId')
-      .getRawMany();
+    // Same reasoning as in getUsers — count projects from BOTH `projects`
+    // and project-typed folders, otherwise users on the new folder model
+    // appear to have 0 projects.
+    const projectCounts: { userId: number; cnt: string }[] = await this.projectsRepo.manager.query(`
+      SELECT uid AS "userId", COUNT(DISTINCT pid)::int AS cnt
+      FROM (
+        SELECT id AS pid, "userId" AS uid FROM projects
+        UNION
+        SELECT id AS pid, owner_id AS uid FROM folders WHERE type = 'projects'
+      ) x
+      GROUP BY uid
+    `);
     const pMap = Object.fromEntries(projectCounts.map(r => [r.userId, Number(r.cnt)]));
 
     // Same triple-source counting as in getUsers — listов в папках раньше
@@ -564,12 +576,14 @@ export class AdminController implements OnModuleInit {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
     const [
-      users, projects, sheets, templates,
+      users, projects, projectFolders, sheets, templates,
       priceListsActive, manufacturers, catalogProducts,
       newUsersToday, newUsersMonth, newProjectsToday, newProjectsMonth,
+      newFoldersToday, newFoldersMonth,
     ] = await Promise.all([
       this.usersRepo.count(),
       this.projectsRepo.count(),
+      this.foldersRepo.count({ where: { type: 'projects' } }),
       this.sheetsRepo.count(),
       this.templatesRepo.count(),
       this.plRepo.count({ where: { status: PriceListStatus.ACTIVE } }),
@@ -579,22 +593,35 @@ export class AdminController implements OnModuleInit {
       this.usersRepo.createQueryBuilder('u').where('u.createdAt >= :d', { d: startOfMonth }).getCount(),
       this.projectsRepo.createQueryBuilder('p').where('p.createdAt >= :d', { d: startOfDay }).getCount(),
       this.projectsRepo.createQueryBuilder('p').where('p.createdAt >= :d', { d: startOfMonth }).getCount(),
+      this.foldersRepo.createQueryBuilder('f').where('f.type = :t AND f.createdAt >= :d', { t: 'projects', d: startOfDay }).getCount(),
+      this.foldersRepo.createQueryBuilder('f').where('f.type = :t AND f.createdAt >= :d', { t: 'projects', d: startOfMonth }).getCount(),
     ]);
 
-    const topUsers = await this.projectsRepo
-      .createQueryBuilder('p')
-      .innerJoin('p.user', 'u')
-      .select('u.email', 'email')
-      .addSelect('COUNT(p.id)', 'count')
-      .groupBy('u.email')
-      .orderBy('count', 'DESC')
-      .limit(5)
-      .getRawMany();
+    // Top users by combined projects+folders count, mirroring the user-facing
+    // "All projects" page where both kinds of containers show up.
+    const topUsers: { email: string; count: string }[] = await this.projectsRepo.manager.query(`
+      SELECT u.email AS email, COUNT(DISTINCT pid)::int AS count
+      FROM (
+        SELECT id AS pid, "userId" AS uid FROM projects
+        UNION
+        SELECT id AS pid, owner_id AS uid FROM folders WHERE type = 'projects'
+      ) x
+      JOIN users u ON u.id = x.uid
+      GROUP BY u.email
+      ORDER BY count DESC
+      LIMIT 5
+    `);
 
     return {
-      users, projects, sheets, templates, priceListsActive,
+      users,
+      // Total projects = legacy `projects` rows + new project-folders.
+      projects: projects + projectFolders,
+      sheets, templates, priceListsActive,
       manufacturers, catalogProducts,
-      newUsersToday, newUsersMonth, newProjectsToday, newProjectsMonth,
+      newUsersToday, newUsersMonth,
+      // "Created today/month" likewise spans both tables.
+      newProjectsToday: newProjectsToday + newFoldersToday,
+      newProjectsMonth: newProjectsMonth + newFoldersMonth,
       topUsers,
     };
   }
