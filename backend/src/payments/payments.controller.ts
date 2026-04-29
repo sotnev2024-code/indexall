@@ -7,6 +7,7 @@ import { Repository } from 'typeorm';
 import { PaymentsService } from './payments.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TariffConfig } from '../admin/tariff-config.entity';
+import { YookassaWebhookGuard } from './yookassa-webhook.guard';
 
 @Controller('payments')
 export class PaymentsController {
@@ -54,9 +55,14 @@ export class PaymentsController {
     return this.paymentsService.confirmPayment(id, req.user.userId);
   }
 
-  /** YuKassa webhook — receives payment events */
+  /** YuKassa webhook — receives payment events.
+   *  Guarded by the IP allow-list of YooKassa's outgoing notification servers
+   *  (plus loopback for on-box `curl` tests). Without this guard, anyone on
+   *  the internet could POST a fake `payment.succeeded` and grant themselves
+   *  a free Pro subscription. */
   @Post('webhook')
   @HttpCode(200)
+  @UseGuards(YookassaWebhookGuard)
   async webhook(@Body() body: any) {
     await this.paymentsService.handleWebhook(body);
     return { ok: true };

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -147,6 +147,18 @@ export class PaymentsService {
     const payment = await this.getPayment(paymentId);
     if (payment.status !== 'succeeded') {
       return { activated: false, plan: 'pending' };
+    }
+    // Owner check — without it any user who learned a paymentId (URL share,
+    // log leak, screenshot) could activate their own subscription using
+    // somebody else's successful payment. metadata.userId is set by us in
+    // createPayment and lives inside YooKassa, so it's the source of truth.
+    const paymentUserId = Number(payment.metadata?.userId);
+    if (!paymentUserId || paymentUserId !== userId) {
+      this.logger.warn(
+        `confirmPayment denied: payment ${paymentId} belongs to user ${paymentUserId || '?'} but ` +
+        `request came from user ${userId}`,
+      );
+      throw new ForbiddenException('Этот платёж принадлежит другому пользователю');
     }
     const user = await this.usersRepo.findOne({ where: { id: userId } });
     if (!user) return { activated: false, plan: 'unknown' };

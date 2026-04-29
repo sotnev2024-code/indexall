@@ -6,6 +6,7 @@ import { PaymentsService } from './payments.service';
 import { User } from '../users/user.entity';
 import { AuthModule } from '../auth/auth.module';
 import { TariffConfig } from '../admin/tariff-config.entity';
+import { YookassaWebhookGuard } from './yookassa-webhook.guard';
 
 @Module({
   imports: [
@@ -14,7 +15,7 @@ import { TariffConfig } from '../admin/tariff-config.entity';
     AuthModule,
   ],
   controllers: [PaymentsController],
-  providers: [PaymentsService],
+  providers: [PaymentsService, YookassaWebhookGuard],
   exports: [PaymentsService],
 })
 export class PaymentsModule {}

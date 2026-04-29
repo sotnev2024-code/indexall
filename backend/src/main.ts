@@ -10,6 +10,11 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
+  // Trust the first proxy hop (nginx in front of the container) so req.ip
+  // resolves to the real client IP via X-Forwarded-For. Required for the
+  // YooKassa webhook IP allow-list check.
+  app.set('trust proxy', 1);
+
   const uploadDir = process.env.UPLOAD_DIR || join(process.cwd(), 'uploads');
   if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
