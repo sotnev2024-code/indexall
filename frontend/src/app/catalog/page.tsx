@@ -517,7 +517,8 @@ function CatalogPageInner() {
       const finalPrice = etmPrice != null
         ? String(etmPrice)
         : (catalogPrice != null ? String(catalogPrice) : '');
-      const finalStore = etmPrice != null ? 'ЭТМ' : '—';
+      // Empty string maps to "—" in the spec table's store dropdown.
+      const finalStore = etmPrice != null ? 'ЭТМ' : '';
       const finalDeadline = etmPrice != null ? etmTerm : '';
 
       await sheetsApi.saveRows(activeSheetId, [...existing, {

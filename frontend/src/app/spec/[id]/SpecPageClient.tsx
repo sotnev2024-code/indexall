@@ -566,7 +566,12 @@ export default function SpecPageClient() {
         const qty   = cleanNum(r.qty);
         const price = cleanNum(r.price);
         const coef  = cleanNum(r.coef, '1') || '1';
-        return { ...r, qty, price, coef, total: calcTotal(price, qty, coef) };
+        // Legacy rows saved with store='—' (literal dash) don't match either
+        // <option> value in the source dropdown; React then falls back to the
+        // first option ('ЭТМ'), which mis-reports the source. Normalise the
+        // dash to empty string so the dropdown shows "—" correctly.
+        const store = r.store === '—' ? '' : r.store;
+        return { ...r, qty, price, coef, store, total: calcTotal(price, qty, coef) };
       });
       // Show data rows + 50 empty buffer (max 1000 total).
       // Rendering 1000 DOM rows × 11 cells = 11000+ inputs which freezes the UI on insert/delete.
@@ -574,7 +579,7 @@ export default function SpecPageClient() {
       const PAD_TARGET = Math.min(1000, normalizedRows.length + 50);
       const padded = [...normalizedRows];
       while (padded.length < PAD_TARGET) {
-        padded.push({ row_number: padded.length + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ЭТМ', coef: '1', total: '', deadline: '' });
+        padded.push({ row_number: padded.length + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: '', coef: '1', total: '', deadline: '' });
       }
       setRows(padded);
       rowsRef.current = padded;
@@ -688,7 +693,7 @@ export default function SpecPageClient() {
           // those tentatively in applyProduct/addProductFromSearch). Don't
           // overwrite rows where the user picked a different store explicitly.
           if (next[j].article !== article) continue;
-          if (next[j].store && !['ЭТМ', '—', ''].includes(next[j].store)) continue;
+          if (next[j].store && !['ЭТМ', ''].includes(next[j].store)) continue;
           const q = next[j].qty || '1';
           const c = next[j].coef || '1';
           if (etmPrice != null && etmPrice > 0) {
@@ -708,7 +713,7 @@ export default function SpecPageClient() {
             // there; flip store to "—" so the column tells the truth.
             next[j] = {
               ...next[j],
-              store: next[j].price ? '—' : '—',
+              store: '',
               deadline: '',
               qty: q,
               coef: c,
@@ -723,7 +728,7 @@ export default function SpecPageClient() {
         const next = [...prev];
         for (let j = 0; j < next.length; j++) {
           if (next[j].article === article && next[j].store === 'ЭТМ') {
-            next[j] = { ...next[j], store: next[j].price ? '—' : 'ЭТМ', deadline: '' };
+            next[j] = { ...next[j], store: next[j].price ? '' : 'ЭТМ', deadline: '' };
           }
         }
         return next;
@@ -771,7 +776,7 @@ export default function SpecPageClient() {
               // If user hasn't picked a store yet: tentatively "—" when we
               // already have a catalog price, "ЭТМ" otherwise (will be
               // confirmed/cleared by fetchEtmForArticle).
-              store: r.store || (hasCatalogPrice ? '—' : 'ЭТМ'),
+              store: r.store || (hasCatalogPrice ? '' : 'ЭТМ'),
               auto_price: true,
               total: calcTotal(priceStr, q || '1', c),
             };
@@ -806,7 +811,7 @@ export default function SpecPageClient() {
         etm_code: p.etm_code || next[i].etm_code || '',
         unit: p.unit || next[i].unit || 'шт',
         price: hasCatalogPrice ? String(p.price) : '',
-        store: hasCatalogPrice ? '—' : 'ЭТМ',
+        store: hasCatalogPrice ? '' : 'ЭТМ',
         auto_price: true,
         qty: q,
         coef: c,
@@ -855,7 +860,7 @@ export default function SpecPageClient() {
         // ETM gets priority and will overwrite via fetchEtmForArticle below;
         // until then mark catalog-price rows with "—" so the column doesn't
         // lie about the source.
-        store: hasCatalogPrice ? '—' : 'ЭТМ',
+        store: hasCatalogPrice ? '' : 'ЭТМ',
         auto_price: true,
         qty: q,
         coef: c,
@@ -873,7 +878,7 @@ export default function SpecPageClient() {
   function handleImport(importedRows: any[], importMode: 'append' | 'replace') {
     pushHistorySnapshot(rowsRef.current);
     const MIN_ROWS = 25;
-    const emptyRowPad = (i: number) => ({ row_number: i + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ЭТМ', coef: '1', total: '', deadline: '' });
+    const emptyRowPad = (i: number) => ({ row_number: i + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: '', coef: '1', total: '', deadline: '' });
 
     const processed = importedRows.map(r => ({
       ...r,
@@ -1282,7 +1287,7 @@ export default function SpecPageClient() {
     setUnsaved(true);
   }
 
-  const emptyRow = (idx: number) => ({ row_number: idx + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ЭТМ', coef: '1', total: '', deadline: '' });
+  const emptyRow = (idx: number) => ({ row_number: idx + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: '', coef: '1', total: '', deadline: '' });
 
   const isRowEmpty = (row: any) => !row.name && !row.article && !row.brand && !row.price && !row.qty;
 
@@ -1448,7 +1453,7 @@ export default function SpecPageClient() {
       // Ensure we have enough rows
       const neededRows = startRow + lines.length;
       while (next.length < neededRows) {
-        next.push({ row_number: next.length + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ЭТМ', coef: '1', total: '', deadline: '' });
+        next.push({ row_number: next.length + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: '', coef: '1', total: '', deadline: '' });
       }
       lines.forEach((cells, ri) => {
         cells.forEach((val, ci) => {
@@ -1456,7 +1461,12 @@ export default function SpecPageClient() {
           const c = startCol + ci;
           if (r < next.length && c < EDITABLE_COLS.length) {
             const field = EDITABLE_COLS[c];
-            next[r] = { ...next[r], [field]: val.trim() };
+            let v = val.trim();
+            // The store dropdown only has 'ЭТМ' and '' (for "—") as values.
+            // Pastes from TSV exports / older UI may carry a literal '—',
+            // which would not match any option and silently fall back to ЭТМ.
+            if (field === 'store' && v === '—') v = '';
+            next[r] = { ...next[r], [field]: v };
             if (['price', 'qty', 'coef'].includes(field)) {
               next[r].total = calcTotal(next[r].price, next[r].qty, next[r].coef);
             }
@@ -1698,7 +1708,7 @@ export default function SpecPageClient() {
     setRows(prev => {
       const existing = prev.filter(r => r.name || r.article);
       const merged = [...existing, ...parsed];
-      while (merged.length < 25) merged.push({ name: '', brand: '', article: '', qty: '', unit: '', price: '', store: 'ЭТМ', coef: '1', total: '' });
+      while (merged.length < 25) merged.push({ name: '', brand: '', article: '', qty: '', unit: '', price: '', store: '', coef: '1', total: '' });
       return merged;
     });
     setUnsaved(true);
@@ -1773,19 +1783,22 @@ export default function SpecPageClient() {
     finally { setExportLoading(false); }
   }
 
-  // Helper: collect ETM-eligible rows and build item map
+  // Helper: collect ETM-eligible rows and build item map.
+  // ETM lookup is keyed strictly on `article` (per spec 28.04). Rows without
+  // an mnf article are skipped — etm_code alone caused false matches with
+  // other manufacturers' products under the same numeric code.
   function getEtmTargets() {
     const targets = rowsRef.current
-      .filter((r) => (r.article || r.etm_code) && (!r.store || r.store === 'ЭТМ' || r.store.toUpperCase() === 'ETM'));
+      .filter((r) => r.article && r.article.trim() && (!r.store || r.store === 'ЭТМ' || r.store.toUpperCase() === 'ETM'));
     const itemMap = new Map<string, { article?: string; etmCode?: string }>();
     for (const r of targets) {
-      const key = (r.article || r.etm_code || '').trim();
+      const key = (r.article || '').trim();
       if (!key || itemMap.has(key)) continue;
-      itemMap.set(key, { article: r.article || undefined, etmCode: r.etm_code || undefined });
+      itemMap.set(key, { article: r.article });
     }
     return { targets, itemMap, uniqueKeys: Array.from(itemMap.keys()) };
   }
-  const rowKey = (r: any) => (r.article || r.etm_code || '').trim();
+  const rowKey = (r: any) => (r.article || '').trim();
 
   function handleEtmError(err: any) {
     const status = err?.response?.status;
