@@ -825,7 +825,7 @@ export default function AdminPage() {
                       <th>ЭТМ</th>
                       <th>Рус.св.</th>
                       <th>Тарифы</th>
-                      <th>Акция</th>
+                      <th>Оплатил</th>
                     </tr>
                   </thead>
                   <tbody>

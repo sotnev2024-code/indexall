@@ -230,21 +230,50 @@ export class AdminController implements OnModuleInit {
       .getRawMany();
     const trMap = Object.fromEntries(tariffCounts.map(r => [r.userId, Number(r.cnt)]));
 
+    // Users who have configured ETM iPRO integration (saved login/password
+    // via Профиль → ЭТМ). Raw SQL because EtmCredential isn't bound to this
+    // module's TypeORM scope.
+    const etmCredRows: { user_id: number }[] = await this.usersRepo.manager.query(
+      `SELECT DISTINCT user_id FROM etm_credentials WHERE user_id IS NOT NULL`,
+    ).catch(() => []);
+    const etmSet = new Set<number>(etmCredRows.map(r => Number(r.user_id)));
+
+    // Users who actually paid (succeeded YooKassa payment recorded as a
+    // tariff_operation with operator='YooKassa'). Distinguishes paying
+    // customers from trial-only / admin-granted plans.
+    const paidRows: { userId: number }[] = await this.tariffRepo.manager.query(
+      `SELECT DISTINCT "userId" FROM tariff_operations WHERE operator ILIKE 'yookassa%' OR operator ILIKE 'юкасса%'`,
+    ).catch(() => []);
+    const paidSet = new Set<number>(paidRows.map(r => Number(r.userId)));
+
     return users.map(({ password, ...u }) => ({
       id: u.id,
       name: u.name,
       email: u.email,
-      step1: true,
+      // Шаг 1 — регистрация: всё, что в этой выборке, по определению зареган.
+      step1: !!u.createdAt,
+      // Шаг 2 — подтверждение email.
       step2: u.emailVerified,
+      // Шаг 3 — создал хоть один проект (legacy projects + folders type=projects).
       step3: (pMap[u.id] || 0) > 0,
-      trial: u.plan === 'trial',
+      // Trial: «когда-либо активировал триал». Использует флаг users.trialUsed,
+      // который ставится в /auth/trial и не сбрасывается при истечении срока.
+      // Раньше колонка проверяла только текущий plan='trial' и врала после
+      // окончания пробного.
+      trial: !!u.trialUsed,
       templates: tMap[u.id] || 0,
       projects: pMap[u.id] || 0,
       specs: sMap[u.id] || 0,
-      etm: false,
+      // ЭТМ — есть ли сохранённая интеграция iPRO в etm_credentials.
+      etm: etmSet.has(u.id),
+      // Рус.св. — отдельная интеграция магазина Русский Свет в проект пока
+      // не заведена; колонка возвращает false для всех до её появления.
       rusSv: false,
       tariffs: trMap[u.id] || 0,
-      promo: false,
+      // Акция/промо — реальное событие «оплатил тариф через ЮKassa».
+      // Раньше просто стояло `false` для всех. Промокодов как сущности
+      // у нас нет, поэтому используем сам факт состоявшейся покупки.
+      promo: paidSet.has(u.id),
     }));
   }
 
