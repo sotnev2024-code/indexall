@@ -396,6 +396,11 @@ export default function SpecPageClient() {
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowsRef = useRef<any[]>([]);
   const hasUnsavedRef = useRef(false);
+  // Active ETM refresh marker — handleRefreshPrices/Terms set it to the sheetId
+  // they started on. Tab-click handler reads it to skip the «save?» confirm
+  // when changes are coming from a refresh; refresh loops read currentIdRef
+  // and bail if the user switches sheets mid-flight.
+  const refreshAbortRef = useRef<{ sheetId: number; type: 'prices' | 'terms' } | null>(null);
   const focusSnapshotRef = useRef<any[] | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshProgress, setRefreshProgress] = useState<{ done: number; total: number } | null>(null);
@@ -1803,12 +1808,18 @@ export default function SpecPageClient() {
     const { targets, itemMap, uniqueKeys } = getEtmTargets();
     if (targets.length === 0) { toast('Нет строк с артикулом для обновления'); return; }
 
+    const startSheetId = currentIdRef.current;
     setRefreshing(true);
     setRefreshProgress({ done: 0, total: uniqueKeys.length });
+    refreshAbortRef.current = { sheetId: startSheetId, type: 'prices' };
     const snap = rowsRef.current.map(r => ({ ...r }));
 
     try {
       const { data: prices } = await storesApi.getEtmPricesByItems(Array.from(itemMap.values()));
+      // Bail if the user switched sheets while ETM was responding — the
+      // updates would land on a different list otherwise.
+      if (currentIdRef.current !== startSheetId) return;
+
       const keysWithPrice = uniqueKeys.filter(k => prices[k] != null && prices[k]! > 0);
 
       setRows(prev => {
@@ -1829,7 +1840,18 @@ export default function SpecPageClient() {
       });
 
       pushHistorySnapshot(snap);
-      setUnsaved(true);
+
+      // Persist immediately and silently — refreshed prices never need a
+      // «сохранить перед уходом?» prompt because they're not user input.
+      try {
+        const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
+        await queueSaveRows(startSheetId, toSave);
+        if (currentIdRef.current === startSheetId) {
+          hasUnsavedRef.current = false;
+          _setUnsaved(false);
+        }
+      } catch { /* keep state, user can retry */ }
+
       if (keysWithPrice.length === 0) {
         toast.error('ЭТМ не вернул данные. Попробуйте позже или проверьте учётные данные.');
       } else {
@@ -1839,7 +1861,11 @@ export default function SpecPageClient() {
           : `Цены обновлены: ${keysWithPrice.length} из ${uniqueKeys.length}. Без цены: ${miss}`);
       }
     } catch (err: any) { handleEtmError(err); }
-    finally { setRefreshing(false); setRefreshProgress(null); }
+    finally {
+      refreshAbortRef.current = null;
+      setRefreshing(false);
+      setRefreshProgress(null);
+    }
   }
 
   // ── Update TERMS only (progressive, 1 req/sec per article) ───
@@ -1852,8 +1878,10 @@ export default function SpecPageClient() {
     );
     if (withPrice.length === 0) { toast('Нет строк с ценой для обновления сроков'); return; }
 
+    const startSheetId = currentIdRef.current;
     setRefreshing(true);
     setRefreshProgress({ done: 0, total: withPrice.length });
+    refreshAbortRef.current = { sheetId: startSheetId, type: 'terms' };
     const snap = rowsRef.current.map(r => ({ ...r }));
 
     // Mark target rows with placeholder
@@ -1864,11 +1892,17 @@ export default function SpecPageClient() {
     }));
 
     let done = 0;
+    let aborted = false;
     try {
       await Promise.all(withPrice.map(async (key) => {
+        // Per-iteration abort check — if user switched sheets, skip
+        // remaining requests so they don't waste the ETM rate-limit budget
+        // and don't poison the new sheet's state.
+        if (currentIdRef.current !== startSheetId) { aborted = true; return; }
         const item = itemMap.get(key);
         try {
           const { data } = await storesApi.getEtmTerm(item?.article || '', item?.etmCode);
+          if (currentIdRef.current !== startSheetId) { aborted = true; return; }
           const term = data.term || 'нет';
           setRows(prev => {
             const next = [...prev];
@@ -1880,6 +1914,7 @@ export default function SpecPageClient() {
             return next;
           });
         } catch {
+          if (currentIdRef.current !== startSheetId) { aborted = true; return; }
           setRows(prev => prev.map(r => rowKey(r) === key && r.deadline === '...' ? { ...r, deadline: 'нет' } : r));
         } finally {
           done++;
@@ -1887,12 +1922,34 @@ export default function SpecPageClient() {
         }
       }));
 
+      if (currentIdRef.current !== startSheetId || aborted) {
+        // User left the sheet — leave whatever was applied and do not save
+        // here. Their next manual save (or sheet-switch silent save) will
+        // persist whatever rows they're on.
+        return;
+      }
+
       setRows(prev => prev.map(r => r.deadline === '...' ? { ...r, deadline: 'нет' } : r));
       pushHistorySnapshot(snap);
-      setUnsaved(true);
+
+      // Persist immediately and silently — same reasoning as
+      // handleRefreshPrices: refreshed terms are not user input.
+      try {
+        const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
+        await queueSaveRows(startSheetId, toSave);
+        if (currentIdRef.current === startSheetId) {
+          hasUnsavedRef.current = false;
+          _setUnsaved(false);
+        }
+      } catch { /* keep state, user can retry */ }
+
       toast.success(`Сроки обновлены: ${withPrice.length} артикулов`);
     } catch (err: any) { handleEtmError(err); }
-    finally { setRefreshing(false); setRefreshProgress(null); }
+    finally {
+      refreshAbortRef.current = null;
+      setRefreshing(false);
+      setRefreshProgress(null);
+    }
   }
 
   const sheetTotal = rows.reduce((s, r) => {
@@ -2090,13 +2147,31 @@ export default function SpecPageClient() {
                         if (currentId === s.id) return;
                         // Cancel any pending debounced autosave — we either save now or discard.
                         if (autoSaveTimer.current) { clearTimeout(autoSaveTimer.current); autoSaveTimer.current = null; }
+                        // Switch the UI immediately — don't block on save or
+                        // a prompt. Saves happen in the background through
+                        // queueSaveRows (preserves order). Refresh-loops read
+                        // currentIdRef and will abort on their own once they
+                        // see the new sheetId.
+                        const refreshActive = !!refreshAbortRef.current;
+                        const oldSid = currentIdRef.current;
                         if (hasUnsavedRef.current) {
-                          const shouldSave = confirm('В текущем листе есть несохранённые изменения.\nСохранить перед переходом?');
-                          if (shouldSave) {
-                            const sid = currentIdRef.current;
+                          // If the only pending changes came from a refresh,
+                          // save silently — refreshed prices/terms aren't
+                          // user input and don't need a «сохранить?» prompt.
+                          if (refreshActive) {
                             const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
-                            try { await queueSaveRows(sid, toSave); hasUnsavedRef.current = false; _setUnsaved(false); } catch { toast.error('Ошибка сохранения'); }
+                            queueSaveRows(oldSid, toSave).catch(() => {});
+                            hasUnsavedRef.current = false;
+                            _setUnsaved(false);
                           } else {
+                            const shouldSave = confirm('В текущем листе есть несохранённые изменения.\nСохранить перед переходом?');
+                            if (shouldSave) {
+                              const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
+                              // Fire-and-forget; the chain serialises so it
+                              // can't race with the subsequent loadData of
+                              // the new sheet.
+                              queueSaveRows(oldSid, toSave).catch(() => toast.error('Ошибка сохранения'));
+                            }
                             hasUnsavedRef.current = false;
                             _setUnsaved(false);
                           }
