@@ -36,4 +36,11 @@ export class TariffOperation {
 
   @Column({ nullable: true, type: 'text' })
   comment: string;
+
+  /** YooKassa payment.id — set for tariff_operations created from a paid
+   *  webhook / polling confirmation. Unique-when-set so duplicate webhook
+   *  retries (or webhook + polling racing) can't extend the subscription
+   *  twice for the same payment. Null for admin-issued tariff changes. */
+  @Column({ nullable: true, type: 'varchar', unique: true })
+  payment_id: string;
 }

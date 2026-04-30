@@ -6,12 +6,13 @@ import { PaymentsService } from './payments.service';
 import { User } from '../users/user.entity';
 import { AuthModule } from '../auth/auth.module';
 import { TariffConfig } from '../admin/tariff-config.entity';
+import { TariffOperation } from '../admin/tariff-operation.entity';
 import { YookassaWebhookGuard } from './yookassa-webhook.guard';
 
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forFeature([User, TariffConfig]),
+    TypeOrmModule.forFeature([User, TariffConfig, TariffOperation]),
     AuthModule,
   ],
   controllers: [PaymentsController],

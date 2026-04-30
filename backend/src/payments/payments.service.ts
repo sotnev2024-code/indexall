@@ -6,6 +6,7 @@ import * as https from 'https';
 import * as crypto from 'crypto';
 import { User, UserPlan } from '../users/user.entity';
 import { TariffConfig } from '../admin/tariff-config.entity';
+import { TariffOperation } from '../admin/tariff-operation.entity';
 
 export interface CreatePaymentDto {
   userId: number;
@@ -29,6 +30,7 @@ export class PaymentsService {
     private configService: ConfigService,
     @InjectRepository(User) private usersRepo: Repository<User>,
     @InjectRepository(TariffConfig) private tariffConfigRepo: Repository<TariffConfig>,
+    @InjectRepository(TariffOperation) private tariffOpsRepo: Repository<TariffOperation>,
   ) {}
 
   private get shopId(): string {
@@ -119,15 +121,41 @@ export class PaymentsService {
     return this.yukassaRequest('GET', `/payments/${paymentId}`);
   }
 
-  async handleWebhook(event: any): Promise<void> {
-    if (event?.event !== 'payment.succeeded') return;
-    const payment: YukassaPayment = event.object;
-    if (!payment?.metadata?.userId) return;
+  /**
+   * Apply a successful payment to the user's subscription. Idempotent:
+   * the tariff_operations row carries the YooKassa payment.id with a
+   * UNIQUE constraint, so retries / webhook+polling races can't extend
+   * the subscription twice. Extension stacks on top of any remaining time
+   * («продлить на год» when 6 месяцев осталось → +1 год от прежнего конца).
+   */
+  private async activateForPayment(payment: YukassaPayment, source: 'webhook' | 'polling'): Promise<boolean> {
+    const userId = Number(payment.metadata?.userId);
+    const planType = (payment.metadata?.planType as 'monthly' | 'annual') || 'monthly';
+    if (!userId) {
+      this.logger.warn(`activateForPayment: payment ${payment.id} has no userId in metadata`);
+      return false;
+    }
 
-    const userId = Number(payment.metadata.userId);
-    const planType = payment.metadata.planType as 'monthly' | 'annual';
+    // Idempotency check — if we already recorded this payment, do nothing.
+    const existing = await this.tariffOpsRepo.findOne({ where: { payment_id: payment.id } });
+    if (existing) {
+      this.logger.log(`Payment ${payment.id} already processed (op id=${existing.id}); ${source} skipped`);
+      return true;
+    }
 
-    const expiresAt = new Date();
+    const user = await this.usersRepo.findOne({ where: { id: userId } });
+    if (!user) {
+      this.logger.warn(`activateForPayment: user ${userId} not found for payment ${payment.id}`);
+      return false;
+    }
+
+    // Stack new period on top of existing remaining time (if any) so
+    // «продлить на год» when 6 месяцев осталось = +1 год от прежнего конца.
+    // If the subscription already expired (or never existed), start from now.
+    const now = new Date();
+    const currentExpires = user.subscriptionExpiresAt ? new Date(user.subscriptionExpiresAt) : null;
+    const baseDate = currentExpires && currentExpires > now ? new Date(currentExpires) : new Date(now);
+    const expiresAt = new Date(baseDate);
     if (planType === 'annual') {
       expiresAt.setFullYear(expiresAt.getFullYear() + 1);
     } else {
@@ -139,7 +167,37 @@ export class PaymentsService {
       subscriptionExpiresAt: expiresAt,
     });
 
-    this.logger.log(`Subscription activated for user ${userId}, plan: ${planType}, expires: ${expiresAt}`);
+    // Record the operation atomically — UNIQUE on payment_id ensures
+    // concurrent webhook + polling races still produce only one row.
+    try {
+      await this.tariffOpsRepo.save({
+        userId,
+        operator: 'YooKassa',
+        plan: 'Pro',
+        amount: Number(payment.amount?.value || 0),
+        status: 'active',
+        expiresAt,
+        comment: `Оплата ${planType === 'annual' ? 'на год' : 'на месяц'} (через ${source})`,
+        payment_id: payment.id,
+      });
+    } catch (e: any) {
+      // Most likely a duplicate-key violation due to a concurrent activation —
+      // safe to ignore, the other writer has the same effect on the user row.
+      this.logger.log(`activateForPayment: tariff_operation insert raced (${e?.code || e?.message}); user already updated`);
+    }
+
+    this.logger.log(
+      `Subscription activated via ${source} for user ${userId}, plan: ${planType}, ` +
+      `from ${currentExpires?.toISOString() || 'now'} → ${expiresAt.toISOString()}`,
+    );
+    return true;
+  }
+
+  async handleWebhook(event: any): Promise<void> {
+    if (event?.event !== 'payment.succeeded') return;
+    const payment: YukassaPayment = event.object;
+    if (!payment?.metadata?.userId) return;
+    await this.activateForPayment(payment, 'webhook');
   }
 
   /** Poll YooKassa and activate if succeeded (fallback when webhook is delayed) */
@@ -150,8 +208,7 @@ export class PaymentsService {
     }
     // Owner check — without it any user who learned a paymentId (URL share,
     // log leak, screenshot) could activate their own subscription using
-    // somebody else's successful payment. metadata.userId is set by us in
-    // createPayment and lives inside YooKassa, so it's the source of truth.
+    // somebody else's successful payment.
     const paymentUserId = Number(payment.metadata?.userId);
     if (!paymentUserId || paymentUserId !== userId) {
       this.logger.warn(
@@ -160,26 +217,9 @@ export class PaymentsService {
       );
       throw new ForbiddenException('Этот платёж принадлежит другому пользователю');
     }
-    const user = await this.usersRepo.findOne({ where: { id: userId } });
-    if (!user) return { activated: false, plan: 'unknown' };
 
-    if (user.plan === UserPlan.PRO && user.subscriptionExpiresAt) {
-      return { activated: true, plan: user.plan };
-    }
-
-    const planType = (payment.metadata?.planType as 'monthly' | 'annual') || 'monthly';
-    const expiresAt = new Date();
-    if (planType === 'annual') {
-      expiresAt.setFullYear(expiresAt.getFullYear() + 1);
-    } else {
-      expiresAt.setMonth(expiresAt.getMonth() + 1);
-    }
-
-    await this.usersRepo.update(userId, {
-      plan: UserPlan.PRO,
-      subscriptionExpiresAt: expiresAt,
-    });
-    this.logger.log(`Subscription confirmed via polling for user ${userId}, plan: ${planType}`);
+    const ok = await this.activateForPayment(payment, 'polling');
+    if (!ok) return { activated: false, plan: 'unknown' };
     return { activated: true, plan: 'pro' };
   }
 
