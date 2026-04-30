@@ -6,6 +6,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PaymentsService } from './payments.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminGuard } from '../auth/guards/admin.guard';
 import { TariffConfig } from '../admin/tariff-config.entity';
 import { YookassaWebhookGuard } from './yookassa-webhook.guard';
 
@@ -38,6 +39,21 @@ export class PaymentsController {
       });
     } catch (err: any) {
       throw new BadRequestException(err.message || 'Ошибка создания платежа в YooKassa');
+    }
+  }
+
+  /** Admin: 1₽ test payment to verify the full integration pipeline.
+   *  Goes through createPayment normally → виджет ЮKassa → webhook → e-mail
+   *  receipt. Marked with metadata.adminTest=1 so it does NOT extend the
+   *  admin's subscription. */
+  @Post('admin/test')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  async adminTestPayment(@Request() req, @Body() body: { returnUrl?: string }) {
+    const returnUrl = body?.returnUrl || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/admin?tab=tariffs&payment_test=1`;
+    try {
+      return await this.paymentsService.createAdminTestPayment(req.user.userId, returnUrl);
+    } catch (err: any) {
+      throw new BadRequestException(err.message || 'Ошибка тестового платежа');
     }
   }
 

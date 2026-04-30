@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
-import { catalogApi, adminApi, templatesApi } from '@/lib/api';
+import { catalogApi, adminApi, templatesApi, paymentsApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 import TilesManagerModal from '@/components/TilesManagerModal';
 import AdminEtmLookup from '@/components/AdminEtmLookup';
@@ -112,6 +112,25 @@ export default function AdminPage() {
   const [editTile, setEditTile] = useState<any | null>(null);
   const [tilesManagerOpen, setTilesManagerOpen] = useState(false);
   const [etmLookupOpen, setEtmLookupOpen] = useState(false);
+  const [testPaymentLoading, setTestPaymentLoading] = useState(false);
+
+  async function handleAdminTestPayment() {
+    if (testPaymentLoading) return;
+    setTestPaymentLoading(true);
+    try {
+      const returnUrl = `${window.location.origin}/admin?tab=tariffs&payment_test=1`;
+      const { data } = await paymentsApi.adminTestPayment(returnUrl);
+      if (data?.confirmationUrl) {
+        window.location.href = data.confirmationUrl;
+      } else {
+        toast.error('ЮKassa не вернула ссылку для оплаты');
+      }
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Ошибка тестового платежа');
+    } finally {
+      setTestPaymentLoading(false);
+    }
+  }
   const [managedTiles, setManagedTiles] = useState<any[]>([]);
   const [newTileName, setNewTileName] = useState('');
 
@@ -875,6 +894,29 @@ export default function AdminPage() {
           {tab === 'tariffs' && (
             <>
               <div className="admin-section-title">Тарифы и их операции</div>
+
+              {/* ── Admin diagnostic: 1₽ test payment ── */}
+              <div className="admin-form" style={{ marginBottom: 24, background: '#fef9c3', border: '1px solid #fde047' }}>
+                <div className="admin-form-title">Тестовый платёж 1 ₽</div>
+                <p style={{ fontSize: 13, color: '#713f12', marginBottom: 12, lineHeight: 1.5 }}>
+                  Списывает с вашей карты 1 ₽ для проверки полной интеграции с ЮKassa:
+                  переход на страницу оплаты → webhook на бэкенд → активация подписки →
+                  фискальный чек на e-mail. <strong>Подписка администратора при этом
+                  не продлевается</strong> (метка <code>adminTest=1</code>). Чек придёт
+                  на e-mail вашего аккаунта.
+                </p>
+                <button
+                  onClick={handleAdminTestPayment}
+                  disabled={testPaymentLoading}
+                  style={{
+                    padding: '8px 18px', background: '#1a1a1a', color: '#fff',
+                    border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                    cursor: 'pointer', opacity: testPaymentLoading ? 0.6 : 1,
+                  }}
+                >
+                  {testPaymentLoading ? 'Создаю платёж…' : 'Оплатить 1 ₽ (тест)'}
+                </button>
+              </div>
 
               {/* ── Tariff plan editor ── */}
               <div className="admin-form" style={{ marginBottom: 32 }}>

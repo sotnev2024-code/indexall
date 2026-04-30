@@ -169,6 +169,64 @@ export class PaymentsService {
   }
 
   /**
+   * Admin diagnostic payment: 1 ₽ with the same receipt+metadata machinery,
+   * tagged so that webhook/confirm don't extend the admin's subscription.
+   * Lets us verify confirmation_url, webhook delivery, fiscal receipt email
+   * end-to-end without affecting accounting.
+   */
+  async createAdminTestPayment(adminUserId: number, returnUrl: string): Promise<{ paymentId: string; confirmationUrl: string }> {
+    const user = await this.usersRepo.findOne({ where: { id: adminUserId } });
+    if (!user?.email) throw new Error('Admin has no email on file');
+
+    const vatCode = Number(process.env.YOOKASSA_VAT_CODE) || 1;
+    const taxSystemCode = Number(process.env.YOOKASSA_TAX_SYSTEM_CODE) || null;
+    const description = 'INDEXALL — Тестовый платёж 1 ₽ (диагностика)';
+
+    const receipt: any = {
+      customer: { email: user.email },
+      items: [{
+        description,
+        quantity: '1.00',
+        amount: { value: '1.00', currency: 'RUB' },
+        vat_code: vatCode,
+        payment_subject: 'service',
+        payment_mode: 'full_payment',
+      }],
+    };
+    if (taxSystemCode) receipt.tax_system_code = taxSystemCode;
+
+    const requestBody = {
+      amount: { value: '1.00', currency: 'RUB' },
+      capture: true,
+      confirmation: { type: 'redirect', return_url: returnUrl },
+      description,
+      metadata: {
+        userId: String(adminUserId),
+        planType: 'monthly',
+        adminTest: '1', // ← marker; handleWebhook/confirmPayment ignore activation
+      },
+      receipt,
+    };
+
+    const response = await this.yukassaRequest('POST', '/payments', requestBody);
+    this.logger.log(`YooKassa admin-test response: ${JSON.stringify(response)}`);
+
+    if (response?.type === 'error') {
+      const msg = response.description || response.code || 'YooKassa error';
+      const param = response.parameter ? ` (param: ${response.parameter})` : '';
+      this.logger.error(
+        `YooKassa admin-test error: ${msg}${param} | full=${JSON.stringify(response)} | request=${JSON.stringify(requestBody)}`,
+      );
+      throw new Error(`${msg}${param}`);
+    }
+
+    const payment = response as YukassaPayment;
+    const confirmationUrl = payment.confirmation?.confirmation_url || '';
+    if (!confirmationUrl) throw new Error('YooKassa не вернул ссылку для оплаты');
+    return { paymentId: payment.id, confirmationUrl };
+  }
+
+  /**
    * Apply a successful payment to the user's subscription. Idempotent:
    * the tariff_operations row carries the YooKassa payment.id with a
    * UNIQUE constraint, so retries / webhook+polling races can't extend
@@ -181,6 +239,13 @@ export class PaymentsService {
     if (!userId) {
       this.logger.warn(`activateForPayment: payment ${payment.id} has no userId in metadata`);
       return false;
+    }
+    // Admin diagnostic payment — full pipeline runs (receipt, webhook, log)
+    // but the admin's subscription is NOT extended. Lets us verify integration
+    // without granting paid time for 1₽.
+    if (payment.metadata?.adminTest === '1') {
+      this.logger.log(`Admin-test payment ${payment.id} processed via ${source} — subscription NOT extended (test marker)`);
+      return true;
     }
 
     // Idempotency check — if we already recorded this payment, do nothing.

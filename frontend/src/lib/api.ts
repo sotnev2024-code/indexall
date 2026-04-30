@@ -228,4 +228,8 @@ export const paymentsApi = {
     api.post(`/payments/confirm/${paymentId}`),
   activateTrial: () =>
     api.post('/auth/trial'),
+  /** Admin only: 1 ₽ test payment that exercises the full integration
+   *  pipeline (виджет → webhook → e-mail чек) without extending subscription. */
+  adminTestPayment: (returnUrl?: string) =>
+    api.post('/payments/admin/test', returnUrl ? { returnUrl } : {}),
 };
