@@ -688,12 +688,18 @@ export default function SpecPageClient() {
   const fetchEtmForArticle = useCallback(async (article: string) => {
     if (!article) return;
     if (!allowStores) return; // Free plan: no live ETM lookups
+    // Pull the etm_code from the row that's about to receive the price —
+    // it's the manufacturer's ETM directory code and goes in as the optional
+    // mnf disambiguator. If multiple rows share the same article (unlikely
+    // but possible), use the first one's mnf code.
+    const matchingRow = rowsRef.current.find(r => r.article === article);
+    const etmCode = (matchingRow?.etm_code || '').trim() || undefined;
     try {
-      const { data: prices } = await storesApi.getEtmPricesByItems([{ article }]);
+      const { data: prices } = await storesApi.getEtmPricesByItems([{ article, etmCode }]);
       const etmPrice = prices[article];
       let term = '';
       if (etmPrice != null && etmPrice > 0) {
-        const tr = await storesApi.getEtmTerm(article).catch(() => null);
+        const tr = await storesApi.getEtmTerm(article, etmCode).catch(() => null);
         term = tr?.data?.term || 'нет';
       }
       setRows(prev => {
@@ -1776,9 +1782,9 @@ export default function SpecPageClient() {
   }
 
   // Helper: collect ETM-eligible rows and build item map.
-  // ETM lookup is keyed strictly on `article` (per spec 28.04). Rows without
-  // an mnf article are skipped — etm_code alone caused false matches with
-  // other manufacturers' products under the same numeric code.
+  // ETM lookup is keyed strictly on `article` (mnf code). The row's
+  // etm_code is the manufacturer's directory code in ETM and rides along
+  // as the optional `mnf` disambiguator — never as a standalone identifier.
   // Only rows with store='ЭТМ' are eligible. store='' («—») means the user
   // explicitly chose «keep my price, don't auto-update from ETM».
   function getEtmTargets() {
@@ -1788,7 +1794,8 @@ export default function SpecPageClient() {
     for (const r of targets) {
       const key = (r.article || '').trim();
       if (!key || itemMap.has(key)) continue;
-      itemMap.set(key, { article: r.article });
+      const etmCode = (r.etm_code || '').trim() || undefined;
+      itemMap.set(key, { article: r.article, etmCode });
     }
     return { targets, itemMap, uniqueKeys: Array.from(itemMap.keys()) };
   }

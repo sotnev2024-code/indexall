@@ -361,21 +361,22 @@ function CatalogPageInner() {
       filterProducts;
     if (!rows || rows.length === 0) return;
 
-    // ETM lookup keys: prefer `article` (sent as type=mnf), fall back to
-    // `etm_code` (sent as type=etm — ETM's own internal code, unambiguous).
-    // The earlier "article-only" rule starved cable price lists where the
-    // article column is empty but every row carries a unique etm_code.
+    // ETM lookup is keyed strictly on the manufacturer article. The stored
+    // etm_code is the manufacturer-directory code in ETM and goes only as
+    // a disambiguator (mnf= query param) — never as a standalone identifier.
+    // Items without an article are skipped: ETM has no way to return a
+    // product price for "manufacturer only".
     const allItems = rows
       .slice(0, 50)
       .map(r => ({ article: r.article, etmCode: r.etm_code }))
-      .filter(it => (it.article && it.article.trim()) || (it.etmCode && it.etmCode.trim()));
+      .filter(it => it.article && it.article.trim());
     if (allItems.length === 0) return;
 
     const t = setTimeout(async () => {
-      // At fire time, filter out items already fetched (via ref to get fresh state)
+      // At fire time, filter out items already fetched (cache key = article).
       const current = rowEtmDataRef.current;
       const items = allItems.filter(it => {
-        const key = (it.article || it.etmCode || '').trim();
+        const key = (it.article || '').trim();
         return key && current[key] === undefined;
       });
       if (items.length === 0) return;
@@ -440,10 +441,12 @@ function CatalogPageInner() {
     setAccView('closed');
     setAccSelectedType(null);
     setAccEtm({});
-    // ETM lookup only when an mnf article is actually present. Without one we
-    // have no reliable identifier (sending etm_code through the legacy mnf
-    // endpoint used to fetch a stranger's price by accident).
+    // ETM lookup only when an mnf article is actually present. The product's
+    // etm_code (manufacturer directory code) is passed as the `mnf=` query
+    // disambiguator so ETM resolves the right brand if multiple share an
+    // article number.
     const article = (p.article || '').trim();
+    const etmCode = (p.etm_code || '').trim() || undefined;
     if (!isToggleOff && article) {
       const cached = rowEtmDataRef.current[article];
       // Price already known from batch load — only fetch the delivery term
@@ -451,7 +454,7 @@ function CatalogPageInner() {
         setEtmData({ price: cached.price, term: cached.term || '' });
         if (!cached.term) {
           setEtmLoading(true);
-          storesApi.getEtmTerm(article)
+          storesApi.getEtmTerm(article, etmCode)
             .then(({ data }) => {
               const term = data?.term || '';
               setEtmData(prev => prev ? { ...prev, term } : prev);
@@ -464,11 +467,11 @@ function CatalogPageInner() {
         // No cached price — fetch both price and term via the structured items
         // endpoint so it goes through the same code path as the list batch.
         setEtmLoading(true);
-        storesApi.getEtmPricesByItems([{ article }])
+        storesApi.getEtmPricesByItems([{ article, etmCode }])
           .then(async ({ data }) => {
             const price = data[article];
             if (price != null && price > 0) {
-              const termRes = await storesApi.getEtmTerm(article).catch(() => null);
+              const termRes = await storesApi.getEtmTerm(article, etmCode).catch(() => null);
               const term = termRes?.data?.term || '';
               setEtmData({ price, term });
               setRowEtmData(prev => ({ ...prev, [article]: { price, term: term || null } }));
@@ -518,13 +521,16 @@ function CatalogPageInner() {
           etmPrice = cached.price;
           etmTerm = cached.term || 'нет';
         } else if (cached === undefined) {
-          // Not yet fetched — pull fresh through the structured endpoint
+          // Pass the manufacturer's ETM directory code as the mnf disambiguator
+          // when present, so ETM can resolve the right brand if multiple share
+          // this article number.
+          const etmCode = (product.etm_code || '').trim() || undefined;
           try {
-            const { data: prices } = await storesApi.getEtmPricesByItems([{ article }]);
+            const { data: prices } = await storesApi.getEtmPricesByItems([{ article, etmCode }]);
             const p = prices[article];
             if (p != null && p > 0) {
               etmPrice = p;
-              const termRes = await storesApi.getEtmTerm(article).catch(() => null);
+              const termRes = await storesApi.getEtmTerm(article, etmCode).catch(() => null);
               etmTerm = termRes?.data?.term || 'нет';
             }
             setRowEtmData(prev => ({ ...prev, [article]: { price: p ?? null, term: etmTerm === 'нет' ? null : etmTerm } }));
