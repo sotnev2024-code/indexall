@@ -558,6 +558,11 @@ export default function SpecPageClient() {
       setLoading(true);
       setRefreshing(false);
       setRefreshProgress(null);
+      // Drain any in-flight saves first — otherwise navigating back to a
+      // sheet that's mid-refresh would read stale data from DB before the
+      // refresh's queueSaveRows committed. Catch-all because even a failed
+      // save shouldn't stop a fresh load.
+      await saveChainRef.current.catch(() => undefined);
       const { data: s } = await sheetsApi.getOne(currentIdRef.current);
       setSheet(s);
       setCustomColumns(s.custom_columns || []);
@@ -1852,6 +1857,21 @@ export default function SpecPageClient() {
         if (currentIdRef.current === startSheetId) {
           hasUnsavedRef.current = false;
           _setUnsaved(false);
+          // Re-apply prices to the live state — covers the case where the
+          // user navigated away and back during the refresh: their loadData
+          // got the pre-save snapshot from DB, so we patch the price fields
+          // surgically (other cells they may have edited stay intact).
+          setRows(prev => prev.map(r => {
+            const key = (r.article || '').trim();
+            if (!key) return r;
+            if (r.store !== 'ЭТМ' && (r.store || '').toUpperCase() !== 'ETM') return r;
+            const price = prices[key];
+            if (price != null && price > 0) {
+              const priceStr = String(price);
+              return { ...r, price: priceStr, store: 'ЭТМ', total: calcTotal(priceStr, r.qty, r.coef) };
+            }
+            return r;
+          }));
         }
       } catch { /* keep updated array, user can hit refresh again */ }
 
@@ -1966,6 +1986,16 @@ export default function SpecPageClient() {
         if (currentIdRef.current === startSheetId) {
           hasUnsavedRef.current = false;
           _setUnsaved(false);
+          // Re-apply terms to the live state for the navigate-away-and-back
+          // case: loadData read pre-save DB rows, so we patch only the
+          // deadline field on rows whose key was in the response.
+          setRows(prev => prev.map(r => {
+            const k = rowKey(r);
+            if (collected.has(k) && (r.store === 'ЭТМ' || !r.store)) {
+              return { ...r, deadline: collected.get(k)! };
+            }
+            return r;
+          }));
         }
       } catch { /* keep state, user can retry */ }
 
