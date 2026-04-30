@@ -93,8 +93,8 @@ export class PaymentsService {
     }
 
     // VAT code per ЮKassa /receipts spec — must match the merchant's tax
-    // regime. Default 1 (без НДС, типично для ИП/самозанятых на УСН).
-    // Override via env if the merchant uses a different regime:
+    // regime configured in ЛК. Default 1 (без НДС, типично для ИП/самозанятых
+    // на УСН). Override via env:
     //   1 — без НДС
     //   2 — НДС 0%
     //   3 — НДС 10%
@@ -103,7 +103,28 @@ export class PaymentsService {
     //   6 — НДС расч. 20/120
     const vatCode = Number(process.env.YOOKASSA_VAT_CODE) || 1;
 
-    const response = await this.yukassaRequest('POST', '/payments', {
+    // Optional tax_system_code — required only if the merchant's account has
+    // multiple tax systems registered. Set via env when ЮKassa demands it:
+    //   1 — ОСН        2 — УСН доходы       3 — УСН доходы-расходы
+    //   4 — ЕСН        5 — ПСН              6 — Самозанятый
+    const taxSystemCode = Number(process.env.YOOKASSA_TAX_SYSTEM_CODE) || null;
+
+    const receipt: any = {
+      customer: { email: user.email },
+      items: [
+        {
+          description,
+          quantity: '1.00',
+          amount: { value: amount.toFixed(2), currency: 'RUB' },
+          vat_code: vatCode,
+          payment_subject: 'service',
+          payment_mode: 'full_payment',
+        },
+      ],
+    };
+    if (taxSystemCode) receipt.tax_system_code = taxSystemCode;
+
+    const requestBody = {
       amount: { value: amount.toFixed(2), currency: 'RUB' },
       capture: true,
       confirmation: { type: 'redirect', return_url: dto.returnUrl },
@@ -112,29 +133,24 @@ export class PaymentsService {
         userId: String(dto.userId),
         planType: dto.planType,
       },
-      receipt: {
-        customer: { email: user.email },
-        items: [
-          {
-            description,
-            quantity: '1.00',
-            amount: { value: amount.toFixed(2), currency: 'RUB' },
-            vat_code: vatCode,
-            payment_subject: 'service',  // SaaS-подписка = услуга
-            payment_mode: 'full_payment', // полная оплата в момент покупки
-          },
-        ],
-      },
-    });
+      receipt,
+    };
+
+    const response = await this.yukassaRequest('POST', '/payments', requestBody);
 
     // Log full response for debugging
     this.logger.log(`YooKassa response: ${JSON.stringify(response)}`);
 
-    // YooKassa returns { type: 'error', code, description } on failure
+    // YooKassa returns { type: 'error', code, description, parameter? } on failure.
+    // `parameter` is the dotted-path of the bad field — invaluable for diagnosing
+    // receipt validation issues.
     if (response?.type === 'error') {
       const msg = response.description || response.code || 'YooKassa error';
-      this.logger.error(`YooKassa error: ${msg}`);
-      throw new Error(msg);
+      const param = response.parameter ? ` (param: ${response.parameter})` : '';
+      this.logger.error(
+        `YooKassa error: ${msg}${param} | full=${JSON.stringify(response)} | request=${JSON.stringify(requestBody)}`,
+      );
+      throw new Error(`${msg}${param}`);
     }
 
     const payment = response as YukassaPayment;
