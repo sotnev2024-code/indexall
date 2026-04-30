@@ -85,6 +85,24 @@ export class PaymentsService {
       ? `INDEXALL — Pro тариф (12 месяцев)`
       : `INDEXALL — Pro тариф (1 месяц)`;
 
+    // Pull the user's email so YooKassa knows where to send the fiscal receipt.
+    // Required by 54-ФЗ once «Чеки от ЮKassa» is enabled in the cabinet.
+    const user = await this.usersRepo.findOne({ where: { id: dto.userId } });
+    if (!user?.email) {
+      throw new Error('Cannot create payment: user has no email on file');
+    }
+
+    // VAT code per ЮKassa /receipts spec — must match the merchant's tax
+    // regime. Default 1 (без НДС, типично для ИП/самозанятых на УСН).
+    // Override via env if the merchant uses a different regime:
+    //   1 — без НДС
+    //   2 — НДС 0%
+    //   3 — НДС 10%
+    //   4 — НДС 20%
+    //   5 — НДС расч. 10/110
+    //   6 — НДС расч. 20/120
+    const vatCode = Number(process.env.YOOKASSA_VAT_CODE) || 1;
+
     const response = await this.yukassaRequest('POST', '/payments', {
       amount: { value: amount.toFixed(2), currency: 'RUB' },
       capture: true,
@@ -93,6 +111,19 @@ export class PaymentsService {
       metadata: {
         userId: String(dto.userId),
         planType: dto.planType,
+      },
+      receipt: {
+        customer: { email: user.email },
+        items: [
+          {
+            description,
+            quantity: '1.00',
+            amount: { value: amount.toFixed(2), currency: 'RUB' },
+            vat_code: vatCode,
+            payment_subject: 'service',  // SaaS-подписка = услуга
+            payment_mode: 'full_payment', // полная оплата в момент покупки
+          },
+        ],
       },
     });
 
