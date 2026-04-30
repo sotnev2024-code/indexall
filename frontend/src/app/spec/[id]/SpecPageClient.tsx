@@ -1809,62 +1809,73 @@ export default function SpecPageClient() {
     if (targets.length === 0) { toast('Нет строк с артикулом для обновления'); return; }
 
     const startSheetId = currentIdRef.current;
+    // Snapshot the rows we started with — we save these (with prices merged
+    // in) at the end regardless of which sheet the user is on, so the data
+    // never gets lost if they switch mid-flight.
+    const startRows = rowsRef.current.map(r => ({ ...r }));
     setRefreshing(true);
     setRefreshProgress({ done: 0, total: uniqueKeys.length });
     refreshAbortRef.current = { sheetId: startSheetId, type: 'prices' };
-    const snap = rowsRef.current.map(r => ({ ...r }));
 
     try {
       const { data: prices } = await storesApi.getEtmPricesByItems(Array.from(itemMap.values()));
-      // Bail if the user switched sheets while ETM was responding — the
-      // updates would land on a different list otherwise.
-      if (currentIdRef.current !== startSheetId) return;
-
       const keysWithPrice = uniqueKeys.filter(k => prices[k] != null && prices[k]! > 0);
 
-      setRows(prev => {
-        const next = [...prev];
-        for (let i = 0; i < next.length; i++) {
-          const r = next[i];
-          const key = rowKey(r);
-          if (!key) continue;
-          // store='' («—») = user opted out, do not overwrite their price.
-          if (r.store !== 'ЭТМ' && (r.store || '').toUpperCase() !== 'ETM') continue;
-          const price = prices[key];
-          if (price != null && price > 0) {
-            const priceStr = String(price);
-            next[i] = { ...r, price: priceStr, store: 'ЭТМ', total: calcTotal(priceStr, r.qty, r.coef) };
-          }
+      // Build the updated row set off the start-time snapshot. This is the
+      // version we'll persist to the start sheet — independent of the React
+      // state, which may already belong to a different sheet.
+      const updated = startRows.map(r => {
+        const key = (r.article || '').trim();
+        if (!key) return r;
+        if (r.store !== 'ЭТМ' && (r.store || '').toUpperCase() !== 'ETM') return r;
+        const price = prices[key];
+        if (price != null && price > 0) {
+          const priceStr = String(price);
+          return { ...r, price: priceStr, store: 'ЭТМ', total: calcTotal(priceStr, r.qty, r.coef) };
         }
-        return next;
+        return r;
       });
 
-      pushHistorySnapshot(snap);
+      // If the user is still on the same sheet, push the result to the live
+      // React state so they see the change immediately.
+      if (currentIdRef.current === startSheetId) {
+        pushHistorySnapshot(startRows);
+        setRows(updated);
+      }
 
-      // Persist immediately and silently — refreshed prices never need a
-      // «сохранить перед уходом?» prompt because they're not user input.
+      // Persist ALWAYS — this is the bit that used to be lost when the user
+      // switched sheets. queueSaveRows targets startSheetId so the data ends
+      // up in the right place even after navigation.
       try {
-        const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
+        const toSave = updated.filter((r: any) => r.name || r.article).map(normRowForSave);
         await queueSaveRows(startSheetId, toSave);
         if (currentIdRef.current === startSheetId) {
           hasUnsavedRef.current = false;
           _setUnsaved(false);
         }
-      } catch { /* keep state, user can retry */ }
+      } catch { /* keep updated array, user can hit refresh again */ }
 
-      if (keysWithPrice.length === 0) {
-        toast.error('ЭТМ не вернул данные. Попробуйте позже или проверьте учётные данные.');
-      } else {
-        const miss = uniqueKeys.length - keysWithPrice.length;
-        toast.success(miss === 0
-          ? `Цены обновлены: ${keysWithPrice.length} артикулов`
-          : `Цены обновлены: ${keysWithPrice.length} из ${uniqueKeys.length}. Без цены: ${miss}`);
+      // Toast only when the user is still looking at the sheet they updated;
+      // otherwise it's distracting noise on the new sheet.
+      if (currentIdRef.current === startSheetId) {
+        if (keysWithPrice.length === 0) {
+          toast.error('ЭТМ не вернул данные. Попробуйте позже или проверьте учётные данные.');
+        } else {
+          const miss = uniqueKeys.length - keysWithPrice.length;
+          toast.success(miss === 0
+            ? `Цены обновлены: ${keysWithPrice.length} артикулов`
+            : `Цены обновлены: ${keysWithPrice.length} из ${uniqueKeys.length}. Без цены: ${miss}`);
+        }
       }
     } catch (err: any) { handleEtmError(err); }
     finally {
       refreshAbortRef.current = null;
-      setRefreshing(false);
-      setRefreshProgress(null);
+      // Only clear the local refresh banner if we're still on the sheet that
+      // started the refresh — switching to another sheet already resets it.
+      if (currentIdRef.current === startSheetId) {
+        setRefreshing(false);
+        setRefreshProgress(null);
+      }
     }
   }
 
@@ -1879,63 +1890,78 @@ export default function SpecPageClient() {
     if (withPrice.length === 0) { toast('Нет строк с ценой для обновления сроков'); return; }
 
     const startSheetId = currentIdRef.current;
+    // Снимок строк на момент старта — финальный save уйдёт именно с этими
+    // данными (плюс собранные сроки), так что переключение листа в середине
+    // ничего не теряет.
+    const startRows = rowsRef.current.map(r => ({ ...r }));
     setRefreshing(true);
     setRefreshProgress({ done: 0, total: withPrice.length });
     refreshAbortRef.current = { sheetId: startSheetId, type: 'terms' };
-    const snap = rowsRef.current.map(r => ({ ...r }));
 
-    // Mark target rows with placeholder
-    setRows(prev => prev.map(r => {
-      const key = rowKey(r);
-      if (withPrice.includes(key) && r.store === 'ЭТМ') return { ...r, deadline: '...' };
-      return r;
-    }));
+    // Visual placeholder for in-progress rows — only on the live sheet.
+    if (currentIdRef.current === startSheetId) {
+      setRows(prev => prev.map(r => {
+        const key = rowKey(r);
+        if (withPrice.includes(key) && r.store === 'ЭТМ') return { ...r, deadline: '...' };
+        return r;
+      }));
+    }
 
+    // Все ответы аккумулируем в локальной мапе. Это единственный источник
+    // истины для финального save — даже если юзер уйдёт с листа,
+    // загрузим то, что собрали, в стартовый sheetId.
+    const collected = new Map<string, string>();
     let done = 0;
-    let aborted = false;
+
     try {
       await Promise.all(withPrice.map(async (key) => {
-        // Per-iteration abort check — if user switched sheets, skip
-        // remaining requests so they don't waste the ETM rate-limit budget
-        // and don't poison the new sheet's state.
-        if (currentIdRef.current !== startSheetId) { aborted = true; return; }
         const item = itemMap.get(key);
         try {
           const { data } = await storesApi.getEtmTerm(item?.article || '', item?.etmCode);
-          if (currentIdRef.current !== startSheetId) { aborted = true; return; }
-          const term = data.term || 'нет';
-          setRows(prev => {
-            const next = [...prev];
-            for (let i = 0; i < next.length; i++) {
-              if (rowKey(next[i]) === key && (next[i].store === 'ЭТМ' || !next[i].store)) {
-                next[i] = { ...next[i], deadline: term };
-              }
-            }
-            return next;
-          });
+          collected.set(key, data?.term || 'нет');
         } catch {
-          if (currentIdRef.current !== startSheetId) { aborted = true; return; }
-          setRows(prev => prev.map(r => rowKey(r) === key && r.deadline === '...' ? { ...r, deadline: 'нет' } : r));
+          collected.set(key, 'нет');
         } finally {
           done++;
-          setRefreshProgress({ done, total: withPrice.length });
+          // Real-time UI update + progress only on the active sheet so we
+          // don't trigger re-renders on a sheet the user already left.
+          if (currentIdRef.current === startSheetId) {
+            const term = collected.get(key)!;
+            setRows(prev => {
+              const next = [...prev];
+              for (let i = 0; i < next.length; i++) {
+                if (rowKey(next[i]) === key && (next[i].store === 'ЭТМ' || !next[i].store)) {
+                  next[i] = { ...next[i], deadline: term };
+                }
+              }
+              return next;
+            });
+            setRefreshProgress({ done, total: withPrice.length });
+          }
         }
       }));
 
-      if (currentIdRef.current !== startSheetId || aborted) {
-        // User left the sheet — leave whatever was applied and do not save
-        // here. Their next manual save (or sheet-switch silent save) will
-        // persist whatever rows they're on.
-        return;
+      // Build the updated rowset off the start-time snapshot, applying every
+      // term we collected. This is what we save to startSheetId regardless
+      // of whether the user is still on it.
+      const updated = startRows.map(r => {
+        const k = rowKey(r);
+        if (collected.has(k) && (r.store === 'ЭТМ' || !r.store)) {
+          return { ...r, deadline: collected.get(k)! };
+        }
+        if (r.deadline === '...') return { ...r, deadline: 'нет' };
+        return r;
+      });
+
+      if (currentIdRef.current === startSheetId) {
+        // Clean up any leftover «...» placeholders on the live sheet.
+        setRows(prev => prev.map(r => r.deadline === '...' ? { ...r, deadline: 'нет' } : r));
+        pushHistorySnapshot(startRows);
       }
 
-      setRows(prev => prev.map(r => r.deadline === '...' ? { ...r, deadline: 'нет' } : r));
-      pushHistorySnapshot(snap);
-
-      // Persist immediately and silently — same reasoning as
-      // handleRefreshPrices: refreshed terms are not user input.
+      // Persist always — to the original sheet — so terms aren't lost.
       try {
-        const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
+        const toSave = updated.filter((r: any) => r.name || r.article).map(normRowForSave);
         await queueSaveRows(startSheetId, toSave);
         if (currentIdRef.current === startSheetId) {
           hasUnsavedRef.current = false;
@@ -1943,12 +1969,16 @@ export default function SpecPageClient() {
         }
       } catch { /* keep state, user can retry */ }
 
-      toast.success(`Сроки обновлены: ${withPrice.length} артикулов`);
+      if (currentIdRef.current === startSheetId) {
+        toast.success(`Сроки обновлены: ${withPrice.length} артикулов`);
+      }
     } catch (err: any) { handleEtmError(err); }
     finally {
       refreshAbortRef.current = null;
-      setRefreshing(false);
-      setRefreshProgress(null);
+      if (currentIdRef.current === startSheetId) {
+        setRefreshing(false);
+        setRefreshProgress(null);
+      }
     }
   }
 
@@ -2149,33 +2179,28 @@ export default function SpecPageClient() {
                         if (autoSaveTimer.current) { clearTimeout(autoSaveTimer.current); autoSaveTimer.current = null; }
                         // Switch the UI immediately — don't block on save or
                         // a prompt. Saves happen in the background through
-                        // queueSaveRows (preserves order). Refresh-loops read
-                        // currentIdRef and will abort on their own once they
-                        // see the new sheetId.
+                        // queueSaveRows (preserves order). Refresh-loops save
+                        // their own results into startSheetId regardless of
+                        // where the user navigates to.
                         const refreshActive = !!refreshAbortRef.current;
                         const oldSid = currentIdRef.current;
                         if (hasUnsavedRef.current) {
-                          // If the only pending changes came from a refresh,
-                          // save silently — refreshed prices/terms aren't
-                          // user input and don't need a «сохранить?» prompt.
-                          if (refreshActive) {
-                            const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
-                            queueSaveRows(oldSid, toSave).catch(() => {});
-                            hasUnsavedRef.current = false;
-                            _setUnsaved(false);
-                          } else {
-                            const shouldSave = confirm('В текущем листе есть несохранённые изменения.\nСохранить перед переходом?');
-                            if (shouldSave) {
-                              const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
-                              // Fire-and-forget; the chain serialises so it
-                              // can't race with the subsequent loadData of
-                              // the new sheet.
-                              queueSaveRows(oldSid, toSave).catch(() => toast.error('Ошибка сохранения'));
-                            }
-                            hasUnsavedRef.current = false;
-                            _setUnsaved(false);
-                          }
+                          // If the only pending changes came from a refresh
+                          // OR user just edited cells, save silently in the
+                          // background — UX rule from spec 30.04.
+                          const toSave = rowsRef.current.filter((r: any) => r.name || r.article).map(normRowForSave);
+                          queueSaveRows(oldSid, toSave).catch(() => {});
+                          hasUnsavedRef.current = false;
+                          _setUnsaved(false);
+                          // Suppress unused-warning:
+                          void refreshActive;
                         }
+                        // Clear stale refresh banner before the new sheet
+                        // mounts. The actual save+state of the in-flight
+                        // refresh is already targeting the old sheetId via
+                        // its own snapshot — no data is lost.
+                        setRefreshing(false);
+                        setRefreshProgress(null);
                         setCurrentId(s.id);
                         if (activeProjectId) setActive(activeProjectId, s.id);
                         window.history.replaceState(null, '', `/spec/${s.id}`);
