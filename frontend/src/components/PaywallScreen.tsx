@@ -13,7 +13,23 @@ interface TariffConfig {
   name: string;
   price: number;
   price_annual: number | null;
+  duration_value: number;
+  duration_unit: 'day' | 'month';
   description: string;
+  sort_order?: number;
+}
+
+function durationLabel(t: TariffConfig): string {
+  const v = Number(t.duration_value);
+  if (t.duration_unit === 'month') {
+    if (v === 1) return '/месяц';
+    if (v === 12) return '/год';
+    return `/${v} мес`;
+  }
+  if (v === 30) return '/месяц';
+  if (v === 365) return '/год';
+  if (v === 7) return '/неделя';
+  return `/${v} дн`;
 }
 
 const FEATURES = [
@@ -44,9 +60,10 @@ export default function PaywallScreen() {
       .catch(() => { /* keep defaults */ });
   }, []);
 
-  const monthlyConfig = configs.find(c => c.plan_key === 'pro' || c.plan_key === 'base');
-  const monthly = monthlyConfig?.price ?? 7990;
-  const annual  = monthlyConfig?.price_annual ?? 79900;
+  const paidTariffs = configs
+    .filter(c => c.plan_key !== 'trial' && Number(c.price) > 0)
+    .slice()
+    .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0));
 
   // Show trial card for logged-out users (lead them to sign up) or logged-in users who can activate it
   const trialUsed = !!(user as any)?.trialUsed;
@@ -76,7 +93,7 @@ export default function PaywallScreen() {
     }
   }
 
-  async function handleBuy(plan: 'monthly' | 'annual') {
+  async function handleBuy(planKey: string) {
     if (!PAYMENTS_ENABLED) {
       toast('Оплата временно недоступна. Свяжитесь с поддержкой для активации тарифа.', { duration: 5000 });
       return;
@@ -86,10 +103,11 @@ export default function PaywallScreen() {
       router.push('/auth/login?redirect=/pricing');
       return;
     }
-    setLoading(plan);
+    setLoading(planKey);
     try {
-      const { data } = await paymentsApi.createPayment(plan, window.location.origin + '/projects');
+      const { data } = await paymentsApi.createPayment(planKey, window.location.origin + '/profile?success=1');
       if (data?.confirmationUrl) {
+        if (data.paymentId) localStorage.setItem('lastPaymentId', data.paymentId);
         window.location.href = data.confirmationUrl;
       } else {
         toast.error('Не удалось получить ссылку оплаты');
@@ -132,29 +150,38 @@ export default function PaywallScreen() {
               ))}
             </ul>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <span style={{ fontSize: 22, fontWeight: 800 }}>{fmt(monthly)} ₽<span style={{ fontSize: 12, fontWeight: 500, color: '#6b7280' }}>/месяц</span></span>
-              <button
-                onClick={() => handleBuy('monthly')}
-                disabled={loading === 'monthly'}
-                style={{ padding: '10px 22px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
-              >
-                {loading === 'monthly' ? '...' : 'Купить'}
-              </button>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #f0f0f0', paddingTop: 12, marginTop: 6 }}>
-              <div>
-                <div style={{ fontSize: 18, fontWeight: 800 }}>{fmt(annual)} ₽<span style={{ fontSize: 11, fontWeight: 500, color: '#6b7280' }}>/год</span></div>
-                <div style={{ fontSize: 10, color: '#10b981', fontWeight: 600 }}>Экономия {fmt(monthly * 12 - annual)} ₽</div>
+            {paidTariffs.length === 0 && (
+              <div style={{ padding: 12, color: '#6b7280', fontSize: 13, textAlign: 'center' }}>
+                Платных тарифов пока нет. Свяжитесь с администратором.
               </div>
-              <button
-                onClick={() => handleBuy('annual')}
-                disabled={loading === 'annual'}
-                style={{ padding: '10px 22px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+            )}
+            {paidTariffs.map((t, idx) => (
+              <div
+                key={t.id}
+                style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  paddingTop: idx > 0 ? 12 : 0,
+                  marginTop: idx > 0 ? 6 : 0,
+                  marginBottom: idx < paidTariffs.length - 1 ? 0 : 0,
+                  borderTop: idx > 0 ? '1px solid #f0f0f0' : 'none',
+                }}
               >
-                {loading === 'annual' ? '...' : 'Купить'}
-              </button>
-            </div>
+                <div>
+                  <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 2 }}>{t.name}</div>
+                  <span style={{ fontSize: 22, fontWeight: 800 }}>
+                    {fmt(Number(t.price))} ₽
+                    <span style={{ fontSize: 12, fontWeight: 500, color: '#6b7280' }}>{durationLabel(t)}</span>
+                  </span>
+                </div>
+                <button
+                  onClick={() => handleBuy(t.plan_key)}
+                  disabled={loading === t.plan_key}
+                  style={{ padding: '10px 22px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+                >
+                  {loading === t.plan_key ? '...' : 'Купить'}
+                </button>
+              </div>
+            ))}
           </div>
 
           {/* Trial */}

@@ -207,8 +207,16 @@ export const adminApi = {
   getPricelists: () => api.get('/admin/pricelists'),
   getTilesStats: () => api.get('/admin/tiles-stats'),
   getTariffConfigs: () => api.get('/admin/tariff-configs'),
-  updateTariffConfig: (id: number, data: { name?: string; price?: number; description?: string; is_active?: boolean }) =>
-    api.put(`/admin/tariff-configs/${id}`, data),
+  createTariffConfig: (data: {
+    plan_key: string; name: string; price: number;
+    duration_value: number; duration_unit: 'day' | 'month';
+    description?: string; sort_order?: number; is_active?: boolean;
+  }) => api.post('/admin/tariff-configs', data),
+  updateTariffConfig: (id: number, data: {
+    name?: string; price?: number; description?: string; is_active?: boolean;
+    duration_value?: number; duration_unit?: 'day' | 'month'; sort_order?: number;
+  }) => api.put(`/admin/tariff-configs/${id}`, data),
+  deleteTariffConfig: (id: number) => api.delete(`/admin/tariff-configs/${id}`),
 };
 
 // ── Profile ───────────────────────────────────────────────────
@@ -220,7 +228,9 @@ export const profileApi = {
 // ── Payments / Subscriptions ──────────────────────────────────
 export const paymentsApi = {
   getPlans: () => api.get('/payments/plans'),
-  createPayment: (planType: 'monthly' | 'annual', returnUrl?: string) =>
+  /** `planType` accepts a tariff_configs.plan_key (preferred) — backend
+   *  also still translates the legacy 'monthly' / 'annual' shortcuts. */
+  createPayment: (planType: string, returnUrl?: string) =>
     api.post('/payments/create', { planType, ...(returnUrl ? { returnUrl } : {}) }),
   getStatus: (paymentId: string) =>
     api.get(`/payments/status/${paymentId}`),

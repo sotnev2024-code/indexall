@@ -110,7 +110,7 @@ export default function ProfilePage() {
   const [savingPassword, setSavingPassword] = useState(false);
 
   const [payLoading, setPayLoading] = useState<string | null>(null);
-  const [prices, setPrices] = useState<{ monthly: number; annual: number }>({ monthly: 0, annual: 0 });
+  const [paidTariffs, setPaidTariffs] = useState<any[]>([]);
 
   // ETM credentials
   const [etmLogin, setEtmLogin] = useState('');
@@ -136,8 +136,11 @@ export default function ProfilePage() {
 
   useEffect(() => {
     paymentsApi.getPlans().then(({ data }) => {
-      const pro = data.find((p: any) => p.plan_key === 'pro');
-      if (pro) setPrices({ monthly: Number(pro.price), annual: Number(pro.price_annual) || 0 });
+      const list = (data as any[])
+        .filter(p => p.plan_key !== 'trial' && Number(p.price) > 0)
+        .slice()
+        .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0));
+      setPaidTariffs(list);
     }).catch(() => {});
   }, []);
 
@@ -189,7 +192,7 @@ export default function ProfilePage() {
     }
   }
 
-  async function handleRenew(planType: 'monthly' | 'annual') {
+  async function handleRenew(planType: string) {
     if (!PAYMENTS_ENABLED) {
       toast('Оплата временно недоступна. Свяжитесь с поддержкой для активации тарифа.', { duration: 5000 });
       return;
@@ -267,22 +270,27 @@ export default function ProfilePage() {
 
       {isBase && (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button
-            onClick={() => handleRenew('monthly')}
-            disabled={payLoading === 'monthly'}
-            style={{ padding: '8px 18px', background: '#1a1a1a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: payLoading === 'monthly' ? 0.6 : 1 }}
-          >
-            {payLoading === 'monthly' ? '...' : `Продлить на месяц — ${prices.monthly ? prices.monthly.toLocaleString('ru-RU') + ' ₽' : '...'}`}
-          </button>
-          {prices.annual > 0 && (
-            <button
-              onClick={() => handleRenew('annual')}
-              disabled={payLoading === 'annual'}
-              style={{ padding: '8px 18px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: 'pointer', opacity: payLoading === 'annual' ? 0.6 : 1 }}
-            >
-              {payLoading === 'annual' ? '...' : `Продлить на год — ${prices.annual.toLocaleString('ru-RU')} ₽`}
-            </button>
+          {paidTariffs.length === 0 && (
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>Платных тарифов нет — обратитесь к администратору</span>
           )}
+          {paidTariffs.map((t, i) => (
+            <button
+              key={t.id}
+              onClick={() => handleRenew(t.plan_key)}
+              disabled={payLoading === t.plan_key}
+              style={{
+                padding: '8px 18px',
+                background: i === 0 ? '#1a1a1a' : '#f5c800',
+                color: i === 0 ? '#fff' : '#1a1a1a',
+                border: 'none', borderRadius: 8, fontSize: 13, fontWeight: i === 0 ? 600 : 700,
+                cursor: 'pointer', opacity: payLoading === t.plan_key ? 0.6 : 1,
+              }}
+            >
+              {payLoading === t.plan_key
+                ? '...'
+                : `${t.name} — ${Number(t.price).toLocaleString('ru-RU')} ₽`}
+            </button>
+          ))}
         </div>
       )}
 

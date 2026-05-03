@@ -10,7 +10,9 @@ import { TariffOperation } from '../admin/tariff-operation.entity';
 
 export interface CreatePaymentDto {
   userId: number;
-  planType: 'monthly' | 'annual';
+  /** Either a tariff_configs.plan_key (preferred) OR the legacy
+   *  'monthly'/'annual' shortcut which maps to 'pro' / 'pro_year'. */
+  planType: string;
   returnUrl: string;
 }
 
@@ -74,16 +76,24 @@ export class PaymentsService {
   }
 
   async createPayment(dto: CreatePaymentDto): Promise<{ paymentId: string; confirmationUrl: string }> {
-    const isAnnual = dto.planType === 'annual';
+    // Translate legacy planType → plan_key. Frontend that hasn't been updated
+    // yet still sends 'monthly' / 'annual'; translate so old clients keep
+    // working through the deploy window.
+    const planKey =
+      dto.planType === 'monthly' ? 'pro' :
+      dto.planType === 'annual'  ? 'pro_year' :
+      dto.planType;
 
-    const proConfig = await this.tariffConfigRepo.findOne({ where: { plan_key: 'pro', is_active: true } });
-    const monthlyPrice = proConfig ? Number(proConfig.price) : 7990;
-    const annualPrice  = proConfig?.price_annual ? Number(proConfig.price_annual) : 79900;
+    const tariff = await this.tariffConfigRepo.findOne({ where: { plan_key: planKey, is_active: true } });
+    if (!tariff) {
+      throw new Error(`Тариф '${planKey}' не найден или отключён`);
+    }
+    if (Number(tariff.price) <= 0) {
+      throw new Error(`Тариф '${planKey}' бесплатный — оплата невозможна`);
+    }
 
-    const amount = isAnnual ? annualPrice : monthlyPrice;
-    const description = isAnnual
-      ? `INDEXALL — Pro тариф (12 месяцев)`
-      : `INDEXALL — Pro тариф (1 месяц)`;
+    const amount = Number(tariff.price);
+    const description = `INDEXALL — ${tariff.name}`;
 
     // Pull the user's email so YooKassa knows where to send the fiscal receipt.
     // Required by 54-ФЗ once «Чеки от ЮKassa» is enabled in the cabinet.
@@ -131,7 +141,10 @@ export class PaymentsService {
       description,
       metadata: {
         userId: String(dto.userId),
-        planType: dto.planType,
+        planType: dto.planType,                    // legacy
+        planKey: tariff.plan_key,                  // new — what activateForPayment reads
+        durationValue: String(tariff.duration_value),
+        durationUnit: tariff.duration_unit,
       },
       receipt,
     };
@@ -203,6 +216,9 @@ export class PaymentsService {
       metadata: {
         userId: String(adminUserId),
         planType: 'monthly',
+        planKey: 'admin_test',
+        durationValue: '0',
+        durationUnit: 'day',
         adminTest: '1', // ← marker; handleWebhook/confirmPayment ignore activation
       },
       receipt,
@@ -261,17 +277,32 @@ export class PaymentsService {
       return false;
     }
 
-    // Stack new period on top of existing remaining time (if any) so
-    // «продлить на год» when 6 месяцев осталось = +1 год от прежнего конца.
-    // If the subscription already expired (or never existed), start from now.
+    // Stack new period on top of existing remaining time (if any).
     const now = new Date();
     const currentExpires = user.subscriptionExpiresAt ? new Date(user.subscriptionExpiresAt) : null;
     const baseDate = currentExpires && currentExpires > now ? new Date(currentExpires) : new Date(now);
     const expiresAt = new Date(baseDate);
-    if (planType === 'annual') {
+
+    // Resolve duration. Preferred path — read durationValue/durationUnit
+    // straight from metadata (set by createPayment off the tariff config).
+    // Legacy path — for in-flight payments started before this deploy that
+    // only carry planType='monthly' / 'annual', map to 30 days / 365 days.
+    const metaValue = Number(payment.metadata?.durationValue);
+    const metaUnit = payment.metadata?.durationUnit;
+    let label = '';
+    if (Number.isFinite(metaValue) && metaValue > 0 && (metaUnit === 'day' || metaUnit === 'month')) {
+      if (metaUnit === 'month') {
+        expiresAt.setMonth(expiresAt.getMonth() + metaValue);
+      } else {
+        expiresAt.setDate(expiresAt.getDate() + metaValue);
+      }
+      label = `${metaValue} ${metaUnit === 'month' ? 'мес' : 'дн'}`;
+    } else if (planType === 'annual') {
       expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+      label = '1 год (legacy)';
     } else {
       expiresAt.setMonth(expiresAt.getMonth() + 1);
+      label = '1 мес (legacy)';
     }
 
     await this.usersRepo.update(userId, {
@@ -279,17 +310,19 @@ export class PaymentsService {
       subscriptionExpiresAt: expiresAt,
     });
 
+    const planKey = (payment.metadata?.planKey as string) || planType;
+
     // Record the operation atomically — UNIQUE on payment_id ensures
     // concurrent webhook + polling races still produce only one row.
     try {
       await this.tariffOpsRepo.save({
         userId,
         operator: 'YooKassa',
-        plan: 'Pro',
+        plan: planKey,
         amount: Number(payment.amount?.value || 0),
         status: 'active',
         expiresAt,
-        comment: `Оплата ${planType === 'annual' ? 'на год' : 'на месяц'} (через ${source})`,
+        comment: `Оплата ${label} (через ${source})`,
         payment_id: payment.id,
       });
     } catch (e: any) {
@@ -299,7 +332,7 @@ export class PaymentsService {
     }
 
     this.logger.log(
-      `Subscription activated via ${source} for user ${userId}, plan: ${planType}, ` +
+      `Subscription activated via ${source} for user ${userId}, plan: ${planKey} (+${label}), ` +
       `from ${currentExpires?.toISOString() || 'now'} → ${expiresAt.toISOString()}`,
     );
     return true;

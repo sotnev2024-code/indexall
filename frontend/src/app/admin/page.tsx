@@ -203,8 +203,10 @@ export default function AdminPage() {
         initial[c.id] = {
           name: c.name,
           price: String(c.price),
-          price_annual: c.price_annual != null ? String(c.price_annual) : '',
+          duration_value: String(c.duration_value ?? 30),
+          duration_unit: c.duration_unit || 'day',
           description: c.description || '',
+          sort_order: c.sort_order != null ? String(c.sort_order) : '',
         };
       });
       setEditingConfig(initial);
@@ -218,12 +220,63 @@ export default function AdminPage() {
       const { data: updated } = await adminApi.updateTariffConfig(id, {
         name: data.name,
         price: Number(data.price),
-        price_annual: data.price_annual !== '' ? Number(data.price_annual) : null,
+        duration_value: Number(data.duration_value),
+        duration_unit: data.duration_unit,
         description: data.description,
+        sort_order: data.sort_order != null && data.sort_order !== '' ? Number(data.sort_order) : undefined,
       });
       setTariffConfigs(prev => prev.map(c => c.id === id ? updated : c));
       toast.success('Тариф обновлён');
-    } catch { toast.error('Ошибка сохранения тарифа'); }
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Ошибка сохранения тарифа');
+    }
+  }
+
+  async function toggleTariffActive(id: number, value: boolean) {
+    try {
+      const { data: updated } = await adminApi.updateTariffConfig(id, { is_active: value });
+      setTariffConfigs(prev => prev.map(c => c.id === id ? updated : c));
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Ошибка обновления');
+    }
+  }
+
+  async function deleteTariff(id: number, planKey: string) {
+    if (!confirm(`Удалить тариф «${planKey}»? Существующие подписки продолжат работать до окончания срока, новые покупки невозможны.`)) return;
+    try {
+      await adminApi.deleteTariffConfig(id);
+      setTariffConfigs(prev => prev.map(c => c.id === id ? { ...c, is_active: false } : c));
+      toast.success('Тариф деактивирован');
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Ошибка удаления');
+    }
+  }
+
+  const [newCfg, setNewCfg] = useState({
+    plan_key: '', name: '', price: '', duration_value: '30', duration_unit: 'day',
+    description: '', sort_order: '100',
+  });
+  async function createTariff() {
+    if (!newCfg.plan_key.trim() || !newCfg.name.trim() || !newCfg.price) {
+      toast.error('Заполните ключ, название и цену');
+      return;
+    }
+    try {
+      const { data: created } = await adminApi.createTariffConfig({
+        plan_key: newCfg.plan_key.trim().toLowerCase(),
+        name: newCfg.name.trim(),
+        price: Number(newCfg.price),
+        duration_value: Number(newCfg.duration_value),
+        duration_unit: newCfg.duration_unit as 'day' | 'month',
+        description: newCfg.description || undefined,
+        sort_order: newCfg.sort_order ? Number(newCfg.sort_order) : 100,
+      });
+      setTariffConfigs(prev => [...prev, created]);
+      setNewCfg({ plan_key: '', name: '', price: '', duration_value: '30', duration_unit: 'day', description: '', sort_order: '100' });
+      toast.success('Тариф создан');
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Ошибка создания тарифа');
+    }
   }
   async function loadStats() {
     try { const { data } = await adminApi.getStats(); setStats(data); }
@@ -919,17 +972,25 @@ export default function AdminPage() {
               </div>
 
               {/* ── Tariff plan editor ── */}
-              <div className="admin-form" style={{ marginBottom: 32 }}>
+              <div className="admin-form" style={{ marginBottom: 24 }}>
                 <div className="admin-form-title">Редактор тарифных планов</div>
+                <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.5 }}>
+                  Изменения цены/срока влияют только на <strong>новые покупки</strong>.
+                  Существующие подписки пользователей продолжат работать до окончания срока.
+                  Удаление деактивирует тариф (мягкое удаление) — пропадает с витрины, но не ломает уже оплаченные подписки.
+                </p>
                 <div style={{ overflowX: 'auto' }}>
-                  <table className="admin-table" style={{ minWidth: 860 }}>
+                  <table className="admin-table" style={{ minWidth: 1080 }}>
                     <thead>
                       <tr>
                         <th>Ключ</th>
                         <th>Название</th>
-                        <th>Цена ₽/мес</th>
-                        <th>Цена ₽/год</th>
+                        <th>Цена ₽</th>
+                        <th>Длительность</th>
+                        <th>Ед.</th>
                         <th>Описание</th>
+                        <th>Сорт.</th>
+                        <th>Активен</th>
                         <th></th>
                       </tr>
                     </thead>
@@ -938,9 +999,12 @@ export default function AdminPage() {
                         const ed = editingConfig[cfg.id] || {
                           name: cfg.name,
                           price: String(cfg.price),
-                          price_annual: cfg.price_annual != null ? String(cfg.price_annual) : '',
+                          duration_value: String(cfg.duration_value ?? 30),
+                          duration_unit: cfg.duration_unit || 'day',
                           description: cfg.description || '',
+                          sort_order: cfg.sort_order != null ? String(cfg.sort_order) : '',
                         };
+                        const isTrial = cfg.plan_key === 'trial';
                         return (
                           <tr key={cfg.id}>
                             <td><code style={{ fontSize: 12, background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4 }}>{cfg.plan_key}</code></td>
@@ -962,11 +1026,21 @@ export default function AdminPage() {
                             <td>
                               <input
                                 type="number"
-                                value={ed.price_annual}
-                                onChange={e => setEditingConfig(p => ({ ...p, [cfg.id]: { ...ed, price_annual: e.target.value } }))}
-                                style={{ width: 90, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13 }}
-                                placeholder="—"
+                                min={1}
+                                value={ed.duration_value}
+                                onChange={e => setEditingConfig(p => ({ ...p, [cfg.id]: { ...ed, duration_value: e.target.value } }))}
+                                style={{ width: 70, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13 }}
                               />
+                            </td>
+                            <td>
+                              <select
+                                value={ed.duration_unit}
+                                onChange={e => setEditingConfig(p => ({ ...p, [cfg.id]: { ...ed, duration_unit: e.target.value } }))}
+                                style={{ padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13 }}
+                              >
+                                <option value="day">дней</option>
+                                <option value="month">мес</option>
+                              </select>
                             </td>
                             <td>
                               <input
@@ -977,19 +1051,171 @@ export default function AdminPage() {
                               />
                             </td>
                             <td>
-                              <button className="btn-primary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => saveTariffConfig(cfg.id)}>
+                              <input
+                                type="number"
+                                value={ed.sort_order}
+                                onChange={e => setEditingConfig(p => ({ ...p, [cfg.id]: { ...ed, sort_order: e.target.value } }))}
+                                style={{ width: 60, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13 }}
+                                placeholder="0"
+                              />
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              <input
+                                type="checkbox"
+                                checked={!!cfg.is_active}
+                                onChange={e => toggleTariffActive(cfg.id, e.target.checked)}
+                              />
+                            </td>
+                            <td style={{ whiteSpace: 'nowrap' }}>
+                              <button
+                                className="btn-primary"
+                                style={{ fontSize: 11, padding: '4px 10px', marginRight: 4 }}
+                                onClick={() => saveTariffConfig(cfg.id)}
+                              >
                                 Сохранить
                               </button>
+                              {!isTrial && (
+                                <button
+                                  style={{ fontSize: 11, padding: '4px 10px', background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca', borderRadius: 4, cursor: 'pointer' }}
+                                  onClick={() => deleteTariff(cfg.id, cfg.plan_key)}
+                                  title="Деактивировать тариф"
+                                >
+                                  Удалить
+                                </button>
+                              )}
                             </td>
                           </tr>
                         );
                       })}
                       {tariffConfigs.length === 0 && (
-                        <tr><td colSpan={6} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>Загрузка…</td></tr>
+                        <tr><td colSpan={9} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>Загрузка…</td></tr>
                       )}
                     </tbody>
                   </table>
                 </div>
+
+                {/* Inactive tariffs */}
+                {tariffConfigs.some((c: any) => !c.is_active) && (
+                  <div style={{ marginTop: 18 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--muted)', marginBottom: 8 }}>
+                      Неактивные тарифы
+                    </div>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table className="admin-table" style={{ minWidth: 720 }}>
+                        <thead>
+                          <tr>
+                            <th>Ключ</th>
+                            <th>Название</th>
+                            <th>Цена ₽</th>
+                            <th>Срок</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {tariffConfigs.filter((c: any) => !c.is_active).map(cfg => (
+                            <tr key={cfg.id} style={{ opacity: 0.6 }}>
+                              <td><code style={{ fontSize: 12, background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4 }}>{cfg.plan_key}</code></td>
+                              <td>{cfg.name}</td>
+                              <td>{Number(cfg.price).toLocaleString('ru-RU')}</td>
+                              <td>{cfg.duration_value} {cfg.duration_unit === 'month' ? 'мес' : 'дн'}</td>
+                              <td>
+                                <button
+                                  className="btn-primary"
+                                  style={{ fontSize: 11, padding: '4px 10px' }}
+                                  onClick={() => toggleTariffActive(cfg.id, true)}
+                                >
+                                  Активировать
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Create new tariff ── */}
+              <div className="admin-form" style={{ marginBottom: 32, background: '#f0f9ff', border: '1px solid #bae6fd' }}>
+                <div className="admin-form-title">Создать новый тариф</div>
+                <div className="form-row" style={{ flexWrap: 'wrap', gap: 8 }}>
+                  <div className="form-col" style={{ minWidth: 140 }}>
+                    <label>Ключ (lat) *</label>
+                    <input
+                      value={newCfg.plan_key}
+                      onChange={e => setNewCfg(p => ({ ...p, plan_key: e.target.value }))}
+                      placeholder="pro_quarter"
+                      style={{ padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13, width: '100%' }}
+                    />
+                  </div>
+                  <div className="form-col" style={{ minWidth: 180 }}>
+                    <label>Название *</label>
+                    <input
+                      value={newCfg.name}
+                      onChange={e => setNewCfg(p => ({ ...p, name: e.target.value }))}
+                      placeholder="Профессиональный (3 мес)"
+                      style={{ padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13, width: '100%' }}
+                    />
+                  </div>
+                  <div className="form-col" style={{ minWidth: 100 }}>
+                    <label>Цена ₽ *</label>
+                    <input
+                      type="number"
+                      value={newCfg.price}
+                      onChange={e => setNewCfg(p => ({ ...p, price: e.target.value }))}
+                      placeholder="12990"
+                      style={{ padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13, width: '100%' }}
+                    />
+                  </div>
+                  <div className="form-col" style={{ minWidth: 90 }}>
+                    <label>Длительность</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={newCfg.duration_value}
+                      onChange={e => setNewCfg(p => ({ ...p, duration_value: e.target.value }))}
+                      style={{ padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13, width: '100%' }}
+                    />
+                  </div>
+                  <div className="form-col" style={{ minWidth: 90 }}>
+                    <label>Ед. измерения</label>
+                    <select
+                      value={newCfg.duration_unit}
+                      onChange={e => setNewCfg(p => ({ ...p, duration_unit: e.target.value }))}
+                      style={{ padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13, width: '100%' }}
+                    >
+                      <option value="day">дней</option>
+                      <option value="month">месяцев</option>
+                    </select>
+                  </div>
+                  <div className="form-col" style={{ flex: 1, minWidth: 200 }}>
+                    <label>Описание</label>
+                    <input
+                      value={newCfg.description}
+                      onChange={e => setNewCfg(p => ({ ...p, description: e.target.value }))}
+                      placeholder="Полный доступ ко всем функциям"
+                      style={{ padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13, width: '100%' }}
+                    />
+                  </div>
+                  <div className="form-col" style={{ minWidth: 80 }}>
+                    <label>Сорт.</label>
+                    <input
+                      type="number"
+                      value={newCfg.sort_order}
+                      onChange={e => setNewCfg(p => ({ ...p, sort_order: e.target.value }))}
+                      style={{ padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 4, fontSize: 13, width: '100%' }}
+                    />
+                  </div>
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <button className="btn-primary" onClick={createTariff}>
+                    + Создать тариф
+                  </button>
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10, lineHeight: 1.5 }}>
+                  Ключ — латиница, цифры и подчёркивания (например <code>pro_quarter</code>). После создания тариф появится на странице оплаты и в виджетах подписки.
+                </p>
               </div>
 
               {/* Add form */}

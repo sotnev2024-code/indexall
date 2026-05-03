@@ -1,6 +1,7 @@
 import {
   Controller, Get, Post, Patch, Delete, Put,
   Param, Body, UseGuards, ParseIntPipe, ParseEnumPipe, OnModuleInit,
+  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -18,21 +19,38 @@ import {
 import { TariffOperation } from './tariff-operation.entity';
 import { TariffConfig } from './tariff-config.entity';
 
+/** Seed tariffs created on first start. After that the table is admin-managed
+ *  (CRUD via admin API). The init logic only ADDS missing seeds — it never
+ *  resets prices or durations the admin has customised. */
 const DEFAULT_TARIFF_CONFIGS = [
   {
     plan_key: 'pro',
-    name: 'Базовый',
-    price: 7990,
-    price_annual: 79900,
-    description: 'Полный доступ ко всем функциям: спецификации, каталог, интеграции, шаблоны, аналоги, аксессуары.',
+    name: 'Базовый (1 месяц)',
+    price: 4990,
+    duration_value: 30,
+    duration_unit: 'day',
+    description: 'Полный доступ ко всем функциям на 30 дней.',
+    sort_order: 10,
+    is_active: true,
+  },
+  {
+    plan_key: 'pro_year',
+    name: 'Базовый (1 год)',
+    price: 49900,
+    duration_value: 365,
+    duration_unit: 'day',
+    description: 'Полный доступ ко всем функциям на 1 год. Экономия по сравнению с месячной подпиской.',
+    sort_order: 20,
     is_active: true,
   },
   {
     plan_key: 'trial',
     name: 'Пробный',
     price: 0,
-    price_annual: null,
+    duration_value: 7,
+    duration_unit: 'day',
     description: '7 дней полного доступа ко всем функциям. Бесплатно, только один раз.',
+    sort_order: 1,
     is_active: true,
   },
 ];
@@ -56,23 +74,31 @@ export class AdminController implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    // Deactivate removed plans (e.g. 'base')
-    const activeKeys = DEFAULT_TARIFF_CONFIGS.map(c => c.plan_key);
-    const all = await this.tariffConfigRepo.find();
-    for (const existing of all) {
-      if (!activeKeys.includes(existing.plan_key) && existing.is_active) {
-        await this.tariffConfigRepo.update(existing.id, { is_active: false });
-      }
-    }
-    // Upsert defaults (only update fields that haven't been customised to non-default values)
+    // Seed only — never overwrite admin-customised data. Specifically:
+    //   · create missing default plan_keys.
+    //   · backfill duration_value/duration_unit for legacy 'pro' rows that
+    //     pre-date these columns (would default to 30d, but old data may
+    //     have nulls).
+    //   · if the legacy 'pro' row carries a non-zero price_annual but
+    //     'pro_year' doesn't exist yet → create 'pro_year' from that price.
     for (const cfg of DEFAULT_TARIFF_CONFIGS) {
       const exists = await this.tariffConfigRepo.findOne({ where: { plan_key: cfg.plan_key } });
       if (!exists) {
         await this.tariffConfigRepo.save(this.tariffConfigRepo.create(cfg));
-      } else {
-        // Always keep is_active and price_annual in sync with defaults; name/price/description admin-editable
-        await this.tariffConfigRepo.update(exists.id, { is_active: cfg.is_active });
       }
+    }
+
+    // One-time migration: lift price_annual into a separate 'pro_year' tariff.
+    const legacyPro = await this.tariffConfigRepo.findOne({ where: { plan_key: 'pro' } });
+    const proYear = await this.tariffConfigRepo.findOne({ where: { plan_key: 'pro_year' } });
+    if (legacyPro && legacyPro.price_annual && (!proYear || Number(proYear.price) === 49900)) {
+      // proYear was just seeded with the default 49900 — replace with the
+      // admin's previously configured annual price.
+      if (proYear) {
+        await this.tariffConfigRepo.update(proYear.id, { price: legacyPro.price_annual });
+      }
+      // Clear the legacy column so we don't re-run this on every restart.
+      await this.tariffConfigRepo.update(legacyPro.id, { price_annual: null });
     }
   }
 
@@ -326,22 +352,105 @@ export class AdminController implements OnModuleInit {
 
   @Get('tariff-configs')
   getTariffConfigs() {
-    return this.tariffConfigRepo.find({ order: { id: 'ASC' } });
+    return this.tariffConfigRepo.find({ order: { sort_order: 'ASC', id: 'ASC' } });
+  }
+
+  /** Create a new tariff. plan_key must be unique and use only safe chars
+   *  (latin/digits/underscore) — it doubles as YooKassa metadata.planKey. */
+  @Post('tariff-configs')
+  async createTariffConfig(@Body() body: {
+    plan_key: string;
+    name: string;
+    price: number;
+    duration_value: number;
+    duration_unit: 'day' | 'month';
+    description?: string;
+    is_active?: boolean;
+    sort_order?: number;
+  }) {
+    if (!body.plan_key || !/^[a-z0-9_]+$/i.test(body.plan_key)) {
+      throw new BadRequestException('plan_key должен содержать только латиницу, цифры и подчёркивания');
+    }
+    if (!body.name || !body.name.trim()) {
+      throw new BadRequestException('Название обязательно');
+    }
+    if (!Number.isFinite(Number(body.price)) || Number(body.price) < 0) {
+      throw new BadRequestException('Цена должна быть неотрицательным числом');
+    }
+    if (!Number.isFinite(Number(body.duration_value)) || Number(body.duration_value) <= 0) {
+      throw new BadRequestException('Срок должен быть положительным числом');
+    }
+    if (!['day', 'month'].includes(body.duration_unit)) {
+      throw new BadRequestException('Единица срока — "day" или "month"');
+    }
+    const existing = await this.tariffConfigRepo.findOne({ where: { plan_key: body.plan_key.toLowerCase() } });
+    if (existing) {
+      throw new BadRequestException(`Тариф с ключом '${body.plan_key}' уже существует`);
+    }
+    const created = await this.tariffConfigRepo.save(this.tariffConfigRepo.create({
+      plan_key: body.plan_key.toLowerCase(),
+      name: body.name.trim(),
+      price: Number(body.price),
+      duration_value: Math.floor(Number(body.duration_value)),
+      duration_unit: body.duration_unit,
+      description: body.description ?? null,
+      is_active: body.is_active ?? true,
+      sort_order: body.sort_order ?? 100,
+    }));
+    return created;
   }
 
   @Put('tariff-configs/:id')
   async updateTariffConfig(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { name?: string; price?: number; price_annual?: number | null; description?: string; is_active?: boolean },
+    @Body() body: {
+      name?: string;
+      price?: number;
+      price_annual?: number | null;
+      duration_value?: number;
+      duration_unit?: 'day' | 'month';
+      description?: string;
+      is_active?: boolean;
+      sort_order?: number;
+    },
   ) {
+    if (body.duration_unit && !['day', 'month'].includes(body.duration_unit)) {
+      throw new BadRequestException('Единица срока — "day" или "month"');
+    }
+    if (body.duration_value !== undefined &&
+        (!Number.isFinite(Number(body.duration_value)) || Number(body.duration_value) <= 0)) {
+      throw new BadRequestException('Срок должен быть положительным числом');
+    }
+    if (body.price !== undefined &&
+        (!Number.isFinite(Number(body.price)) || Number(body.price) < 0)) {
+      throw new BadRequestException('Цена должна быть неотрицательным числом');
+    }
     await this.tariffConfigRepo.update(id, {
       ...(body.name !== undefined && { name: body.name }),
-      ...(body.price !== undefined && { price: body.price }),
+      ...(body.price !== undefined && { price: Number(body.price) }),
       ...(body.price_annual !== undefined && { price_annual: body.price_annual }),
+      ...(body.duration_value !== undefined && { duration_value: Math.floor(Number(body.duration_value)) }),
+      ...(body.duration_unit !== undefined && { duration_unit: body.duration_unit }),
       ...(body.description !== undefined && { description: body.description }),
       ...(body.is_active !== undefined && { is_active: body.is_active }),
+      ...(body.sort_order !== undefined && { sort_order: body.sort_order }),
     });
     return this.tariffConfigRepo.findOne({ where: { id } });
+  }
+
+  /** Soft delete: marks the tariff inactive so existing user subscriptions
+   *  remain valid until expiry but new purchases are no longer offered. */
+  @Delete('tariff-configs/:id')
+  async deleteTariffConfig(@Param('id', ParseIntPipe) id: number) {
+    const cfg = await this.tariffConfigRepo.findOne({ where: { id } });
+    if (!cfg) throw new BadRequestException('Тариф не найден');
+    // The trial seed shouldn't be deletable — it's wired into /auth/trial
+    // and expected to exist by name elsewhere.
+    if (cfg.plan_key === 'trial') {
+      throw new BadRequestException('Пробный тариф нельзя удалить, можно только деактивировать');
+    }
+    await this.tariffConfigRepo.update(id, { is_active: false });
+    return { success: true, soft_deleted: true };
   }
 
   // ── Templates (admin view) ───────────────────────────────────

@@ -13,7 +13,24 @@ interface TariffConfig {
   name: string;
   price: number;
   price_annual: number | null;
+  duration_value: number;
+  duration_unit: 'day' | 'month';
   description: string;
+  sort_order?: number;
+}
+
+function durationLabel(t: TariffConfig): string {
+  const v = Number(t.duration_value);
+  if (t.duration_unit === 'month') {
+    if (v === 1) return '/месяц';
+    if (v === 12) return '/год';
+    return `/${v} мес`;
+  }
+  // day
+  if (v === 30) return '/месяц';
+  if (v === 365) return '/год';
+  if (v === 7) return '/неделя';
+  return `/${v} дн`;
 }
 
 const PAID_FEATURES = [
@@ -50,19 +67,20 @@ function PricingContent() {
   const { user, setAuth } = useAppStore();
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
-  const [plans, setPlans] = useState<Record<string, TariffConfig>>({});
+  const [tariffs, setTariffs] = useState<TariffConfig[]>([]);
 
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     paymentsApi.getPlans().then(({ data }) => {
-      const map: Record<string, TariffConfig> = {};
-      data.forEach((p: TariffConfig) => { map[p.plan_key] = p; });
-      setPlans(map);
+      const list = (data as TariffConfig[])
+        .slice()
+        .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0));
+      setTariffs(list);
     }).catch(() => {});
   }, []);
 
-  async function handleBuy(planType: 'monthly' | 'annual') {
+  async function handleBuy(planKey: string) {
     if (!mounted) return;
     if (!PAYMENTS_ENABLED) {
       toast('Оплата временно недоступна. Свяжитесь с поддержкой для активации тарифа.', { duration: 5000 });
@@ -70,10 +88,10 @@ function PricingContent() {
     }
     const token = localStorage.getItem('token');
     if (!token) { router.push('/auth/login'); return; }
-    setLoading(planType);
+    setLoading(planKey);
     try {
       const returnUrl = `${window.location.origin}/profile?success=1`;
-      const { data } = await paymentsApi.createPayment(planType, returnUrl);
+      const { data } = await paymentsApi.createPayment(planKey, returnUrl);
       if (data.confirmationUrl) {
         if (data.paymentId) localStorage.setItem('lastPaymentId', data.paymentId);
         window.location.href = data.confirmationUrl;
@@ -115,9 +133,9 @@ function PricingContent() {
   const trialAvailable = canActivateTrial(user as any);
   const showTrialBtn = !user || trialAvailable;
 
-  const proPlan = plans.pro || plans.base;
-  const monthlyPrice = proPlan?.price ?? 7990;
-  const annualPrice  = proPlan?.price_annual ?? 79900;
+  // Paid tariffs (price > 0) come from the admin-managed tariff_configs.
+  // Trial is a separate UI block — it never goes through createPayment.
+  const paidTariffs = tariffs.filter(t => t.plan_key !== 'trial' && Number(t.price) > 0);
 
   return (
     <div style={{ minHeight: '100vh', background: '#f4f4f4' }}>
@@ -128,12 +146,12 @@ function PricingContent() {
           Выберите тариф
         </h1>
         <p style={{ textAlign: 'center', fontSize: 14, color: '#6b7280', maxWidth: 580, margin: '0 auto 40px' }}>
-          Активируйте бесплатный пробный период на 7 дней или оформите тариф «Базовый».
+          Активируйте бесплатный пробный период на 7 дней или оформите подходящий платный тариф.
         </p>
 
         <div style={{ display: 'grid', gridTemplateColumns: showTrialBtn || isCurrentTrial ? '1fr 1fr' : '1fr', gap: 20, maxWidth: showTrialBtn || isCurrentTrial ? 760 : 380, margin: '0 auto' }}>
 
-          {/* ── Card 1: Базовый (PRO) ── */}
+          {/* ── Paid tariffs card (lists every active paid tariff from admin) ── */}
           <div style={{
             background: '#fff', borderRadius: 14, padding: 28,
             border: isCurrentPro ? '2px solid #1a1a1a' : '1px solid #d0d0d0',
@@ -141,7 +159,7 @@ function PricingContent() {
             boxShadow: '0 4px 16px rgba(0,0,0,0.06)',
           }}>
             <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <h2 style={{ fontSize: 19, fontWeight: 800 }}>Базовый</h2>
+              <h2 style={{ fontSize: 19, fontWeight: 800 }}>Платные тарифы</h2>
               <span style={{ background: '#f5c800', borderRadius: 4, padding: '3px 10px', fontSize: 10, fontWeight: 700 }}>Все функции</span>
             </div>
             <p style={{ fontSize: 12, color: '#666', marginBottom: 14, lineHeight: 1.5 }}>
@@ -162,36 +180,36 @@ function PricingContent() {
               </div>
             )}
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              <div style={{ fontSize: 20, fontWeight: 800 }}>
-                {fmt(monthlyPrice)} ₽<span style={{ fontWeight: 400, fontSize: 12, color: '#6b7280' }}>/месяц</span>
+            {paidTariffs.length === 0 && (
+              <div style={{ padding: 12, color: '#6b7280', fontSize: 13, textAlign: 'center' }}>
+                Платных тарифов пока нет. Свяжитесь с администратором.
               </div>
-              <button
-                style={{ padding: '10px 22px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
-                onClick={() => handleBuy('monthly')}
-                disabled={loading === 'monthly'}
+            )}
+            {paidTariffs.map((t, idx) => (
+              <div
+                key={t.id}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  marginBottom: idx < paidTariffs.length - 1 ? 12 : 0,
+                  paddingTop: idx > 0 ? 12 : 0,
+                  borderTop: idx > 0 ? '1px solid #f0f0f0' : 'none',
+                }}
               >
-                {loading === 'monthly' ? '...' : isCurrentPro ? 'Продлить' : 'Купить'}
-              </button>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #f0f0f0', paddingTop: 12 }}>
-              <div>
-                <div style={{ fontSize: 18, fontWeight: 800 }}>
-                  {fmt(annualPrice)} ₽<span style={{ fontWeight: 400, fontSize: 11, color: '#6b7280' }}>/год</span>
+                <div>
+                  <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 2 }}>{t.name}</div>
+                  <div style={{ fontSize: 20, fontWeight: 800 }}>
+                    {fmt(Number(t.price))} ₽<span style={{ fontWeight: 400, fontSize: 12, color: '#6b7280' }}>{durationLabel(t)}</span>
+                  </div>
                 </div>
-                <div style={{ fontSize: 10, color: '#10b981', fontWeight: 600 }}>
-                  Экономия {fmt(monthlyPrice * 12 - annualPrice)} ₽
-                </div>
+                <button
+                  style={{ padding: '10px 22px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+                  onClick={() => handleBuy(t.plan_key)}
+                  disabled={loading === t.plan_key}
+                >
+                  {loading === t.plan_key ? '...' : isCurrentPro ? 'Продлить' : 'Купить'}
+                </button>
               </div>
-              <button
-                style={{ padding: '10px 22px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
-                onClick={() => handleBuy('annual')}
-                disabled={loading === 'annual'}
-              >
-                {loading === 'annual' ? '...' : isCurrentPro ? 'Продлить' : 'Купить'}
-              </button>
-            </div>
+            ))}
           </div>
 
           {/* ── Card 2: Trial — only when available ── */}

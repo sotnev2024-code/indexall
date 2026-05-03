@@ -23,12 +23,14 @@ export class PaymentsController {
     return this.tariffConfigRepo.find({ where: { is_active: true }, order: { id: 'ASC' } });
   }
 
-  /** Create a payment — called from the pricing page */
+  /** Create a payment — called from the pricing page.
+   *  `planType` accepts a tariff_configs.plan_key; also still maps the
+   *  legacy 'monthly' / 'annual' values to 'pro' / 'pro_year'. */
   @Post('create')
   @UseGuards(JwtAuthGuard)
   async createPayment(
     @Request() req,
-    @Body() body: { planType: 'monthly' | 'annual'; returnUrl?: string },
+    @Body() body: { planType: string; returnUrl?: string },
   ) {
     const returnUrl = body.returnUrl || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/pricing?success=1`;
     try {
