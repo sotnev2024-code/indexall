@@ -221,6 +221,7 @@ export const adminApi = {
   deleteTariffConfig: (id: number) => api.delete(`/admin/tariff-configs/${id}`),
   uploadTariffImage: (id: number, fd: FormData) =>
     api.post(`/admin/tariff-configs/${id}/image`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  deleteTariffImage: (id: number) => api.delete(`/admin/tariff-configs/${id}/image`),
   reorderTariffConfigs: (items: Array<{ id: number; sort_order: number; parent_id: number | null }>) =>
     api.put('/admin/tariff-configs/reorder', { items }),
 };

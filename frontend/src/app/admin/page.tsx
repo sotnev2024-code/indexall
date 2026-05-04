@@ -352,6 +352,17 @@ export default function AdminPage() {
     }
   }
 
+  async function deleteManagedTariffImage(id: number) {
+    try {
+      await adminApi.deleteTariffImage(id);
+      setManagedTariffs(prev => prev.map(t => t.id === id ? { ...t, image_path: null } : t));
+      setTariffConfigs(prev => prev.map(c => c.id === id ? { ...c, image_path: null } : c));
+      toast.success('Обложка удалена');
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Ошибка удаления обложки');
+    }
+  }
+
   async function saveTariffsManager() {
     try {
       // 1. Create new tariffs (those without an `id`). Backend auto-generates
@@ -1145,27 +1156,36 @@ export default function AdminPage() {
                   существующие подписки продолжат работать до окончания срока.
                 </p>
 
-                {/* Compact preview grid */}
+                {/* Compact preview grid — 4 cols, height auto-fits placed tiles */}
                 <div style={{
-                  display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gridAutoRows: '50px',
+                  display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gridAutoRows: '60px',
                   gridAutoFlow: 'dense', gap: 6, background: '#f4f4f4', padding: 8, borderRadius: 6,
                 }}>
                   {tariffConfigs.filter((c: any) => c.is_active).slice().sort((a: any, b: any) =>
-                    (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.id - b.id).map((cfg: any) => (
-                    <div key={cfg.id} style={{
-                      gridColumn: `span ${cfg.width || 1}`,
-                      gridRow: `span ${cfg.height || 3}`,
-                      background: cfg.image_path ? `url(${getBackendOrigin()}/uploads/${String(cfg.image_path).split(/[\\/]/).pop()}) center/cover` : '#1a1a1a',
-                      borderRadius: 6, color: '#fff', padding: 8, fontSize: 11,
-                      display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-                      border: cfg.parent_id ? '2px dashed rgba(245,200,0,0.7)' : 'none',
-                    }}>
-                      <div style={{ fontWeight: 700, textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}>{cfg.name}</div>
-                      <div style={{ color: '#f5c800', fontWeight: 800, textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}>
-                        {Number(cfg.price).toLocaleString('ru-RU')} ₽ <span style={{ color: '#fff', fontWeight: 500, fontSize: 10 }}>· {cfg.duration_value}{cfg.duration_unit === 'month' ? 'мес' : 'дн'}</span>
+                    (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.id - b.id).map((cfg: any) => {
+                    // Static assets are mounted under /api/uploads/, so build
+                    // the URL off NEXT_PUBLIC_API_URL (which already contains
+                    // the /api segment), not the bare origin.
+                    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+                    const img = cfg.image_path
+                      ? `${apiUrl}/uploads/${String(cfg.image_path).split(/[\\/]/).pop()}`
+                      : null;
+                    return (
+                      <div key={cfg.id} style={{
+                        gridColumn: `span ${cfg.width || 1}`,
+                        gridRow: `span ${cfg.height || 3}`,
+                        background: img ? `url("${img}") center/cover` : '#1a1a1a',
+                        borderRadius: 6, color: '#fff', padding: 8, fontSize: 11,
+                        display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+                        border: cfg.parent_id ? '2px dashed rgba(245,200,0,0.7)' : 'none',
+                      }}>
+                        <div style={{ fontWeight: 700, textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}>{cfg.name}</div>
+                        <div style={{ color: '#f5c800', fontWeight: 800, textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}>
+                          {Number(cfg.price).toLocaleString('ru-RU')} ₽ <span style={{ color: '#fff', fontWeight: 500, fontSize: 10 }}>· {cfg.duration_value}{cfg.duration_unit === 'month' ? 'мес' : 'дн'}</span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {tariffConfigs.filter((c: any) => c.is_active).length === 0 && (
                     <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 24, color: 'var(--muted)' }}>
                       Активных тарифов нет — откройте «Управление тарифами» и добавьте первый.
@@ -1960,6 +1980,7 @@ export default function AdminPage() {
           onUpdateField={updateManagedTariffField}
           onReorder={reorderManagedTariffs}
           onUploadImage={uploadManagedTariffImage}
+          onDeleteImage={deleteManagedTariffImage}
           onClose={() => setTariffsManagerOpen(false)}
           onSave={saveTariffsManager}
         />

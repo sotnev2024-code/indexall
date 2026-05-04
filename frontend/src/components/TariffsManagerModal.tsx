@@ -4,10 +4,14 @@ import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragEn
 import { SortableContext, useSortable, rectSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
-function getImageUrl(path: string | null | undefined): string | null {
+function getImageUrl(path: string | null | undefined, bust?: number): string | null {
   if (!path) return null;
   const filename = String(path).split(/[\\/]/).pop();
-  return `${process.env.NEXT_PUBLIC_API_URL}/uploads/${filename}`;
+  const url = `${process.env.NEXT_PUBLIC_API_URL}/uploads/${filename}`;
+  // Cache-bust after re-upload — same filename can be reused on quick retry
+  // (Date.now() collisions are unlikely but possible) and Next.js images get
+  // aggressively cached by the browser.
+  return bust ? `${url}?v=${bust}` : url;
 }
 
 export interface TariffTile {
@@ -37,10 +41,13 @@ interface Props {
   onUpdateField: (idx: number, patch: Partial<TariffTile>) => void;
   onReorder: (fromIdx: number, toIdx: number) => void;
   onUploadImage: (id: number, f: File) => Promise<void>;
+  onDeleteImage: (id: number) => Promise<void>;
   onClose: () => void;
   onSave: () => void;
 }
 
+// Vertical-column-first sizes (the client wants tariffs as long vertical
+// columns) within a 4-column grid. Heights run 1..4.
 const SIZES: { label: string; w: number; h: number }[] = [
   { label: '1×1', w: 1, h: 1 },
   { label: '1×2', w: 1, h: 2 },
@@ -65,7 +72,7 @@ function durationLabel(t: TariffTile) {
 }
 
 function SortableTariff({
-  tile, idx, onRemove, onSetSize, onToggleActive, onUpdateField, onUploadImage, onAddChild,
+  tile, idx, onRemove, onSetSize, onToggleActive, onUpdateField, onUploadImage, onDeleteImage, onAddChild,
 }: {
   tile: TariffTile; idx: number;
   onRemove: (idx: number) => void;
@@ -73,6 +80,7 @@ function SortableTariff({
   onToggleActive: (idx: number) => void;
   onUpdateField: (idx: number, patch: Partial<TariffTile>) => void;
   onUploadImage: (id: number, f: File) => Promise<void>;
+  onDeleteImage: (id: number) => Promise<void>;
   onAddChild: (parentId: number) => void;
 }) {
   const id = tile.id ? `t-${tile.id}` : `new-${tile._tempId}`;
@@ -98,7 +106,10 @@ function SortableTariff({
     zIndex: isDragging ? 100 : 'auto',
   };
 
-  const imgSrc = getImageUrl(tile.image_path);
+  // Bust HTTP cache on every render derived from the tile data — when the
+  // admin re-uploads / removes an image the URL string flips, forcing the
+  // browser to refetch instead of showing the previous image.
+  const imgSrc = getImageUrl(tile.image_path, tile.image_path ? tile.image_path.length : 0);
   const isChild = tile.parent_id != null;
   const isActiveSize = (sw: number, sh: number) => w === sw && h === sh;
 
@@ -327,6 +338,23 @@ function SortableTariff({
           </label>
         )}
 
+        {tile.id && tile.image_path && (
+          <button
+            onClick={e => {
+              e.stopPropagation();
+              if (confirm('Удалить обложку?')) onDeleteImage(tile.id!);
+            }}
+            title="Удалить обложку"
+            style={{
+              background: 'rgba(255,255,255,0.9)', color: '#991b1b',
+              border: 'none', borderRadius: 3, padding: '2px 5px',
+              fontSize: 11, fontWeight: 700, cursor: 'pointer',
+            }}
+          >
+            🗑
+          </button>
+        )}
+
         <button
           onClick={e => { e.stopPropagation(); onToggleActive(idx); }}
           title={tile.is_active ? 'Виден пользователям' : 'Скрыт'}
@@ -346,7 +374,7 @@ function SortableTariff({
 export default function TariffsManagerModal(props: Props) {
   const {
     tiles, onAddMain, onAddChild, onRemove, onSetSize,
-    onToggleActive, onUpdateField, onReorder, onClose, onSave, onUploadImage,
+    onToggleActive, onUpdateField, onReorder, onClose, onSave, onUploadImage, onDeleteImage,
   } = props;
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -380,8 +408,12 @@ export default function TariffsManagerModal(props: Props) {
             <SortableContext items={ids} strategy={rectSortingStrategy}>
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(6, 1fr)',
-                gridAutoRows: '90px',
+                // 4-column grid; row height auto-stretches via gridAutoRows.
+                // gridAutoFlow: 'dense' lets multi-cell tiles slot in earlier
+                // gaps, so the height of the canvas is determined by the
+                // tiles you place — no fixed row count.
+                gridTemplateColumns: 'repeat(4, 1fr)',
+                gridAutoRows: '110px',
                 gridAutoFlow: 'dense',
                 gap: 8,
                 background: '#E3E3E3',
@@ -399,6 +431,7 @@ export default function TariffsManagerModal(props: Props) {
                     onToggleActive={onToggleActive}
                     onUpdateField={onUpdateField}
                     onUploadImage={onUploadImage}
+                    onDeleteImage={onDeleteImage}
                     onAddChild={onAddChild}
                   />
                 ))}

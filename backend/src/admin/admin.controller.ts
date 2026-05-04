@@ -531,6 +531,19 @@ export class AdminController implements OnModuleInit {
     return this.tariffConfigRepo.findOne({ where: { id } });
   }
 
+  /** Remove the cover image — clears image_path and best-effort unlinks the
+   *  file. The tile then falls back to the dark text-on-card rendering. */
+  @Delete('tariff-configs/:id/image')
+  async deleteTariffImage(@Param('id', ParseIntPipe) id: number) {
+    const cfg = await this.tariffConfigRepo.findOne({ where: { id } });
+    if (!cfg) throw new BadRequestException('Тариф не найден');
+    if (cfg.image_path) {
+      try { fs.unlinkSync(cfg.image_path); } catch {}
+    }
+    await this.tariffConfigRepo.update(id, { image_path: null });
+    return this.tariffConfigRepo.findOne({ where: { id } });
+  }
+
 
   /** Soft delete: marks the tariff inactive so existing user subscriptions
    *  remain valid until expiry but new purchases are no longer offered. */
