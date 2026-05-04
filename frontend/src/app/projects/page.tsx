@@ -34,6 +34,7 @@ type FolderNode = {
   name: string;
   parent_id: number | null;
   sort_order: number;
+  createdAt: string;
   updatedAt: string;
   children: FolderNode[];
   items: SheetItem[];
@@ -43,8 +44,46 @@ type SheetItem = {
   name: string;
   total: number;
   folder_id: number | null;
+  createdAt: string;
   updatedAt: string;
 };
+
+type SortMode =
+  | 'custom'
+  | 'created_desc' | 'created_asc'
+  | 'updated_desc' | 'updated_asc'
+  | 'name_asc'     | 'name_desc';
+
+const SORT_LABELS: Record<SortMode, string> = {
+  custom:        'Свой порядок (drag & drop)',
+  created_desc:  'Сначала новые',
+  created_asc:   'Сначала старые',
+  updated_desc:  'Последние изменения',
+  updated_asc:   'Давние изменения',
+  name_asc:      'По алфавиту (А → Я)',
+  name_desc:     'По алфавиту (Я → А)',
+};
+
+/** Returns a new sorted copy. `custom` keeps the server order (sort_order),
+ *  which is set by drag-drop. Other modes sort by createdAt/updatedAt/name. */
+function sortNodes<T extends { createdAt?: string; updatedAt?: string; name: string; sort_order?: number }>(
+  arr: T[],
+  mode: SortMode,
+): T[] {
+  if (!arr.length || mode === 'custom') return arr;
+  const cmp = (a: T, b: T): number => {
+    switch (mode) {
+      case 'created_desc': return (b.createdAt || '').localeCompare(a.createdAt || '');
+      case 'created_asc':  return (a.createdAt || '').localeCompare(b.createdAt || '');
+      case 'updated_desc': return (b.updatedAt || '').localeCompare(a.updatedAt || '');
+      case 'updated_asc':  return (a.updatedAt || '').localeCompare(b.updatedAt || '');
+      case 'name_asc':     return a.name.localeCompare(b.name, 'ru');
+      case 'name_desc':    return b.name.localeCompare(a.name, 'ru');
+      default:             return 0;
+    }
+  };
+  return [...arr].sort(cmp);
+}
 
 export default function ProjectsPage() {
   return <RequireSubscription><ProjectsPageInner /></RequireSubscription>;
@@ -65,6 +104,15 @@ function ProjectsPageInner() {
     return new Set();
   });
   const [search, setSearch] = useState('');
+  const [sortMode, setSortMode] = useState<SortMode>(() => {
+    if (typeof window === 'undefined') return 'custom';
+    const saved = localStorage.getItem('projects_sort_mode');
+    if (saved && saved in SORT_LABELS) return saved as SortMode;
+    return 'custom';
+  });
+  useEffect(() => {
+    if (typeof window !== 'undefined') localStorage.setItem('projects_sort_mode', sortMode);
+  }, [sortMode]);
 
   // Renaming
   const [renaming, setRenaming] = useState<{ id: number; type: 'folder' | 'sheet'; val: string } | null>(null);
@@ -506,19 +554,23 @@ function ProjectsPageInner() {
         </div>
 
         {/* Expanded content */}
-        {isOpen && (
-          <>
-            {folder.children.map(child => renderFolder(child, depth + 1))}
-            {folder.items.map((sheet, si) => renderSheet(sheet, folder.id, depth + 1, si === folder.items.length - 1 && folder.children.length === 0))}
-            <div
-              className="add-sheet-row"
-              style={{ paddingLeft: 20 + (depth + 1) * 18 }}
-              onClick={() => createSheet(folder.id)}
-            >
-              <span>+</span> добавить лист
-            </div>
-          </>
-        )}
+        {isOpen && (() => {
+          const sortedChildren = sortNodes(folder.children, sortMode);
+          const sortedItems = sortNodes(folder.items, sortMode);
+          return (
+            <>
+              {sortedChildren.map(child => renderFolder(child, depth + 1))}
+              {sortedItems.map((sheet, si) => renderSheet(sheet, folder.id, depth + 1, si === sortedItems.length - 1 && sortedChildren.length === 0))}
+              <div
+                className="add-sheet-row"
+                style={{ paddingLeft: 20 + (depth + 1) * 18 }}
+                onClick={() => createSheet(folder.id)}
+              >
+                <span>+</span> добавить лист
+              </div>
+            </>
+          );
+        })()}
       </div>
     );
   }
@@ -644,6 +696,24 @@ function ProjectsPageInner() {
               catch { toast.error('Ошибка загрузки корзины'); }
               finally { setTrashLoading(false); }
             }}>Корзина</button>
+            <select
+              value={sortMode}
+              onChange={e => setSortMode(e.target.value as SortMode)}
+              title="Сортировка проектов"
+              style={{
+                padding: '6px 10px',
+                border: '1px solid var(--border)',
+                borderRadius: 6,
+                background: 'var(--bg2)',
+                color: 'var(--text)',
+                fontSize: 13,
+                cursor: 'pointer',
+              }}
+            >
+              {(Object.keys(SORT_LABELS) as SortMode[]).map(k => (
+                <option key={k} value={k}>{SORT_LABELS[k]}</option>
+              ))}
+            </select>
           </div>
 
           {/* Table */}
@@ -663,10 +733,13 @@ function ProjectsPageInner() {
             )}
 
             {/* Root-level folders */}
-            {tree.children.map(folder => renderFolder(folder, 0))}
+            {sortNodes(tree.children, sortMode).map(folder => renderFolder(folder, 0))}
 
             {/* Root-level sheets (orphans / legacy) */}
-            {tree.items.map((sheet, i) => renderSheet(sheet, null, 0, i === tree.items.length - 1))}
+            {(() => {
+              const sorted = sortNodes(tree.items, sortMode);
+              return sorted.map((sheet, i) => renderSheet(sheet, null, 0, i === sorted.length - 1));
+            })()}
           </div>
         </div>
       </div>

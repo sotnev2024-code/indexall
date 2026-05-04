@@ -1,10 +1,38 @@
 import {
   Controller, Get, Post, Patch, Delete, Put,
   Param, Body, UseGuards, ParseIntPipe, ParseEnumPipe, OnModuleInit,
-  BadRequestException,
+  BadRequestException, UseInterceptors, UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname } from 'path';
+import * as fs from 'fs';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+
+const tariffImageStorage = diskStorage({
+  destination: process.env.UPLOAD_DIR || './uploads',
+  filename: (_, file, cb) => cb(null, `tariff-${Date.now()}${extname(file.originalname)}`),
+});
+
+/** Cyrillic → Latin transliteration for auto-generating plan_keys when the
+ *  admin doesn't supply one. Matches the public ГОСТ-7.79 system A subset. */
+const CYR_TO_LAT: Record<string, string> = {
+  а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ё:'e',ж:'zh',з:'z',и:'i',й:'y',
+  к:'k',л:'l',м:'m',н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',
+  х:'h',ц:'ts',ч:'ch',ш:'sh',щ:'sch',ъ:'',ы:'y',ь:'',э:'e',ю:'yu',я:'ya',
+};
+function slugifyForPlanKey(name: string): string {
+  return name
+    .toLowerCase()
+    .split('')
+    .map(c => CYR_TO_LAT[c] ?? c)
+    .join('')
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '')
+    .slice(0, 40) || 'tariff';
+}
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { User, UserPlan, UserStatus } from '../users/user.entity';
@@ -355,11 +383,32 @@ export class AdminController implements OnModuleInit {
     return this.tariffConfigRepo.find({ order: { sort_order: 'ASC', id: 'ASC' } });
   }
 
-  /** Create a new tariff. plan_key must be unique and use only safe chars
-   *  (latin/digits/underscore) — it doubles as YooKassa metadata.planKey. */
+  /** Batch save reorder + parent reassignment from the tile manager.
+   *  Frontend sends the full visible ordering (top-level + sub-blocks);
+   *  we update sort_order/parent_id in one round-trip.
+   *  Declared BEFORE `/:id` routes so the literal `reorder` path wins. */
+  @Put('tariff-configs/reorder')
+  async reorderTariffConfigs(@Body() body: { items: Array<{ id: number; sort_order: number; parent_id: number | null }> }) {
+    if (!body || !Array.isArray(body.items)) {
+      throw new BadRequestException('Ожидается массив items');
+    }
+    for (const it of body.items) {
+      if (!Number.isFinite(Number(it.id))) continue;
+      await this.tariffConfigRepo.update(Number(it.id), {
+        sort_order: Number(it.sort_order) || 0,
+        parent_id: it.parent_id == null ? null : Number(it.parent_id),
+      });
+    }
+    return { success: true };
+  }
+
+  /** Create a new tariff. plan_key is now auto-generated from the name when
+   *  not supplied (the admin UI no longer asks for it — clients found it
+   *  one extra field of friction). plan_key still doubles as YooKassa
+   *  metadata.planKey, so we ensure uniqueness via _2/_3 suffixes. */
   @Post('tariff-configs')
   async createTariffConfig(@Body() body: {
-    plan_key: string;
+    plan_key?: string;
     name: string;
     price: number;
     duration_value: number;
@@ -367,10 +416,10 @@ export class AdminController implements OnModuleInit {
     description?: string;
     is_active?: boolean;
     sort_order?: number;
+    width?: number;
+    height?: number;
+    parent_id?: number | null;
   }) {
-    if (!body.plan_key || !/^[a-z0-9_]+$/i.test(body.plan_key)) {
-      throw new BadRequestException('plan_key должен содержать только латиницу, цифры и подчёркивания');
-    }
     if (!body.name || !body.name.trim()) {
       throw new BadRequestException('Название обязательно');
     }
@@ -383,12 +432,28 @@ export class AdminController implements OnModuleInit {
     if (!['day', 'month'].includes(body.duration_unit)) {
       throw new BadRequestException('Единица срока — "day" или "month"');
     }
-    const existing = await this.tariffConfigRepo.findOne({ where: { plan_key: body.plan_key.toLowerCase() } });
-    if (existing) {
-      throw new BadRequestException(`Тариф с ключом '${body.plan_key}' уже существует`);
+
+    // Resolve plan_key: explicit (legacy callers / bot integrations) or auto.
+    let planKey = (body.plan_key || '').trim().toLowerCase();
+    if (planKey && !/^[a-z0-9_]+$/.test(planKey)) {
+      throw new BadRequestException('plan_key должен содержать только латиницу, цифры и подчёркивания');
     }
+    if (!planKey) {
+      const base = slugifyForPlanKey(body.name);
+      planKey = base;
+      let n = 2;
+      // Cheap dedup loop — at scale this is fine (admin creates a handful).
+      while (await this.tariffConfigRepo.findOne({ where: { plan_key: planKey } })) {
+        planKey = `${base}_${n++}`;
+        if (n > 999) throw new BadRequestException('Не удалось сгенерировать plan_key');
+      }
+    } else {
+      const existing = await this.tariffConfigRepo.findOne({ where: { plan_key: planKey } });
+      if (existing) throw new BadRequestException(`Тариф с ключом '${planKey}' уже существует`);
+    }
+
     const created = await this.tariffConfigRepo.save(this.tariffConfigRepo.create({
-      plan_key: body.plan_key.toLowerCase(),
+      plan_key: planKey,
       name: body.name.trim(),
       price: Number(body.price),
       duration_value: Math.floor(Number(body.duration_value)),
@@ -396,6 +461,9 @@ export class AdminController implements OnModuleInit {
       description: body.description ?? null,
       is_active: body.is_active ?? true,
       sort_order: body.sort_order ?? 100,
+      width: body.width != null ? Math.max(1, Math.min(2, Math.floor(Number(body.width)))) : 1,
+      height: body.height != null ? Math.max(1, Math.min(4, Math.floor(Number(body.height)))) : 3,
+      parent_id: body.parent_id ?? null,
     }));
     return created;
   }
@@ -412,6 +480,9 @@ export class AdminController implements OnModuleInit {
       description?: string;
       is_active?: boolean;
       sort_order?: number;
+      width?: number;
+      height?: number;
+      parent_id?: number | null;
     },
   ) {
     if (body.duration_unit && !['day', 'month'].includes(body.duration_unit)) {
@@ -434,9 +505,32 @@ export class AdminController implements OnModuleInit {
       ...(body.description !== undefined && { description: body.description }),
       ...(body.is_active !== undefined && { is_active: body.is_active }),
       ...(body.sort_order !== undefined && { sort_order: body.sort_order }),
+      ...(body.width !== undefined && { width: Math.max(1, Math.min(2, Math.floor(Number(body.width)))) }),
+      ...(body.height !== undefined && { height: Math.max(1, Math.min(4, Math.floor(Number(body.height)))) }),
+      ...(body.parent_id !== undefined && { parent_id: body.parent_id }),
     });
     return this.tariffConfigRepo.findOne({ where: { id } });
   }
+
+  /** Upload a cover image for a tariff (rendered as the tile background). */
+  @Post('tariff-configs/:id/image')
+  @UseInterceptors(FileInterceptor('file', { storage: tariffImageStorage }))
+  async uploadTariffImage(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Файл не загружен');
+    const cfg = await this.tariffConfigRepo.findOne({ where: { id } });
+    if (!cfg) throw new BadRequestException('Тариф не найден');
+    if (cfg.image_path) {
+      // Best-effort cleanup of the old file. Don't fail the request if the
+      // file is already gone (e.g. uploads dir was wiped between deploys).
+      try { fs.unlinkSync(cfg.image_path); } catch {}
+    }
+    await this.tariffConfigRepo.update(id, { image_path: file.path });
+    return this.tariffConfigRepo.findOne({ where: { id } });
+  }
+
 
   /** Soft delete: marks the tariff inactive so existing user subscriptions
    *  remain valid until expiry but new purchases are no longer offered. */

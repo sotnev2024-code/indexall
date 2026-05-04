@@ -45,6 +45,27 @@ export class TariffConfig {
   @Column({ default: 0 })
   sort_order: number;
 
+  /** Cover image path (multer-saved). Rendered as the tile background in
+   *  the admin tile manager — admin uploads an image → tile shows it. */
+  @Column({ nullable: true })
+  image_path: string;
+
+  /** Grid cell width: 1 or 2. Combined with height for 1×1, 1×2, 1×3, 1×4
+   *  layouts. Defaults to 1×3 (tall vertical column) for new tariffs since
+   *  the client wants tariffs displayed as vertical columns. */
+  @Column({ default: 1 })
+  width: number;
+
+  /** Grid cell height: 1..4. */
+  @Column({ default: 3 })
+  height: number;
+
+  /** Optional parent tariff id — when set, this tariff is a "mini sub-block"
+   *  under a main tariff column (e.g. 60-day / annual variants attached to
+   *  the Pro column). null for top-level tiles. */
+  @Column({ nullable: true })
+  parent_id: number;
+
   @UpdateDateColumn()
   updated_at: Date;
 }

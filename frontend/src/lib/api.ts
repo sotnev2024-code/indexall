@@ -208,15 +208,21 @@ export const adminApi = {
   getTilesStats: () => api.get('/admin/tiles-stats'),
   getTariffConfigs: () => api.get('/admin/tariff-configs'),
   createTariffConfig: (data: {
-    plan_key: string; name: string; price: number;
+    plan_key?: string; name: string; price: number;
     duration_value: number; duration_unit: 'day' | 'month';
     description?: string; sort_order?: number; is_active?: boolean;
+    width?: number; height?: number; parent_id?: number | null;
   }) => api.post('/admin/tariff-configs', data),
   updateTariffConfig: (id: number, data: {
     name?: string; price?: number; description?: string; is_active?: boolean;
     duration_value?: number; duration_unit?: 'day' | 'month'; sort_order?: number;
+    width?: number; height?: number; parent_id?: number | null;
   }) => api.put(`/admin/tariff-configs/${id}`, data),
   deleteTariffConfig: (id: number) => api.delete(`/admin/tariff-configs/${id}`),
+  uploadTariffImage: (id: number, fd: FormData) =>
+    api.post(`/admin/tariff-configs/${id}/image`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  reorderTariffConfigs: (items: Array<{ id: number; sort_order: number; parent_id: number | null }>) =>
+    api.put('/admin/tariff-configs/reorder', { items }),
 };
 
 // ── Profile ───────────────────────────────────────────────────

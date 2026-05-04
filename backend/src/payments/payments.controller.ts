@@ -20,7 +20,7 @@ export class PaymentsController {
   /** Public endpoint — returns tariff plan configs for the pricing page */
   @Get('plans')
   getPlans() {
-    return this.tariffConfigRepo.find({ where: { is_active: true }, order: { id: 'ASC' } });
+    return this.tariffConfigRepo.find({ where: { is_active: true }, order: { sort_order: 'ASC', id: 'ASC' } });
   }
 
   /** Create a payment — called from the pricing page.
