@@ -8,6 +8,7 @@ import { PaymentsService } from './payments.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { TariffConfig } from '../admin/tariff-config.entity';
+import { AppSetting } from '../admin/app-setting.entity';
 import { YookassaWebhookGuard } from './yookassa-webhook.guard';
 
 @Controller('payments')
@@ -15,12 +16,24 @@ export class PaymentsController {
   constructor(
     private readonly paymentsService: PaymentsService,
     @InjectRepository(TariffConfig) private tariffConfigRepo: Repository<TariffConfig>,
+    @InjectRepository(AppSetting) private settingsRepo: Repository<AppSetting>,
   ) {}
 
   /** Public endpoint — returns tariff plan configs for the pricing page */
   @Get('plans')
   getPlans() {
     return this.tariffConfigRepo.find({ where: { is_active: true }, order: { sort_order: 'ASC', id: 'ASC' } });
+  }
+
+  /** Public flags read by the pricing/paywall UI to decide between the
+   *  legacy text card and the new image-tile grid. Only the safe subset is
+   *  exposed — never dump the whole settings table here. */
+  @Get('settings')
+  async getPublicSettings() {
+    const tilesRow = await this.settingsRepo.findOne({ where: { key: 'pricing_tiles_enabled' } });
+    return {
+      pricingTilesEnabled: tilesRow?.value === 'true',
+    };
   }
 
   /** Create a payment — called from the pricing page.

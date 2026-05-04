@@ -97,6 +97,7 @@ export default function AdminPage() {
   const [editingConfig, setEditingConfig] = useState<Record<number, any>>({});
   const [tariffsManagerOpen, setTariffsManagerOpen] = useState(false);
   const [managedTariffs, setManagedTariffs] = useState<TariffTile[]>([]);
+  const [pricingTilesEnabled, setPricingTilesEnabled] = useState(false);
 
   // Stats
   const [stats, setStats] = useState<any>(null);
@@ -193,14 +194,16 @@ export default function AdminPage() {
   }
   async function loadTariffOps() {
     try {
-      const [{ data: ops }, { data: us }, { data: cfgs }] = await Promise.all([
+      const [{ data: ops }, { data: us }, { data: cfgs }, { data: settings }] = await Promise.all([
         adminApi.getTariffOperations(),
         users.length === 0 ? adminApi.getUsers() : Promise.resolve({ data: users }),
         adminApi.getTariffConfigs(),
+        adminApi.getSettings().catch(() => ({ data: {} as Record<string, string> })),
       ]);
       setTariffOps(ops);
       if (users.length === 0) setUsers(us);
       setTariffConfigs(cfgs);
+      setPricingTilesEnabled(settings?.pricing_tiles_enabled === 'true');
       const initial: Record<number, any> = {};
       cfgs.forEach((c: any) => {
         initial[c.id] = {
@@ -349,6 +352,18 @@ export default function AdminPage() {
       toast.success('Обложка загружена');
     } catch (e: any) {
       toast.error(e?.response?.data?.message || 'Ошибка загрузки обложки');
+    }
+  }
+
+  async function togglePricingTiles(value: boolean) {
+    setPricingTilesEnabled(value);
+    try {
+      await adminApi.setSetting('pricing_tiles_enabled', value ? 'true' : 'false');
+      toast.success(value ? 'Плиточный режим включён' : 'Плиточный режим выключен');
+    } catch (e: any) {
+      // Revert local state on failure so UI reflects the actual server state.
+      setPricingTilesEnabled(!value);
+      toast.error(e?.response?.data?.message || 'Ошибка сохранения настройки');
     }
   }
 
@@ -1138,16 +1153,26 @@ export default function AdminPage() {
 
               {/* ── Tariff plan editor (tile manager) ── */}
               <div className="admin-form" style={{ marginBottom: 24 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
                   <div className="admin-form-title" style={{ margin: 0 }}>Тарифы — плитки</div>
-                  <button
-                    className="btn-primary"
-                    style={{ padding: '6px 16px' }}
-                    onClick={openTariffsManager}
-                    disabled={tariffConfigs.length === 0 && !tariffsManagerOpen}
-                  >
-                    Управление тарифами
-                  </button>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', userSelect: 'none' }} title="Когда включено — на странице оплаты и в paywall показываются плитки с обложками. Когда выключено — старая текстовая карточка с тарифами.">
+                      <input
+                        type="checkbox"
+                        checked={pricingTilesEnabled}
+                        onChange={e => togglePricingTiles(e.target.checked)}
+                      />
+                      <span>Показывать плитками на сайте</span>
+                    </label>
+                    <button
+                      className="btn-primary"
+                      style={{ padding: '6px 16px' }}
+                      onClick={openTariffsManager}
+                      disabled={tariffConfigs.length === 0 && !tariffsManagerOpen}
+                    >
+                      Управление тарифами
+                    </button>
+                  </div>
                 </div>
                 <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.5 }}>
                   В плиточном редакторе можно перетаскивать тарифы, загружать обложку, выбирать размер

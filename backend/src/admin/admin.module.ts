@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AdminController } from './admin.controller';
 import { TariffOperation } from './tariff-operation.entity';
 import { TariffConfig } from './tariff-config.entity';
+import { AppSetting } from './app-setting.entity';
 import { User } from '../users/user.entity';
 import { Project } from '../projects/project.entity';
 import { Sheet } from '../sheets/sheet.entity';
@@ -15,7 +16,7 @@ import { PriceList, Manufacturer, CatalogProduct, CatalogTile, CatalogCategory }
     TypeOrmModule.forFeature([
       User, Project, Sheet, Template, Folder,
       PriceList, Manufacturer, CatalogProduct, CatalogTile, CatalogCategory,
-      TariffOperation, TariffConfig,
+      TariffOperation, TariffConfig, AppSetting,
     ]),
   ],
   controllers: [AdminController],

@@ -6,6 +6,7 @@ import { paymentsApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 import { canActivateTrial, PAYMENTS_ENABLED } from '@/lib/permissions';
 import Header from '@/components/layout/Header';
+import PricingTilesGrid from '@/components/PricingTilesGrid';
 
 interface TariffConfig {
   id: number;
@@ -17,6 +18,10 @@ interface TariffConfig {
   duration_unit: 'day' | 'month';
   description: string;
   sort_order?: number;
+  width?: number;
+  height?: number;
+  parent_id?: number | null;
+  image_path?: string | null;
 }
 
 function durationLabel(t: TariffConfig): string {
@@ -68,6 +73,7 @@ function PricingContent() {
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
   const [tariffs, setTariffs] = useState<TariffConfig[]>([]);
+  const [tilesMode, setTilesMode] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -78,6 +84,9 @@ function PricingContent() {
         .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0));
       setTariffs(list);
     }).catch(() => {});
+    paymentsApi.getPublicSettings()
+      .then(({ data }) => setTilesMode(!!data?.pricingTilesEnabled))
+      .catch(() => setTilesMode(false));
   }, []);
 
   async function handleBuy(planKey: string) {
@@ -142,13 +151,48 @@ function PricingContent() {
       <Header breadcrumb="Тарифы" />
 
       <main style={{ padding: '72px 24px 48px', maxWidth: 880, margin: '0 auto', width: '100%' }}>
-        <h1 style={{ textAlign: 'center', fontSize: 28, fontWeight: 800, marginBottom: 16, letterSpacing: -0.5 }}>
+        <h1 style={{ textAlign: 'center', fontSize: 28, fontWeight: 800, marginBottom: 40, letterSpacing: -0.5 }}>
           Выберите тариф
         </h1>
-        <p style={{ textAlign: 'center', fontSize: 14, color: '#6b7280', maxWidth: 580, margin: '0 auto 40px' }}>
-          Активируйте бесплатный пробный период на 7 дней или оформите подходящий платный тариф.
-        </p>
 
+        {tilesMode ? (
+          <>
+            <PricingTilesGrid
+              tariffs={paidTariffs as any}
+              loadingPlanKey={loading}
+              onBuy={handleBuy}
+            />
+            {(showTrialBtn || isCurrentTrial) && (
+              <div style={{ maxWidth: 380, margin: '24px auto 0', background: '#fff', borderRadius: 14, padding: 24, border: isCurrentTrial ? '2px solid #f5c800' : '1px solid #e5e7eb', textAlign: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 8 }}>
+                  <h3 style={{ fontSize: 18, fontWeight: 800 }}>Пробный период</h3>
+                  <span style={{ background: '#f5c800', color: '#1a1a1a', padding: '3px 10px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>7 дней</span>
+                </div>
+                {isCurrentTrial ? (
+                  <>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: '#059669' }}>✓ Trial активен</div>
+                    {expiresAt && (
+                      <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>
+                        До {new Date(expiresAt).toLocaleDateString('ru-RU')}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 14 }}>7 дней бесплатного Pro</p>
+                    <button
+                      style={{ width: '100%', padding: '12px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}
+                      onClick={handleActivateTrial}
+                      disabled={loading === 'trial'}
+                    >
+                      {loading === 'trial' ? 'Активация…' : 'Активировать пробный'}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
         <div style={{ display: 'grid', gridTemplateColumns: showTrialBtn || isCurrentTrial ? '1fr 1fr' : '1fr', gap: 20, maxWidth: showTrialBtn || isCurrentTrial ? 760 : 380, margin: '0 auto' }}>
 
           {/* ── Paid tariffs card (lists every active paid tariff from admin) ── */}
@@ -262,6 +306,7 @@ function PricingContent() {
             </div>
           )}
         </div>
+        )}
 
         {(isCurrentPro || isCurrentTrial) && (
           <div style={{ textAlign: 'center', marginTop: 40 }}>

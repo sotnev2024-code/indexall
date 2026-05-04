@@ -224,6 +224,8 @@ export const adminApi = {
   deleteTariffImage: (id: number) => api.delete(`/admin/tariff-configs/${id}/image`),
   reorderTariffConfigs: (items: Array<{ id: number; sort_order: number; parent_id: number | null }>) =>
     api.put('/admin/tariff-configs/reorder', { items }),
+  getSettings: () => api.get<Record<string, string>>('/admin/settings'),
+  setSetting: (key: string, value: string) => api.put(`/admin/settings/${key}`, { value }),
 };
 
 // ── Profile ───────────────────────────────────────────────────
@@ -235,6 +237,8 @@ export const profileApi = {
 // ── Payments / Subscriptions ──────────────────────────────────
 export const paymentsApi = {
   getPlans: () => api.get('/payments/plans'),
+  /** Public flags driving the pricing UI (e.g. tile mode toggle). */
+  getPublicSettings: () => api.get<{ pricingTilesEnabled: boolean }>('/payments/settings'),
   /** `planType` accepts a tariff_configs.plan_key (preferred) — backend
    *  also still translates the legacy 'monthly' / 'annual' shortcuts. */
   createPayment: (planType: string, returnUrl?: string) =>

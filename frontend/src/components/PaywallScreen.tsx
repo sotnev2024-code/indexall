@@ -6,6 +6,7 @@ import { paymentsApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 import { canActivateTrial, PAYMENTS_ENABLED } from '@/lib/permissions';
 import Header from '@/components/layout/Header';
+import PricingTilesGrid from '@/components/PricingTilesGrid';
 
 interface TariffConfig {
   id: number;
@@ -17,6 +18,10 @@ interface TariffConfig {
   duration_unit: 'day' | 'month';
   description: string;
   sort_order?: number;
+  width?: number;
+  height?: number;
+  parent_id?: number | null;
+  image_path?: string | null;
 }
 
 function durationLabel(t: TariffConfig): string {
@@ -53,11 +58,15 @@ export default function PaywallScreen() {
   const { user, setAuth } = useAppStore();
   const [configs, setConfigs] = useState<TariffConfig[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
+  const [tilesMode, setTilesMode] = useState(false);
 
   useEffect(() => {
     paymentsApi.getPlans()
       .then(({ data }) => setConfigs(data || []))
       .catch(() => { /* keep defaults */ });
+    paymentsApi.getPublicSettings()
+      .then(({ data }) => setTilesMode(!!data?.pricingTilesEnabled))
+      .catch(() => setTilesMode(false));
   }, []);
 
   const paidTariffs = configs
@@ -129,10 +138,37 @@ export default function PaywallScreen() {
           </h1>
           <p style={{ fontSize: 15, color: '#6b7280', maxWidth: 580, margin: '0 auto' }}>
             Для работы с проектами, каталогом и спецификациями необходима активная подписка.
-            Активируйте бесплатный пробный период на 7 дней или оформите тариф.
           </p>
         </div>
 
+        {/* Tile mode (toggle in admin → Тарифы) — clicking a tile triggers
+            the YooKassa buy flow directly. Trial card is rendered separately
+            below so unregistered/eligible users can still claim 7 free days. */}
+        {tilesMode ? (
+          <>
+            <PricingTilesGrid
+              tariffs={paidTariffs as any}
+              loadingPlanKey={loading}
+              onBuy={handleBuy}
+            />
+            {trialAvailable && (
+              <div style={{ maxWidth: 380, margin: '24px auto 0', background: '#fff', borderRadius: 14, padding: 24, border: '1px solid #e5e7eb', textAlign: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 8 }}>
+                  <h3 style={{ fontSize: 18, fontWeight: 800 }}>Пробный период</h3>
+                  <span style={{ background: '#f5c800', color: '#1a1a1a', padding: '3px 10px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>7 дней</span>
+                </div>
+                <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 14 }}>7 дней бесплатного Pro</p>
+                <button
+                  onClick={handleActivateTrial}
+                  disabled={loading === 'trial'}
+                  style={{ width: '100%', padding: '12px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}
+                >
+                  {loading === 'trial' ? '...' : (isLoggedOut ? 'Зарегистрироваться' : 'Активировать пробный')}
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
         <div style={{ display: 'grid', gridTemplateColumns: trialAvailable ? '1fr 1fr' : '1fr', gap: 20, maxWidth: trialAvailable ? 760 : 380, margin: '0 auto' }}>
           {/* Pro tariff */}
           <div style={{ background: '#fff', borderRadius: 14, padding: 28, border: '2px solid #1a1a1a', boxShadow: '0 4px 16px rgba(0,0,0,0.06)' }}>
@@ -216,6 +252,7 @@ export default function PaywallScreen() {
             </div>
           )}
         </div>
+        )}
       </main>
     </div>
   );

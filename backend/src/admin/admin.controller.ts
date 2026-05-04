@@ -46,6 +46,7 @@ import {
 } from '../catalog/entities/catalog.entities';
 import { TariffOperation } from './tariff-operation.entity';
 import { TariffConfig } from './tariff-config.entity';
+import { AppSetting } from './app-setting.entity';
 
 /** Seed tariffs created on first start. After that the table is admin-managed
  *  (CRUD via admin API). The init logic only ADDS missing seeds — it never
@@ -99,6 +100,7 @@ export class AdminController implements OnModuleInit {
     @InjectRepository(CatalogCategory) private catRepo: Repository<CatalogCategory>,
     @InjectRepository(TariffOperation) private tariffRepo: Repository<TariffOperation>,
     @InjectRepository(TariffConfig) private tariffConfigRepo: Repository<TariffConfig>,
+    @InjectRepository(AppSetting) private settingsRepo: Repository<AppSetting>,
   ) {}
 
   async onModuleInit() {
@@ -374,6 +376,37 @@ export class AdminController implements OnModuleInit {
   async deleteTariffOperation(@Param('id', ParseIntPipe) id: number) {
     await this.tariffRepo.delete(id);
     return { ok: true };
+  }
+
+  // ── App settings (key/value flags) ───────────────────────────
+
+  /** Returns all admin-controlled flags. Each value is a string — bool flags
+   *  use 'true'/'false', everything else is plain text. The frontend admin
+   *  toggle reads this to render its initial state. */
+  @Get('settings')
+  async getSettings() {
+    const rows = await this.settingsRepo.find();
+    const map: Record<string, string> = {};
+    for (const r of rows) map[r.key] = r.value;
+    return map;
+  }
+
+  @Put('settings/:key')
+  async setSetting(
+    @Param('key') key: string,
+    @Body() body: { value: string },
+  ) {
+    if (!key || !/^[a-z0-9_-]+$/i.test(key)) {
+      throw new BadRequestException('Недопустимый ключ настройки');
+    }
+    const value = String(body?.value ?? '');
+    const existing = await this.settingsRepo.findOne({ where: { key } });
+    if (existing) {
+      await this.settingsRepo.update({ key }, { value });
+    } else {
+      await this.settingsRepo.save(this.settingsRepo.create({ key, value }));
+    }
+    return { key, value };
   }
 
   // ── Tariff configs (plan editor) ─────────────────────────────
