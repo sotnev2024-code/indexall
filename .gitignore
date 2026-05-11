@@ -47,3 +47,9 @@ KEAZ-13.04.2026.xls
 Texenergo all pricete.xlsx
 *.xls
 *.xlsx
+*.docx
+# Server artefacts
+api etm
+node
+backend/.env.production
+frontend/.env.production
