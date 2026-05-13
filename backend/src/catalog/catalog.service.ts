@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Not, In } from 'typeorm';
-import { Manufacturer, PriceList, PriceListStatus, CatalogCategory, CatalogProduct, ProductAnalog, ProductAccessory, CatalogTile, TileProduct } from './entities/catalog.entities';
+import { Manufacturer, PriceList, PriceListStatus, CatalogCategory, CatalogProduct, ProductAnalog, ProductAccessory, CatalogTile, TileProduct, AccessoryTable, AccessoryItem } from './entities/catalog.entities';
 import * as XLSX from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -69,6 +69,8 @@ export class CatalogService implements OnModuleInit {
     @InjectRepository(ProductAccessory) private accessoryRepo: Repository<ProductAccessory>,
     @InjectRepository(CatalogTile) private tileRepo: Repository<CatalogTile>,
     @InjectRepository(TileProduct) private tileProductRepo: Repository<TileProduct>,
+    @InjectRepository(AccessoryTable) private accTableRepo: Repository<AccessoryTable>,
+    @InjectRepository(AccessoryItem) private accItemRepo: Repository<AccessoryItem>,
     private readonly botDb: BotDbService,
   ) {}
 
@@ -1247,5 +1249,155 @@ export class CatalogService implements OnModuleInit {
     });
 
     return { success: true };
+  }
+
+  // ── Accessory Tables ─────────────────────────────────────────
+
+  async getAccessoryTables() {
+    return this.accTableRepo.find({
+      relations: ['tile'],
+      order: { created_at: 'DESC' },
+    });
+  }
+
+  async uploadAccessoryTable(
+    file: Express.Multer.File,
+    tileId: number,
+    mapping: AccessoryTable['column_mapping'],
+  ) {
+    const tile = await this.tileRepo.findOne({ where: { id: tileId } });
+    if (!tile) throw new NotFoundException('Tile not found');
+
+    const fixedName = this.fixFilenameEncoding(file.originalname);
+
+    const table = await this.accTableRepo.save({
+      tile_id: tileId,
+      file_name: fixedName,
+      file_path: file.path,
+      column_mapping: mapping,
+      items_count: 0,
+    });
+
+    this.parseAccessoryXlsxAsync(table.id, file.path, mapping).catch(console.error);
+    return table;
+  }
+
+  private async parseAccessoryXlsxAsync(
+    tableId: number,
+    filePath: string,
+    mapping: AccessoryTable['column_mapping'],
+  ) {
+    try {
+      const wb = XLSX.readFile(filePath);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const allRows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+      const colIdx = (col: string | undefined) =>
+        col ? XLSX.utils.decode_col(col.toUpperCase()) : -1;
+
+      const artIdx  = colIdx(mapping.articleCol);
+      const nameIdx = colIdx(mapping.nameCol);
+      const imgIdx  = colIdx(mapping.imageUrlCol);
+      const siteIdx = colIdx(mapping.siteUrlCol);
+      const descIdx = colIdx(mapping.descriptionCol);
+      const paramCols = (mapping.params || []).map(p => ({
+        idx: colIdx(p.col),
+        label: p.label,
+      }));
+
+      const startRow = Math.max(0, (mapping.firstRow || 1) - 1);
+      const items: Partial<AccessoryItem>[] = [];
+
+      for (let i = startRow; i < allRows.length; i++) {
+        const row = allRows[i];
+        const article = String(row[artIdx] ?? '').trim();
+        if (!article) continue;
+
+        const attrs: Record<string, string> = {};
+        for (const pc of paramCols) {
+          const val = String(row[pc.idx] ?? '').trim();
+          if (val && pc.label) attrs[pc.label] = val;
+        }
+
+        items.push({
+          accessory_table_id: tableId,
+          article,
+          name: nameIdx >= 0 ? String(row[nameIdx] ?? '').trim() : undefined,
+          image_url: imgIdx >= 0 ? String(row[imgIdx] ?? '').trim() || undefined : undefined,
+          site_url: siteIdx >= 0 ? String(row[siteIdx] ?? '').trim() || undefined : undefined,
+          description: descIdx >= 0 ? String(row[descIdx] ?? '').trim() || undefined : undefined,
+          attributes: attrs,
+        });
+      }
+
+      // Delete old items and re-insert
+      await this.accItemRepo.delete({ accessory_table_id: tableId });
+      for (let i = 0; i < items.length; i += 500) {
+        await this.accItemRepo.save(items.slice(i, i + 500));
+      }
+      await this.accTableRepo.update(tableId, { items_count: items.length });
+    } catch (e) {
+      console.error('parseAccessoryXlsxAsync error:', e);
+    }
+  }
+
+  async deleteAccessoryTable(id: number) {
+    const table = await this.accTableRepo.findOne({ where: { id } });
+    if (!table) throw new NotFoundException('Таблица аксессуаров не найдена');
+    if (table.file_path) {
+      try { fs.unlinkSync(table.file_path); } catch {}
+    }
+    await this.accItemRepo.delete({ accessory_table_id: id });
+    await this.accTableRepo.delete(id);
+    return { success: true };
+  }
+
+  /** Get accessory detail by article, for a given tile */
+  async getAccessoryByArticle(tileId: number, article: string): Promise<AccessoryItem | null> {
+    const table = await this.accTableRepo.findOne({ where: { tile_id: tileId } });
+    if (!table) return null;
+    return this.accItemRepo.findOne({
+      where: { accessory_table_id: table.id, article },
+    });
+  }
+
+  /** Get accessories for a tile product — returns grouped list enriched with DB details */
+  async getTileProductAccessories(tileId: number, productId: number) {
+    const product = await this.tileProductRepo.findOne({ where: { id: productId } });
+    if (!product || !product.accessories?.length) return [];
+
+    // Get all accessory tables for this tile
+    const tables = await this.accTableRepo.find({ where: { tile_id: tileId } });
+    const tableIds = tables.map(t => t.id);
+
+    // Collect unique articles from this product's accessories
+    const articles = [...new Set(product.accessories.map(a => a.article).filter(Boolean))];
+
+    // Look up details in DB
+    const items = tableIds.length > 0 ? await this.accItemRepo
+      .createQueryBuilder('ai')
+      .where('ai.accessory_table_id IN (:...tableIds)', { tableIds })
+      .andWhere('ai.article IN (:...articles)', { articles: articles.length ? articles : ['__none__'] })
+      .getMany() : [];
+
+    const itemMap = new Map(items.map(i => [i.article, i]));
+
+    // Group by type
+    const groups: Record<string, any[]> = {};
+    for (const acc of product.accessories) {
+      const key = acc.type || 'Прочее';
+      if (!groups[key]) groups[key] = [];
+      const detail = itemMap.get(acc.article);
+      groups[key].push({
+        ...acc,
+        image_url: detail?.image_url || null,
+        site_url: detail?.site_url || null,
+        description: detail?.description || null,
+        attributes: detail?.attributes || {},
+        db_name: detail?.name || null,
+      });
+    }
+
+    return Object.entries(groups).map(([type, items]) => ({ type, items }));
   }
 }

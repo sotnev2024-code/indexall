@@ -268,4 +268,41 @@ export class CatalogController {
     if (!Array.isArray(articles) || articles.length === 0) return {};
     return this.service.getPricesByArticles(articles);
   }
+
+  // ── Accessory Tables (admin) ──────────────────────────────────
+
+  @Get('accessory-tables')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  getAccessoryTables() {
+    return this.service.getAccessoryTables();
+  }
+
+  @Post('accessory-tables')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  @UseInterceptors(FileInterceptor('file', { storage: uploadStorage }))
+  uploadAccessoryTable(
+    @UploadedFile() file: Express.Multer.File,
+    @Body('tileId') tileId: string,
+    @Body('mapping') mappingStr: string,
+  ) {
+    const mapping = JSON.parse(mappingStr);
+    return this.service.uploadAccessoryTable(file, Number(tileId), mapping);
+  }
+
+  @Delete('accessory-tables/:id')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  deleteAccessoryTable(@Param('id', ParseIntPipe) id: number) {
+    return this.service.deleteAccessoryTable(id);
+  }
+
+  // ── Accessory lookup (user-facing) ────────────────────────────
+
+  @Get('tiles/:tileId/products/:productId/accessories')
+  @UseGuards(JwtAuthGuard)
+  getTileProductAccessories(
+    @Param('tileId', ParseIntPipe) tileId: number,
+    @Param('productId', ParseIntPipe) productId: number,
+  ) {
+    return this.service.getTileProductAccessories(tileId, productId);
+  }
 }

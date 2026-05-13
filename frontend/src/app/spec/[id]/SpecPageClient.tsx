@@ -947,10 +947,10 @@ export default function SpecPageClient() {
       try {
         const { data: prices } = await catalogApi.getPricesByArticles([article]);
         const entry = prices[article];
-        if (entry != null) {
+        if (entry != null && entry) {
           setRows(prev => {
             const next = [...prev];
-            const priceStr = String(entry.price);
+            const priceStr = String(entry!.price);
             next[rowIdx] = { ...next[rowIdx], price: priceStr, auto_price: false, total: calcTotal(priceStr, next[rowIdx].qty, next[rowIdx].coef) };
             return next;
           });

@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Index, OneToMany } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Index, OneToMany, RelationId } from 'typeorm';
 
 @Entity('manufacturers')
 export class Manufacturer {
@@ -162,4 +162,45 @@ export class TileProduct {
   @Column({ nullable: true }) image_url: string;
   @Column({ type: 'jsonb', default: '{}' }) attributes: Record<string, string>;
   @Column({ type: 'jsonb', default: '[]' }) accessories: { type: string; name: string; article: string; url: string }[];
+}
+
+/** Uploaded accessory table, linked to a CatalogTile */
+@Entity('accessory_tables')
+export class AccessoryTable {
+  @PrimaryGeneratedColumn() id: number;
+  @Column() tile_id: number;
+  @ManyToOne(() => CatalogTile, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'tile_id' })
+  tile: CatalogTile;
+  @Column() file_name: string;
+  @Column({ nullable: true }) file_path: string;
+  /** Column mapping: { firstRow, articleCol, nameCol, imageUrlCol, siteUrlCol, descriptionCol, params: [{col, label}] } */
+  @Column({ type: 'jsonb', nullable: true }) column_mapping: {
+    firstRow: number;
+    articleCol: string;
+    nameCol: string;
+    imageUrlCol?: string;
+    siteUrlCol?: string;
+    descriptionCol?: string;
+    params: { col: string; label: string }[];
+  };
+  @Column({ default: 0 }) items_count: number;
+  @CreateDateColumn() created_at: Date;
+}
+
+/** Individual accessory item parsed from an AccessoryTable */
+@Entity('accessory_items')
+@Index('idx_acc_items_article', ['accessory_table_id', 'article'])
+export class AccessoryItem {
+  @PrimaryGeneratedColumn() id: number;
+  @Column() accessory_table_id: number;
+  @ManyToOne(() => AccessoryTable, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'accessory_table_id' })
+  table: AccessoryTable;
+  @Column({ nullable: true }) article: string;
+  @Column({ nullable: true }) name: string;
+  @Column({ nullable: true }) image_url: string;
+  @Column({ nullable: true }) site_url: string;
+  @Column({ nullable: true, type: 'text' }) description: string;
+  @Column({ type: 'jsonb', default: '{}' }) attributes: Record<string, string>;
 }

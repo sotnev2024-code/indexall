@@ -9,7 +9,7 @@ import TilesManagerModal from '@/components/TilesManagerModal';
 import TariffsManagerModal, { TariffTile } from '@/components/TariffsManagerModal';
 import AdminEtmLookup from '@/components/AdminEtmLookup';
 
-type Tab = 'pricelists' | 'base' | 'templates' | 'users' | 'conversions' | 'tariffs' | 'stats' | 'tiles';
+type Tab = 'pricelists' | 'base' | 'templates' | 'users' | 'conversions' | 'tariffs' | 'stats' | 'tiles' | 'accessories';
 
 function getBackendOrigin(): string {
   try {
@@ -146,6 +146,16 @@ export default function AdminPage() {
   const [tileFilterCols, setTileFilterCols] = useState<{ col: string; label: string }[]>([]);
   const [tileUploading, setTileUploading] = useState(false);
 
+  // ── Accessories state ─────────────────────────────────────────
+  const [accTables, setAccTables] = useState<any[]>([]);
+  const [allTiles, setAllTiles] = useState<any[]>([]);
+  const [accFile, setAccFile] = useState<File | null>(null);
+  const [accPreview, setAccPreview] = useState<{ headers: string[]; rows: any[][] } | null>(null);
+  const [accMapping, setAccMapping] = useState({ firstRow: '2', articleCol: '', nameCol: '', imageUrlCol: '', siteUrlCol: '', descriptionCol: '' });
+  const [accParamCols, setAccParamCols] = useState<{ col: string; label: string }[]>([]);
+  const [accTileId, setAccTileId] = useState<string>('');
+  const [accUploading, setAccUploading] = useState(false);
+
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
@@ -168,6 +178,7 @@ export default function AdminPage() {
     else if (tab === 'templates') loadAdminTemplates();
     else if (tab === 'base') loadTiles();
     else if (tab === 'tiles') loadTiles();
+    else if (tab === 'accessories') loadAccessories();
   }, [tab]);
 
   // While any price list is parsing on the server, refresh the table every
@@ -475,6 +486,68 @@ export default function AdminPage() {
   async function loadTiles() {
     try { const { data } = await catalogApi.getTilesAll(); setTiles(data); }
     catch { toast.error('Ошибка загрузки категорий'); }
+  }
+
+  async function loadAccessories() {
+    try {
+      const [{ data: tables }, { data: tiles }] = await Promise.all([
+        catalogApi.getAccessoryTables(),
+        catalogApi.getTilesAll(),
+      ]);
+      setAccTables(tables);
+      setAllTiles(tiles);
+    } catch { toast.error('Ошибка загрузки аксессуаров'); }
+  }
+
+  async function handleAccFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setAccFile(f);
+    setAccPreview(null);
+    const fd = new FormData();
+    fd.append('file', f);
+    try {
+      const { data } = await catalogApi.previewAccessoryExcel(fd);
+      setAccPreview(data);
+    } catch { toast.error('Ошибка чтения файла'); }
+  }
+
+  async function handleAccUpload() {
+    if (!accFile || !accTileId) { toast.error('Выберите файл и категорию'); return; }
+    if (!accMapping.articleCol || !accMapping.nameCol) { toast.error('Укажите колонки артикула и названия'); return; }
+    setAccUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', accFile);
+      fd.append('tileId', accTileId);
+      fd.append('mapping', JSON.stringify({
+        firstRow: Number(accMapping.firstRow) || 2,
+        articleCol: accMapping.articleCol,
+        nameCol: accMapping.nameCol,
+        imageUrlCol: accMapping.imageUrlCol || undefined,
+        siteUrlCol: accMapping.siteUrlCol || undefined,
+        descriptionCol: accMapping.descriptionCol || undefined,
+        params: accParamCols.filter(p => p.col && p.label),
+      }));
+      await catalogApi.uploadAccessoryTable(fd);
+      toast.success('Загружено, обрабатывается…');
+      setAccFile(null);
+      setAccPreview(null);
+      setAccMapping({ firstRow: '2', articleCol: '', nameCol: '', imageUrlCol: '', siteUrlCol: '', descriptionCol: '' });
+      setAccParamCols([]);
+      setAccTileId('');
+      loadAccessories();
+    } catch { toast.error('Ошибка загрузки'); }
+    finally { setAccUploading(false); }
+  }
+
+  async function handleAccDelete(id: number) {
+    if (!confirm('Удалить таблицу аксессуаров?')) return;
+    try {
+      await catalogApi.deleteAccessoryTable(id);
+      setAccTables(prev => prev.filter(t => t.id !== id));
+      toast.success('Удалено');
+    } catch { toast.error('Ошибка удаления'); }
   }
 
   // ── User actions ─────────────────────────────────────────────
@@ -910,9 +983,10 @@ export default function AdminPage() {
     { key: 'conversions', label: 'Конверсии' },
     { key: 'tariffs',   label: 'Тарифы и их операции' },
     { key: 'templates', label: 'Шаблоны' },
-    { key: 'pricelists', label: 'Каталог: Прайс-листы' },
-    { key: 'base',      label: 'Каталог: База' },
-    { key: 'stats',     label: 'Статистика' },
+    { key: 'pricelists',  label: 'Каталог: Прайс-листы' },
+    { key: 'accessories', label: 'Каталог: Аксессуары' },
+    { key: 'base',        label: 'Каталог: База' },
+    { key: 'stats',       label: 'Статистика' },
   ];
 
   if (!mounted) return <div style={{ paddingTop: 120, textAlign: 'center', color: 'var(--muted)' }}>Загрузка…</div>;
@@ -1746,6 +1820,159 @@ export default function AdminPage() {
                   ))}
                   {pricelists.length === 0 && (
                     <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Нет загруженных прайс-листов</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </>
+          )}
+
+          {/* ── Каталог: Аксессуары ── */}
+          {tab === 'accessories' && (
+            <>
+              <div className="admin-section-title">Каталог: Аксессуары</div>
+
+              <div className="admin-form">
+                <div className="admin-form-title">Загрузить таблицу аксессуаров</div>
+
+                {/* File upload */}
+                <div className="form-row">
+                  <div className="form-col">
+                    <label>Excel-файл (.xlsx) *</label>
+                    <input type="file" accept=".xlsx,.xls" onChange={handleAccFileChange} key={accFile ? 'has' : 'empty'} />
+                  </div>
+                  <div className="form-col">
+                    <label>Категория оборудования *</label>
+                    <select value={accTileId} onChange={e => setAccTileId(e.target.value)} className="admin-input">
+                      <option value="">— выберите —</option>
+                      {allTiles.map((t: any) => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Preview */}
+                {accPreview && (
+                  <div style={{ overflowX: 'auto', marginTop: 12 }}>
+                    <table style={{ fontSize: 12, borderCollapse: 'collapse', minWidth: '100%' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ padding: '3px 6px', background: '#f0f0f0', border: '1px solid #ddd' }}>#</th>
+                          {accPreview.headers.map((h, i) => (
+                            <th key={i} style={{ padding: '3px 8px', background: '#f0f0f0', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>
+                              {XLSX.utils.encode_col(i)} — {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {accPreview.rows.map((row, ri) => (
+                          <tr key={ri} style={{ background: ri + 1 < Number(accMapping.firstRow) ? '#f9f9f9' : undefined }}>
+                            <td style={{ padding: '3px 6px', borderBottom: '1px solid #eee', fontWeight: 600, color: 'var(--muted)' }}>{ri + 1}</td>
+                            {row.map((cell: any, ci: number) => (
+                              <td key={ci} style={{ padding: '3px 8px', borderBottom: '1px solid #eee', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {String(cell)}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Mapping */}
+                {accPreview && (
+                  <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Первая строка данных *</div>
+                      <input className="admin-input" type="number" value={accMapping.firstRow}
+                        onChange={e => setAccMapping(m => ({ ...m, firstRow: e.target.value }))} style={{ width: '100%' }} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Артикул (колонка) *</div>
+                      <input className="admin-input" placeholder="Пример: A или 1" value={accMapping.articleCol}
+                        onChange={e => setAccMapping(m => ({ ...m, articleCol: e.target.value }))} style={{ width: '100%' }} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Название (колонка) *</div>
+                      <input className="admin-input" placeholder="Пример: B или 2" value={accMapping.nameCol}
+                        onChange={e => setAccMapping(m => ({ ...m, nameCol: e.target.value }))} style={{ width: '100%' }} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Ссылка на картинку</div>
+                      <input className="admin-input" placeholder="Пример: C" value={accMapping.imageUrlCol}
+                        onChange={e => setAccMapping(m => ({ ...m, imageUrlCol: e.target.value }))} style={{ width: '100%' }} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Сайт производителя</div>
+                      <input className="admin-input" placeholder="Пример: D" value={accMapping.siteUrlCol}
+                        onChange={e => setAccMapping(m => ({ ...m, siteUrlCol: e.target.value }))} style={{ width: '100%' }} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>Описание</div>
+                      <input className="admin-input" placeholder="Пример: E" value={accMapping.descriptionCol}
+                        onChange={e => setAccMapping(m => ({ ...m, descriptionCol: e.target.value }))} style={{ width: '100%' }} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Custom params */}
+                {accPreview && (
+                  <div style={{ marginTop: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>Доп. параметры</span>
+                      <button className="btn-secondary" style={{ fontSize: 12, padding: '3px 10px' }}
+                        onClick={() => setAccParamCols(p => [...p, { col: '', label: '' }])}>+ Добавить</button>
+                    </div>
+                    {accParamCols.map((p, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
+                        <input className="admin-input" placeholder="Колонка (A/1)" value={p.col}
+                          onChange={e => setAccParamCols(cols => cols.map((c, j) => j === i ? { ...c, col: e.target.value } : c))}
+                          style={{ width: 120 }} />
+                        <input className="admin-input" placeholder="Название параметра" value={p.label}
+                          onChange={e => setAccParamCols(cols => cols.map((c, j) => j === i ? { ...c, label: e.target.value } : c))}
+                          style={{ flex: 1 }} />
+                        <button className="btn-danger" style={{ fontSize: 12, padding: '3px 8px' }}
+                          onClick={() => setAccParamCols(cols => cols.filter((_, j) => j !== i))}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ marginTop: 16 }}>
+                  <button className="btn-primary" onClick={handleAccUpload} disabled={accUploading || !accFile || !accTileId}>
+                    {accUploading ? 'Загрузка…' : 'Загрузить'}
+                  </button>
+                </div>
+              </div>
+
+              {/* List of accessory tables */}
+              <table className="admin-table" style={{ marginTop: 24 }}>
+                <thead>
+                  <tr>
+                    <th>Файл</th>
+                    <th>Категория</th>
+                    <th>Аксессуаров</th>
+                    <th>Дата</th>
+                    <th>Действия</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {accTables.map((t: any) => (
+                    <tr key={t.id}>
+                      <td>{t.file_name}</td>
+                      <td>{t.tile?.name || t.tile_id}</td>
+                      <td>{t.items_count}</td>
+                      <td>{new Date(t.created_at).toLocaleDateString('ru')}</td>
+                      <td>
+                        <button className="btn-danger" style={{ fontSize: 12, padding: '4px 10px' }}
+                          onClick={() => handleAccDelete(t.id)}>Удалить</button>
+                      </td>
+                    </tr>
+                  ))}
+                  {accTables.length === 0 && (
+                    <tr><td colSpan={5} style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Нет загруженных таблиц аксессуаров</td></tr>
                   )}
                 </tbody>
               </table>

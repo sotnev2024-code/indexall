@@ -125,6 +125,15 @@ export const catalogApi = {
   /** Returns dynamic filter options for a given category slug */
   getFilterOptions: (slug: string) => api.get<{ label: string; opts: string[] }[]>('/catalog/filter-options', { params: { slug } }),
   getPricesByArticles: (articles: string[]) => api.post<Record<string, { price: number; manufacturer: string } | null>>('/catalog/prices-by-articles', { articles }),
+  // Accessory tables (admin)
+  getAccessoryTables: () => api.get('/catalog/accessory-tables'),
+  uploadAccessoryTable: (fd: FormData) => api.post('/catalog/accessory-tables', fd, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  deleteAccessoryTable: (id: number) => api.delete(`/catalog/accessory-tables/${id}`),
+  // Accessory lookup (user)
+  getTileProductAccessories: (tileId: number, productId: number) =>
+    api.get<{ type: string; items: any[] }[]>(`/catalog/tiles/${tileId}/products/${productId}/accessories`),
+  // Reuse tile excel preview for accessory tables
+  previewAccessoryExcel: (fd: FormData) => api.post<{ headers: string[]; rows: any[][] }>('/catalog/tiles/preview-excel', fd, { headers: { 'Content-Type': 'multipart/form-data' } }),
 };
 
 // ── Templates ─────────────────────────────────────────────────

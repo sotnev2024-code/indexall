@@ -102,6 +102,10 @@ function CatalogPageInner() {
   const [accSelectedType, setAccSelectedType] = useState<string | null>(null);
   // ETM data for accessories keyed by article: { price, term, loading }
   const [accEtm, setAccEtm] = useState<Record<string, { price: number | null; term: string | null; loading: boolean }>>({});
+  // Enriched accessories from DB (image, site_url, description, attributes) keyed by article
+  const [accItemDetails, setAccItemDetails] = useState<Record<string, any>>({});
+  // Zoomed image URL for accessory photo
+  const [accZoomImg, setAccZoomImg] = useState<string | null>(null);
   // Track whether we've done the initial restore fetch
   const restoredRef = useRef(false);
 
@@ -330,6 +334,27 @@ function CatalogPageInner() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accView, accSelectedType, selectedProduct?.id]);
 
+  // Fetch enriched accessory details from DB (image, site_url, description, attributes)
+  useEffect(() => {
+    if (accView === 'closed' || !selectedProduct) return;
+    if (Object.keys(accItemDetails).length > 0) return; // already loaded
+    const tileId = tiles.find((t: any) => t.slug === selectedSlug)?.id;
+    if (!tileId) return;
+    (async () => {
+      try {
+        const { data: groups } = await catalogApi.getTileProductAccessories(tileId, selectedProduct.id);
+        const details: Record<string, any> = {};
+        for (const g of groups) {
+          for (const item of g.items) {
+            if (item.article) details[item.article] = item;
+          }
+        }
+        setAccItemDetails(details);
+      } catch { /* silently ignore — image/desc just won't show */ }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accView, selectedProduct?.id, selectedSlug]);
+
   // Global search across all products (catalog + tiles) with 300ms debounce.
   useEffect(() => {
     const q = search.trim();
@@ -441,6 +466,7 @@ function CatalogPageInner() {
     setAccView('closed');
     setAccSelectedType(null);
     setAccEtm({});
+    setAccItemDetails({});
     // ETM lookup only when an mnf article is actually present. The product's
     // etm_code (manufacturer directory code) is passed as the `mnf=` query
     // disambiguator so ETM resolves the right brand if multiple share an
@@ -821,28 +847,56 @@ function CatalogPageInner() {
                         </button>
                         <span style={{ fontSize: 13, fontWeight: 600 }}>{accSelectedType}</span>
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {listAccs.map((acc: any, ai: number) => {
                           const etm = acc.article ? accEtm[acc.article] : undefined;
+                          const detail = acc.article ? accItemDetails[acc.article] : undefined;
+                          const imgUrl = detail?.image_url || null;
+                          const siteUrl = detail?.site_url || null;
+                          const description = detail?.description || null;
+                          const extraAttrs = detail?.attributes ? Object.entries(detail.attributes as Record<string, string>).filter(([, v]) => v) : [];
                           return (
-                            <div key={ai} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '6px 10px', background: 'var(--bg)', borderRadius: 4, border: '1px solid var(--border)' }}>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ fontWeight: 500 }}>{acc.name}</div>
-                                {acc.article && <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>{acc.article}</div>}
-                                <div style={{ fontSize: 11, marginTop: 3, color: 'var(--muted)' }}>
-                                  {etm?.loading && 'Загрузка цены...'}
+                            <div key={ai} style={{ display: 'flex', gap: 10, fontSize: 12, padding: '8px 10px', background: 'var(--bg)', borderRadius: 6, border: '1px solid var(--border)', alignItems: 'flex-start' }}>
+                              {imgUrl && (
+                                <img
+                                  src={imgUrl} alt=""
+                                  style={{ width: 56, height: 56, objectFit: 'contain', flexShrink: 0, borderRadius: 4, background: '#f5f5f5', cursor: 'zoom-in' }}
+                                  onClick={e => { e.stopPropagation(); setAccZoomImg(imgUrl); }}
+                                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                />
+                              )}
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontWeight: 500 }}>{acc.name || detail?.db_name}</div>
+                                {acc.article && <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>Арт: {acc.article}</div>}
+                                {description && <div style={{ fontSize: 11, marginTop: 3, color: 'var(--text)' }}>{description}</div>}
+                                {extraAttrs.length > 0 && (
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', marginTop: 3 }}>
+                                    {extraAttrs.map(([k, v]) => (
+                                      <span key={k} style={{ fontSize: 10, color: 'var(--muted)' }}>{k}: <strong>{v}</strong></span>
+                                    ))}
+                                  </div>
+                                )}
+                                <div style={{ fontSize: 11, marginTop: 4, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                                  {etm?.loading && <span>Загрузка цены…</span>}
                                   {etm && !etm.loading && (
                                     <>
                                       {etm.price != null && etm.price > 0
-                                        ? <span>Цена ЭТМ: <strong>{etm.price} ₽</strong></span>
-                                        : <span>Цена: нет</span>}
-                                      {etm.term && <span style={{ marginLeft: 10 }}>Срок: <strong>{etm.term}</strong></span>}
+                                        ? <span>Цена ЭТМ: <strong style={{ color: 'var(--text)' }}>{etm.price} ₽</strong></span>
+                                        : <span>Цена ЭТМ: нет</span>}
+                                      {etm.term && <span>Срок: <strong style={{ color: 'var(--text)' }}>{etm.term}</strong></span>}
                                     </>
+                                  )}
+                                  {siteUrl && (
+                                    <a href={siteUrl} target="_blank" rel="noopener noreferrer"
+                                      style={{ color: 'var(--yellow)', textDecoration: 'none' }}
+                                      onClick={e => e.stopPropagation()}>
+                                      Сайт производителя ↗
+                                    </a>
                                   )}
                                 </div>
                               </div>
-                              <button className="btn-add-to-list" style={{ padding: '3px 10px', fontSize: 11, whiteSpace: 'nowrap' }}
-                                onClick={e => { e.stopPropagation(); addToSheet({ name: acc.name, article: acc.article, manufacturer: selectedProduct.manufacturer }); }}>
+                              <button className="btn-add-to-list" style={{ padding: '3px 10px', fontSize: 11, whiteSpace: 'nowrap', alignSelf: 'flex-start' }}
+                                onClick={e => { e.stopPropagation(); addToSheet({ name: acc.name || detail?.db_name, article: acc.article, manufacturer: selectedProduct.manufacturer }); }}>
                                 + В лист
                               </button>
                             </div>
@@ -1222,6 +1276,20 @@ function CatalogPageInner() {
               <button className="btn-cancel" onClick={() => setAdminInfo(null)}>Закрыть</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Accessory image zoom modal ── */}
+      {accZoomImg && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}
+          onClick={() => setAccZoomImg(null)}
+        >
+          <img
+            src={accZoomImg} alt=""
+            style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
+            onClick={e => e.stopPropagation()}
+          />
         </div>
       )}
     </>
