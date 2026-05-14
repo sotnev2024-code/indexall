@@ -856,7 +856,7 @@ function CatalogPageInner() {
                         </button>
                         <span style={{ fontSize: 13, fontWeight: 600 }}>{accSelectedType}</span>
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {listAccs.map((acc: any, ai: number) => {
                           const etm = acc.article ? accEtm[acc.article] : undefined;
                           const detail = acc.article ? accItemDetails[acc.article] : undefined;
@@ -864,50 +864,83 @@ function CatalogPageInner() {
                           const siteUrl = detail?.site_url || null;
                           const description = detail?.description || null;
                           const extraAttrs = detail?.attributes ? Object.entries(detail.attributes as Record<string, string>).filter(([, v]) => v) : [];
+                          const displayName = acc.name || detail?.db_name || '';
                           return (
-                            <div key={ai} style={{ display: 'flex', gap: 10, fontSize: 12, padding: '8px 10px', background: 'var(--bg)', borderRadius: 6, border: '1px solid var(--border)', alignItems: 'flex-start' }}>
-                              {imgUrl && (
-                                <img
-                                  src={imgUrl} alt=""
-                                  style={{ width: 80, height: 80, objectFit: 'contain', flexShrink: 0, borderRadius: 6, background: '#f5f5f5', cursor: 'zoom-in' }}
-                                  onClick={e => { e.stopPropagation(); setAccZoomImg(imgUrl); }}
-                                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                                />
-                              )}
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontWeight: 500 }}>{acc.name || detail?.db_name}</div>
-                                {acc.article && <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>Арт: {acc.article}</div>}
-                                {description && <div style={{ fontSize: 11, marginTop: 3, color: 'var(--text)' }}>{description}</div>}
-                                {extraAttrs.length > 0 && (
-                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', marginTop: 3 }}>
-                                    {extraAttrs.map(([k, v]) => (
-                                      <span key={k} style={{ fontSize: 10, color: 'var(--muted)' }}>{k}: <strong>{v}</strong></span>
-                                    ))}
+                            <div key={ai} style={{ background: 'var(--bg)', borderRadius: 8, border: '1px solid var(--border)', padding: '12px 14px', fontSize: 13 }}>
+                              {/* Header: name + article + ETM + button */}
+                              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 10 }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontWeight: 600, fontSize: 13, lineHeight: 1.3 }}>{displayName}</div>
+                                  {acc.article && (
+                                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{acc.article}</div>
+                                  )}
+                                  {/* ETM price row */}
+                                  <div style={{ marginTop: 6, fontSize: 12 }}>
+                                    {etm?.loading && <span style={{ color: 'var(--muted)' }}>Загрузка цены…</span>}
+                                    {etm && !etm.loading && (
+                                      <span style={{ background: '#fffbe6', border: '1px solid #f5c800', borderRadius: 4, padding: '3px 8px', display: 'inline-flex', gap: 12, fontSize: 12 }}>
+                                        {etm.price != null && etm.price > 0
+                                          ? <span>Цена ЭТМ: <strong>{etm.price.toLocaleString('ru-RU')} ₽</strong></span>
+                                          : <span style={{ color: 'var(--muted)' }}>Цена ЭТМ: нет</span>}
+                                        {etm.term && <span>Срок: <strong>{etm.term}</strong></span>}
+                                      </span>
+                                    )}
                                   </div>
-                                )}
-                                <div style={{ fontSize: 11, marginTop: 4, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                                  {etm?.loading && <span>Загрузка цены…</span>}
-                                  {etm && !etm.loading && (
-                                    <>
-                                      {etm.price != null && etm.price > 0
-                                        ? <span>Цена ЭТМ: <strong style={{ color: 'var(--text)' }}>{etm.price} ₽</strong></span>
-                                        : <span>Цена ЭТМ: нет</span>}
-                                      {etm.term && <span>Срок: <strong style={{ color: 'var(--text)' }}>{etm.term}</strong></span>}
-                                    </>
-                                  )}
-                                  {siteUrl && (
-                                    <a href={siteUrl} target="_blank" rel="noopener noreferrer"
-                                      style={{ color: 'var(--yellow)', textDecoration: 'none' }}
-                                      onClick={e => e.stopPropagation()}>
-                                      Сайт производителя ↗
-                                    </a>
-                                  )}
                                 </div>
+                                <button className="btn-add-to-list" style={{ padding: '5px 12px', fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+                                  onClick={e => { e.stopPropagation(); addToSheet({ name: displayName, article: acc.article, manufacturer: selectedProduct.manufacturer }); }}>
+                                  + В лист
+                                </button>
                               </div>
-                              <button className="btn-add-to-list" style={{ padding: '3px 10px', fontSize: 11, whiteSpace: 'nowrap', alignSelf: 'flex-start' }}
-                                onClick={e => { e.stopPropagation(); addToSheet({ name: acc.name || detail?.db_name, article: acc.article, manufacturer: selectedProduct.manufacturer }); }}>
-                                + В лист
-                              </button>
+
+                              {/* Body: image + characteristics */}
+                              {(imgUrl || extraAttrs.length > 0 || description) && (
+                                <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+                                  {/* Photo */}
+                                  {imgUrl && (
+                                    <img
+                                      src={imgUrl} alt=""
+                                      style={{ width: 110, height: 110, objectFit: 'contain', flexShrink: 0, borderRadius: 6, background: '#f5f5f5', cursor: 'zoom-in', border: '1px solid var(--border)' }}
+                                      onClick={e => { e.stopPropagation(); setAccZoomImg(imgUrl); }}
+                                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                    />
+                                  )}
+
+                                  {/* Characteristics */}
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    {(extraAttrs.length > 0 || description) && (
+                                      <>
+                                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                          Основные характеристики
+                                        </div>
+                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                                          <tbody>
+                                            {description && (
+                                              <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                                                <td style={{ padding: '4px 8px 4px 0', color: 'var(--muted)', width: '45%', verticalAlign: 'top' }}>Описание</td>
+                                                <td style={{ padding: '4px 0', fontWeight: 500 }}>{description}</td>
+                                              </tr>
+                                            )}
+                                            {extraAttrs.map(([k, v]) => (
+                                              <tr key={k} style={{ borderBottom: '1px solid var(--border)' }}>
+                                                <td style={{ padding: '4px 8px 4px 0', color: 'var(--muted)', width: '45%', verticalAlign: 'top' }}>{k}</td>
+                                                <td style={{ padding: '4px 0', fontWeight: 500 }}>{v}</td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </>
+                                    )}
+                                    {siteUrl && (
+                                      <a href={siteUrl} target="_blank" rel="noopener noreferrer"
+                                        style={{ display: 'inline-block', marginTop: 8, color: 'var(--yellow)', textDecoration: 'none', fontSize: 12 }}
+                                        onClick={e => e.stopPropagation()}>
+                                        Сайт производителя ↗
+                                      </a>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
