@@ -104,8 +104,9 @@ function CatalogPageInner() {
   const [accEtm, setAccEtm] = useState<Record<string, { price: number | null; term: string | null; loading: boolean }>>({});
   // Enriched accessories from DB (image, site_url, description, attributes) keyed by article
   const [accItemDetails, setAccItemDetails] = useState<Record<string, any>>({});
-  // Zoomed image URL for accessory photo
+  // Zoomed image URL (accessories and product thumbnails)
   const [accZoomImg, setAccZoomImg] = useState<string | null>(null);
+  const [productZoomImg, setProductZoomImg] = useState<string | null>(null);
   // Track whether we've done the initial restore fetch
   const restoredRef = useRef(false);
 
@@ -647,10 +648,14 @@ function CatalogPageInner() {
           <span className="product-num">{i + 1}</span>
           {/* Thumbnail */}
           {p.image_url ? (
-            <img src={p.image_url} alt="" style={{ width: 40, height: 40, objectFit: 'contain', marginRight: 8, borderRadius: 4, flexShrink: 0 }}
-              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            <img
+              src={p.image_url} alt=""
+              style={{ width: 80, height: 80, objectFit: 'contain', marginRight: 8, borderRadius: 6, flexShrink: 0, cursor: 'zoom-in', background: '#f5f5f5' }}
+              onClick={e => { e.stopPropagation(); setProductZoomImg(p.image_url); }}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+            />
           ) : (
-            <div style={{ width: 40, height: 40, marginRight: 8, background: '#f5f5f5', borderRadius: 4, flexShrink: 0 }} />
+            <div style={{ width: 80, height: 80, marginRight: 8, background: '#f5f5f5', borderRadius: 6, flexShrink: 0 }} />
           )}
           <div className="product-info">
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -731,8 +736,12 @@ function CatalogPageInner() {
       <div ref={detailRef} className="product-detail-inline">
         <div style={{ display: 'flex', gap: 12 }}>
           {selectedProduct.image_url && (
-            <img src={selectedProduct.image_url} alt="" style={{ width: 120, height: 120, objectFit: 'contain', background: '#f5f5f5', borderRadius: 6, flexShrink: 0 }}
-              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            <img
+              src={selectedProduct.image_url} alt=""
+              style={{ width: 160, height: 160, objectFit: 'contain', background: '#f5f5f5', borderRadius: 6, flexShrink: 0, cursor: 'zoom-in' }}
+              onClick={e => { e.stopPropagation(); setProductZoomImg(selectedProduct.image_url); }}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+            />
           )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 13, flex: 1 }}>
           {selectedProduct.article && (
@@ -860,7 +869,7 @@ function CatalogPageInner() {
                               {imgUrl && (
                                 <img
                                   src={imgUrl} alt=""
-                                  style={{ width: 56, height: 56, objectFit: 'contain', flexShrink: 0, borderRadius: 4, background: '#f5f5f5', cursor: 'zoom-in' }}
+                                  style={{ width: 80, height: 80, objectFit: 'contain', flexShrink: 0, borderRadius: 6, background: '#f5f5f5', cursor: 'zoom-in' }}
                                   onClick={e => { e.stopPropagation(); setAccZoomImg(imgUrl); }}
                                   onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                                 />
@@ -1279,19 +1288,23 @@ function CatalogPageInner() {
         </div>
       )}
 
-      {/* ── Accessory image zoom modal ── */}
-      {accZoomImg && (
-        <div
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}
-          onClick={() => setAccZoomImg(null)}
-        >
-          <img
-            src={accZoomImg} alt=""
-            style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
-            onClick={e => e.stopPropagation()}
-          />
-        </div>
-      )}
+      {/* ── Image zoom modal (accessories + product thumbnails) ── */}
+      {(accZoomImg || productZoomImg) && (() => {
+        const src = accZoomImg || productZoomImg!;
+        const close = () => { setAccZoomImg(null); setProductZoomImg(null); };
+        return (
+          <div
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}
+            onClick={close}
+          >
+            <img
+              src={src} alt=""
+              style={{ width: 300, height: 300, objectFit: 'contain', borderRadius: 10, boxShadow: '0 8px 40px rgba(0,0,0,0.6)', background: '#fff' }}
+              onClick={e => e.stopPropagation()}
+            />
+          </div>
+        );
+      })()}
     </>
   );
 }

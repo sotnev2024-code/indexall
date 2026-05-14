@@ -283,10 +283,14 @@ export class CatalogController {
   uploadAccessoryTable(
     @UploadedFile() file: Express.Multer.File,
     @Body('tileId') tileId: string,
+    @Body('priceListId') priceListId: string,
     @Body('mapping') mappingStr: string,
   ) {
     const mapping = JSON.parse(mappingStr);
-    return this.service.uploadAccessoryTable(file, Number(tileId), mapping);
+    return this.service.uploadAccessoryTable(file, {
+      tileId: tileId ? Number(tileId) : undefined,
+      priceListId: priceListId ? Number(priceListId) : undefined,
+    }, mapping);
   }
 
   @Delete('accessory-tables/:id')

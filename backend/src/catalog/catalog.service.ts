@@ -1255,23 +1255,37 @@ export class CatalogService implements OnModuleInit {
 
   async getAccessoryTables() {
     return this.accTableRepo.find({
-      relations: ['tile'],
+      relations: ['tile', 'priceList', 'priceList.manufacturer'],
       order: { created_at: 'DESC' },
     });
   }
 
+  /**
+   * Upload an accessory table linked to either a CatalogTile (from "База")
+   * or a PriceList (from "Прайс-листы"). Pass exactly one of tileId / priceListId.
+   */
   async uploadAccessoryTable(
     file: Express.Multer.File,
-    tileId: number,
+    opts: { tileId?: number; priceListId?: number },
     mapping: AccessoryTable['column_mapping'],
   ) {
-    const tile = await this.tileRepo.findOne({ where: { id: tileId } });
-    if (!tile) throw new NotFoundException('Tile not found');
+    const { tileId, priceListId } = opts;
+
+    if (tileId) {
+      const tile = await this.tileRepo.findOne({ where: { id: tileId } });
+      if (!tile) throw new NotFoundException('Tile not found');
+    } else if (priceListId) {
+      const pl = await this.plRepo.findOne({ where: { id: priceListId } });
+      if (!pl) throw new NotFoundException('Price list not found');
+    } else {
+      throw new Error('Укажите tileId или priceListId');
+    }
 
     const fixedName = this.fixFilenameEncoding(file.originalname);
 
     const table = await this.accTableRepo.save({
-      tile_id: tileId,
+      tile_id: tileId ?? null,
+      price_list_id: priceListId ?? null,
       file_name: fixedName,
       file_path: file.path,
       column_mapping: mapping,
@@ -1352,13 +1366,33 @@ export class CatalogService implements OnModuleInit {
     return { success: true };
   }
 
-  /** Get accessory detail by article, for a given tile */
-  async getAccessoryByArticle(tileId: number, article: string): Promise<AccessoryItem | null> {
-    const table = await this.accTableRepo.findOne({ where: { tile_id: tileId } });
-    if (!table) return null;
-    return this.accItemRepo.findOne({
-      where: { accessory_table_id: table.id, article },
-    });
+  /** Resolve all AccessoryTable IDs that apply to a given tile product.
+   *  Checks tables linked directly to the tile, then falls back to tables
+   *  linked to a PriceList whose manufacturer name matches the product brand. */
+  private async resolveAccTableIdsForTileProduct(tileId: number, brand: string | null): Promise<number[]> {
+    // 1. Directly tile-linked tables
+    const tileTables = await this.accTableRepo.find({ where: { tile_id: tileId } });
+    if (tileTables.length) return tileTables.map(t => t.id);
+
+    // 2. Fallback: find by manufacturer name → price lists → accessory tables
+    if (brand) {
+      const manuf = await this.manufRepo
+        .createQueryBuilder('m')
+        .where('LOWER(m.name) = LOWER(:name)', { name: brand.trim() })
+        .getOne();
+      if (manuf) {
+        const pls = await this.plRepo.find({ where: { manufacturer_id: manuf.id } });
+        if (pls.length) {
+          const plIds = pls.map(p => p.id);
+          const plTables = await this.accTableRepo
+            .createQueryBuilder('at')
+            .where('at.price_list_id IN (:...plIds)', { plIds })
+            .getMany();
+          if (plTables.length) return plTables.map(t => t.id);
+        }
+      }
+    }
+    return [];
   }
 
   /** Get accessories for a tile product — returns grouped list enriched with DB details */
@@ -1366,9 +1400,7 @@ export class CatalogService implements OnModuleInit {
     const product = await this.tileProductRepo.findOne({ where: { id: productId } });
     if (!product || !product.accessories?.length) return [];
 
-    // Get all accessory tables for this tile
-    const tables = await this.accTableRepo.find({ where: { tile_id: tileId } });
-    const tableIds = tables.map(t => t.id);
+    const tableIds = await this.resolveAccTableIdsForTileProduct(tileId, product.brand);
 
     // Collect unique articles from this product's accessories
     const articles = [...new Set(product.accessories.map(a => a.article).filter(Boolean))];

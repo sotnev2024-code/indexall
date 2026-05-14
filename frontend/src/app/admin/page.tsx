@@ -148,12 +148,14 @@ export default function AdminPage() {
 
   // ── Accessories state ─────────────────────────────────────────
   const [accTables, setAccTables] = useState<any[]>([]);
-  const [allTiles, setAllTiles] = useState<any[]>([]);
+  const [accAllTiles, setAccAllTiles] = useState<any[]>([]);
+  const [accAllPricelists, setAccAllPricelists] = useState<any[]>([]);
   const [accFile, setAccFile] = useState<File | null>(null);
   const [accPreview, setAccPreview] = useState<{ headers: string[]; rows: any[][] } | null>(null);
   const [accMapping, setAccMapping] = useState({ firstRow: '2', articleCol: '', nameCol: '', imageUrlCol: '', siteUrlCol: '', descriptionCol: '' });
   const [accParamCols, setAccParamCols] = useState<{ col: string; label: string }[]>([]);
-  const [accTileId, setAccTileId] = useState<string>('');
+  // value format: "tile:ID" or "pl:ID"
+  const [accLinkTarget, setAccLinkTarget] = useState<string>('');
   const [accUploading, setAccUploading] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
@@ -490,12 +492,14 @@ export default function AdminPage() {
 
   async function loadAccessories() {
     try {
-      const [{ data: tables }, { data: tiles }] = await Promise.all([
+      const [{ data: tables }, { data: tiles }, { data: pls }] = await Promise.all([
         catalogApi.getAccessoryTables(),
         catalogApi.getTilesAll(),
+        adminApi.getPricelists(),
       ]);
       setAccTables(tables);
-      setAllTiles(tiles);
+      setAccAllTiles(tiles);
+      setAccAllPricelists(pls);
     } catch { toast.error('Ошибка загрузки аксессуаров'); }
   }
 
@@ -513,13 +517,15 @@ export default function AdminPage() {
   }
 
   async function handleAccUpload() {
-    if (!accFile || !accTileId) { toast.error('Выберите файл и категорию'); return; }
+    if (!accFile || !accLinkTarget) { toast.error('Выберите файл и таблицу для привязки'); return; }
     if (!accMapping.articleCol || !accMapping.nameCol) { toast.error('Укажите колонки артикула и названия'); return; }
     setAccUploading(true);
     try {
       const fd = new FormData();
       fd.append('file', accFile);
-      fd.append('tileId', accTileId);
+      const [kind, idStr] = accLinkTarget.split(':');
+      if (kind === 'tile') fd.append('tileId', idStr);
+      else fd.append('priceListId', idStr);
       fd.append('mapping', JSON.stringify({
         firstRow: Number(accMapping.firstRow) || 2,
         articleCol: accMapping.articleCol,
@@ -535,7 +541,7 @@ export default function AdminPage() {
       setAccPreview(null);
       setAccMapping({ firstRow: '2', articleCol: '', nameCol: '', imageUrlCol: '', siteUrlCol: '', descriptionCol: '' });
       setAccParamCols([]);
-      setAccTileId('');
+      setAccLinkTarget('');
       loadAccessories();
     } catch { toast.error('Ошибка загрузки'); }
     finally { setAccUploading(false); }
@@ -1596,30 +1602,30 @@ export default function AdminPage() {
                       {(tmplPreview.rows || []).filter((r: any) => r.name || r.article).length === 0 ? (
                         <div style={{ textAlign: 'center', padding: 32, color: 'var(--muted)', fontSize: 13 }}>Шаблон пустой</div>
                       ) : (
-                        <div style={{ overflowX: 'auto' }}>
+              <div style={{ overflowX: 'auto' }}>
                           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                            <thead>
+                  <thead>
                               <tr style={{ background: 'var(--bg)' }}>
                                 <th style={{ padding: '5px 8px', border: '1px solid var(--border)', textAlign: 'left', fontWeight: 600 }}>№</th>
                                 {COLS.map(c => (
                                   <th key={c} style={{ padding: '5px 8px', border: '1px solid var(--border)', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>{COL_LABELS[c]}</th>
                                 ))}
-                              </tr>
-                            </thead>
-                            <tbody>
+                    </tr>
+                  </thead>
+                  <tbody>
                               {(tmplPreview.rows || []).filter((r: any) => r.name || r.article).map((r: any, i: number) => (
                                 <tr key={i} style={{ background: i % 2 === 0 ? '#fff' : 'var(--bg)' }}>
                                   <td style={{ padding: '4px 8px', border: '1px solid var(--border)', color: 'var(--muted)' }}>{i + 1}</td>
                                   {COLS.map(c => (
                                     <td key={c} style={{ padding: '4px 8px', border: '1px solid var(--border)', maxWidth: c === 'name' ? 200 : 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                       {r[c] ?? ''}
-                                    </td>
+                        </td>
                                   ))}
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
                       )}
 
                       <div style={{ marginTop: 14, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -1841,22 +1847,35 @@ export default function AdminPage() {
                     <input type="file" accept=".xlsx,.xls" onChange={handleAccFileChange} key={accFile ? 'has' : 'empty'} />
                   </div>
                   <div className="form-col">
-                    <label>Категория оборудования *</label>
-                    <select value={accTileId} onChange={e => setAccTileId(e.target.value)} className="admin-input">
+                    <label>Привязать к таблице *</label>
+                    <select value={accLinkTarget} onChange={e => setAccLinkTarget(e.target.value)} className="admin-input">
                       <option value="">— выберите —</option>
-                      {allTiles.map((t: any) => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
+                      {accAllPricelists.length > 0 && (
+                        <optgroup label="── Прайс-листы производителей ──">
+                          {accAllPricelists.map((pl: any) => (
+                            <option key={`pl:${pl.id}`} value={`pl:${pl.id}`}>
+                              {pl.manufacturer?.name || pl.file_name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {accAllTiles.length > 0 && (
+                        <optgroup label="── База (категории) ──">
+                          {accAllTiles.map((t: any) => (
+                            <option key={`tile:${t.id}`} value={`tile:${t.id}`}>{t.name}</option>
+                          ))}
+                        </optgroup>
+                      )}
                     </select>
                   </div>
-                </div>
+              </div>
 
                 {/* Preview */}
                 {accPreview && (
                   <div style={{ overflowX: 'auto', marginTop: 12 }}>
                     <table style={{ fontSize: 12, borderCollapse: 'collapse', minWidth: '100%' }}>
-                      <thead>
-                        <tr>
+                <thead>
+                  <tr>
                           <th style={{ padding: '3px 6px', background: '#f0f0f0', border: '1px solid #ddd' }}>#</th>
                           {accPreview.headers.map((h, i) => (
                             <th key={i} style={{ padding: '3px 8px', background: '#f0f0f0', border: '1px solid #ddd', whiteSpace: 'nowrap' }}>
@@ -1941,7 +1960,7 @@ export default function AdminPage() {
                 )}
 
                 <div style={{ marginTop: 16 }}>
-                  <button className="btn-primary" onClick={handleAccUpload} disabled={accUploading || !accFile || !accTileId}>
+                  <button className="btn-primary" onClick={handleAccUpload} disabled={accUploading || !accFile || !accLinkTarget}>
                     {accUploading ? 'Загрузка…' : 'Загрузить'}
                   </button>
                 </div>
@@ -1962,7 +1981,13 @@ export default function AdminPage() {
                   {accTables.map((t: any) => (
                     <tr key={t.id}>
                       <td>{t.file_name}</td>
-                      <td>{t.tile?.name || t.tile_id}</td>
+                      <td>
+                        {t.priceList
+                          ? <><span style={{ fontSize: 10, color: 'var(--muted)', marginRight: 4 }}>Прайс:</span>{t.priceList.manufacturer?.name || t.priceList.file_name}</>
+                          : t.tile
+                            ? <><span style={{ fontSize: 10, color: 'var(--muted)', marginRight: 4 }}>База:</span>{t.tile.name}</>
+                            : '—'}
+                      </td>
                       <td>{t.items_count}</td>
                       <td>{new Date(t.created_at).toLocaleDateString('ru')}</td>
                       <td>
@@ -2002,7 +2027,7 @@ export default function AdminPage() {
                       opacity: tile.is_active ? 1 : 0.6,
                     }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                        {tile.image_path
+                          {tile.image_path
                           ? <img src={`${process.env.NEXT_PUBLIC_API_URL}/uploads/${tile.image_path.split(/[\\/]/).pop()}`}
                               alt="" style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 6 }} />
                           : tile.icon
@@ -2016,37 +2041,37 @@ export default function AdminPage() {
                             {tile.data_file_name && <span>{tile.data_file_name}</span>}
                             {!tile.is_active && <span style={{ color: 'var(--danger)' }}>скрыта</span>}
                             {tile.is_large && <span>широкая</span>}
-                          </div>
+                        </div>
                         </div>
                         <span className={tile.is_active ? 'badge badge-green' : 'badge badge-gray'} style={{ fontSize: 11 }}>
                           {tile.is_active ? 'видна' : 'скрыта'}
                         </span>
                       </div>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         <button className="btn-primary" style={{ fontSize: 12, padding: '5px 12px' }}
                           onClick={() => openTileDataModal(tile)}>
                           {tile.products_count > 0 ? 'Обновить данные' : 'Загрузить Excel'}
                         </button>
                         <label className="btn-outline" style={{ fontSize: 12, padding: '5px 12px', cursor: 'pointer' }}>
                           Обложка
-                          <input type="file" accept="image/*" style={{ display: 'none' }}
-                            onChange={e => e.target.files?.[0] && handleUploadTileImage(tile.id, e.target.files[0])} />
-                        </label>
+                            <input type="file" accept="image/*" style={{ display: 'none' }}
+                              onChange={e => e.target.files?.[0] && handleUploadTileImage(tile.id, e.target.files[0])} />
+                          </label>
                         <button className="btn-secondary" style={{ fontSize: 12, padding: '5px 12px' }}
                           onClick={() => setEditTile({ ...tile })}>
                           Настройки
-                        </button>
+                          </button>
                         {tile.products_count > 0 && (
                           <button className="btn-outline" style={{ fontSize: 12, padding: '5px 12px', color: 'var(--danger)' }}
                             onClick={() => handleDeleteTileData(tile.id)}>
                             Очистить
                           </button>
                         )}
-                      </div>
+                        </div>
                     </div>
                   ))}
                 </div>
-              )}
+                  )}
             </>
           )}
 
@@ -2272,7 +2297,7 @@ export default function AdminPage() {
               </div>
             </div>
             {editTile.filters?.length > 0 && (
-              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginBottom: 12 }}>
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginBottom: 12 }}>
                 <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Текущие фильтры (автоматические из Excel)</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                   {editTile.filters.map((fg: any, i: number) => (
@@ -2280,13 +2305,13 @@ export default function AdminPage() {
                       {fg.label} ({fg.opts?.length || 0})
                     </span>
                   ))}
-                </div>
               </div>
+                  </div>
             )}
             <div className="modal-actions">
               <button className="btn-cancel" onClick={() => setEditTile(null)}>Отмена</button>
               <button className="btn-primary" onClick={handleSaveTile}>Сохранить</button>
-            </div>
+                      </div>
           </div>
         </div>
       )}
@@ -2340,7 +2365,7 @@ export default function AdminPage() {
                       ))}
                     </tbody>
                   </table>
-                </div>
+                  </div>
 
                 {/* Column mapping */}
                 <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Маппинг столбцов</div>
@@ -2425,9 +2450,9 @@ export default function AdminPage() {
                         onClick={() => setTileFilterCols(f => f.filter((_, fi) => fi !== i))}>
                         ✕
                       </button>
-                    </div>
-                  ))}
                 </div>
+              ))}
+            </div>
               </>
             )}
 

@@ -164,14 +164,20 @@ export class TileProduct {
   @Column({ type: 'jsonb', default: '[]' }) accessories: { type: string; name: string; article: string; url: string }[];
 }
 
-/** Uploaded accessory table, linked to a CatalogTile */
+/** Uploaded accessory table, linked to a CatalogTile OR a PriceList */
 @Entity('accessory_tables')
 export class AccessoryTable {
   @PrimaryGeneratedColumn() id: number;
-  @Column() tile_id: number;
-  @ManyToOne(() => CatalogTile, { onDelete: 'CASCADE' })
+  /** Link to a category tile (from "База" section). Nullable — one of tile_id/price_list_id must be set. */
+  @Column({ nullable: true }) tile_id: number;
+  @ManyToOne(() => CatalogTile, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'tile_id' })
   tile: CatalogTile;
+  /** Link to a manufacturer price list (from "Прайс-листы" section). Nullable. */
+  @Column({ nullable: true }) price_list_id: number;
+  @ManyToOne(() => PriceList, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'price_list_id' })
+  priceList: PriceList;
   @Column() file_name: string;
   @Column({ nullable: true }) file_path: string;
   /** Column mapping: { firstRow, articleCol, nameCol, imageUrlCol, siteUrlCol, descriptionCol, params: [{col, label}] } */
