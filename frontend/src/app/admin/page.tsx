@@ -2052,6 +2052,16 @@ export default function AdminPage() {
                           onClick={() => openTileDataModal(tile)}>
                           {tile.products_count > 0 ? 'Обновить данные' : 'Загрузить Excel'}
                         </button>
+                        {tile.data_file_name && (
+                          <a
+                            href={`${getBackendOrigin()}/catalog/tiles/${tile.id}/data/download`}
+                            className="btn-outline"
+                            style={{ fontSize: 12, padding: '5px 12px', textDecoration: 'none' }}
+                            download
+                          >
+                            ⬇ Скачать файл
+                          </a>
+                        )}
                         <label className="btn-outline" style={{ fontSize: 12, padding: '5px 12px', cursor: 'pointer' }}>
                           Обложка
                             <input type="file" accept="image/*" style={{ display: 'none' }}

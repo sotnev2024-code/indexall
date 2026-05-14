@@ -116,6 +116,10 @@ export class CatalogService implements OnModuleInit {
     return this.tileRepo.find({ order: { sort_order: 'ASC', id: 'ASC' } });
   }
 
+  async getTileById(id: number) {
+    return this.tileRepo.findOne({ where: { id } });
+  }
+
   async createTile(data: Partial<CatalogTile>) {
     return this.tileRepo.save(data);
   }

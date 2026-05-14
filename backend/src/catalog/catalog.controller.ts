@@ -139,6 +139,17 @@ export class CatalogController {
     return this.service.uploadTileData(id, file, mapping);
   }
 
+  /** Download the original Excel file uploaded for a tile */
+  @Get('tiles/:id/data/download')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  async downloadTileData(@Param('id', ParseIntPipe) id: number, @Res() res: Response) {
+    const tile = await this.service.getTileById(id);
+    if (!tile || !tile.data_file_path) {
+      return res.status(404).json({ message: 'Файл не найден' });
+    }
+    return res.download(tile.data_file_path, tile.data_file_name || 'data.xlsx');
+  }
+
   /** Delete tile data (products + file) */
   @Delete('tiles/:id/data')
   @UseGuards(JwtAuthGuard, AdminGuard)
