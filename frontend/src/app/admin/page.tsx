@@ -984,6 +984,18 @@ export default function AdminPage() {
     } catch { toast.error('Файл не найден'); }
   }
 
+  async function handleDownloadTileData(tile: any) {
+    try {
+      const { data } = await catalogApi.downloadTileData(tile.id);
+      const url = URL.createObjectURL(new Blob([data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = tile.data_file_name || `tile-${tile.id}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error('Файл не найден'); }
+  }
+
   const navItems: { key: Tab; label: string }[] = [
     { key: 'users',     label: 'Пользователи' },
     { key: 'conversions', label: 'Конверсии' },
@@ -2053,14 +2065,10 @@ export default function AdminPage() {
                           {tile.products_count > 0 ? 'Обновить данные' : 'Загрузить Excel'}
                         </button>
                         {tile.data_file_name && (
-                          <a
-                            href={`${getBackendOrigin()}/catalog/tiles/${tile.id}/data/download`}
-                            className="btn-outline"
-                            style={{ fontSize: 12, padding: '5px 12px', textDecoration: 'none' }}
-                            download
-                          >
+                          <button className="btn-outline" style={{ fontSize: 12, padding: '5px 12px' }}
+                            onClick={() => handleDownloadTileData(tile)}>
                             ⬇ Скачать файл
-                          </a>
+                          </button>
                         )}
                         <label className="btn-outline" style={{ fontSize: 12, padding: '5px 12px', cursor: 'pointer' }}>
                           Обложка

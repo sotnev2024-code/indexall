@@ -100,6 +100,7 @@ export const catalogApi = {
   deletePriceList: (id: number) => api.delete(`/catalog/pricelists/${id}`),
   setPriceListStatus: (id: number, active: boolean) => api.patch(`/catalog/pricelists/${id}/status`, { active }),
   downloadPriceList: (id: number) => api.get(`/catalog/pricelists/${id}/download`, { responseType: 'blob' }),
+  downloadTileData: (id: number) => api.get(`/catalog/tiles/${id}/data/download`, { responseType: 'blob' }),
   getAnalogs: (productId: number) => api.get(`/catalog/products/${productId}/analogs`),
   getAccessories: (productId: number) => api.get(`/catalog/products/${productId}/accessories`),
   filterProducts: (slug: string, brands?: string[], extraFilters?: Record<string, string[]>) => {
