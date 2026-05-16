@@ -338,6 +338,65 @@ export class PaymentsService {
     return true;
   }
 
+  /**
+   * Activate a free (price = 0) tariff directly — no payment required.
+   * Respects max_activations_per_user: if set to N > 0, the user can only
+   * activate this tariff N times total.
+   */
+  async activateFree(userId: number, planKey: string): Promise<{ expiresAt: Date }> {
+    const tariff = await this.tariffConfigRepo.findOne({ where: { plan_key: planKey, is_active: true } });
+    if (!tariff) throw new Error(`Тариф '${planKey}' не найден или отключён`);
+    if (Number(tariff.price) > 0) throw new Error(`Тариф '${tariff.name}' является платным`);
+
+    // Check per-user activation limit
+    const maxAct = Number(tariff.max_activations_per_user) || 0;
+    if (maxAct > 0) {
+      const usedCount = await this.tariffOpsRepo.count({ where: { userId, plan: planKey } });
+      if (usedCount >= maxAct) {
+        const times = maxAct === 1 ? 'один раз' : `${maxAct} раза`;
+        throw new Error(`Тариф «${tariff.name}» можно активировать только ${times}`);
+      }
+    }
+
+    const user = await this.usersRepo.findOne({ where: { id: userId } });
+    if (!user) throw new Error('Пользователь не найден');
+
+    const now = new Date();
+    const currentExpires = user.subscriptionExpiresAt ? new Date(user.subscriptionExpiresAt) : null;
+    const baseDate = currentExpires && currentExpires > now ? new Date(currentExpires) : new Date(now);
+    const expiresAt = new Date(baseDate);
+
+    if (tariff.duration_unit === 'month') {
+      expiresAt.setMonth(expiresAt.getMonth() + Number(tariff.duration_value));
+    } else {
+      expiresAt.setDate(expiresAt.getDate() + Number(tariff.duration_value));
+    }
+
+    await this.usersRepo.update(userId, {
+      plan: UserPlan.PRO,
+      subscriptionExpiresAt: expiresAt,
+    });
+
+    // Use a UUID so the unique constraint on payment_id is never violated
+    // when the same user activates multiple free tariffs in a row.
+    const { randomUUID } = await import('crypto');
+    await this.tariffOpsRepo.save({
+      userId,
+      operator: 'free',
+      plan: planKey,
+      amount: 0,
+      status: 'active',
+      expiresAt,
+      comment: `Бесплатная активация тарифа «${tariff.name}»`,
+      payment_id: `free_${randomUUID()}`,
+    });
+
+    this.logger.log(
+      `Free tariff activated for user ${userId}: ${planKey}, expires ${expiresAt.toISOString()}`,
+    );
+    return { expiresAt };
+  }
+
   async handleWebhook(event: any): Promise<void> {
     if (event?.event !== 'payment.succeeded') return;
     const payment: YukassaPayment = event.object;

@@ -66,6 +66,13 @@ export class TariffConfig {
   @Column({ nullable: true })
   parent_id: number;
 
+  /** How many times a single user can activate this tariff.
+   *  0 = unlimited. Useful for free/trial tariffs that should only be
+   *  used once per account. Only enforced for free (price=0) tariffs
+   *  via the activate-free endpoint. */
+  @Column({ default: 0 })
+  max_activations_per_user: number;
+
   @UpdateDateColumn()
   updated_at: Date;
 }

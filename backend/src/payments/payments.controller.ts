@@ -72,6 +72,25 @@ export class PaymentsController {
     }
   }
 
+  /**
+   * Activate a free (price = 0) tariff without going through YooKassa.
+   * Returns the updated user so the frontend can refresh the auth store.
+   */
+  @Post('activate-free')
+  @UseGuards(JwtAuthGuard)
+  async activateFree(
+    @Request() req,
+    @Body() body: { planKey: string },
+  ) {
+    if (!body?.planKey) throw new BadRequestException('planKey обязателен');
+    try {
+      const result = await this.paymentsService.activateFree(req.user.userId, body.planKey);
+      return { activated: true, expiresAt: result.expiresAt };
+    } catch (err: any) {
+      throw new BadRequestException(err.message || 'Ошибка активации тарифа');
+    }
+  }
+
   /** Check payment status */
   @Get('status/:id')
   @UseGuards(JwtAuthGuard)

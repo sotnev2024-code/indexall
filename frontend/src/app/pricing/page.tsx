@@ -2,7 +2,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { paymentsApi } from '@/lib/api';
+import { paymentsApi, authApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 import { canActivateTrial, PAYMENTS_ENABLED } from '@/lib/permissions';
 import Header from '@/components/layout/Header';
@@ -91,17 +91,39 @@ function PricingContent() {
 
   async function handleBuy(planKey: string) {
     if (!mounted) return;
-    // Trial tile in the grid routes here — delegate to the trial handler
+    const token = localStorage.getItem('token');
+    if (!token) { router.push('/auth/login?redirect=/pricing'); return; }
+
+    // Legacy trial plan_key — delegate to the existing trial endpoint
     if (planKey === 'trial') {
       handleActivateTrial();
       return;
     }
+
+    // Check if this is a free tariff (price = 0) — activate without YooKassa
+    const tariff = tariffs.find(t => t.plan_key === planKey);
+    if (tariff && Number(tariff.price) === 0) {
+      setLoading(planKey);
+      try {
+        await paymentsApi.activateFree(planKey);
+        // Refresh user data so Header/Profile reflect the new plan immediately
+        const { data: freshUser } = await authApi.me();
+        if (freshUser?.id) setAuth(freshUser, token);
+        toast.success('Тариф активирован!');
+        router.push('/projects');
+      } catch (e: any) {
+        toast.error(e?.response?.data?.message || 'Ошибка активации тарифа');
+      } finally {
+        setLoading(null);
+      }
+      return;
+    }
+
+    // Paid tariff → YooKassa
     if (!PAYMENTS_ENABLED) {
       toast('Оплата временно недоступна. Свяжитесь с поддержкой для активации тарифа.', { duration: 5000 });
       return;
     }
-    const token = localStorage.getItem('token');
-    if (!token) { router.push('/auth/login'); return; }
     setLoading(planKey);
     try {
       const returnUrl = `${window.location.origin}/profile?success=1`;
@@ -150,13 +172,16 @@ function PricingContent() {
   // Paid tariffs for the non-tiles (list) mode
   const paidTariffs = tariffs.filter(t => t.plan_key !== 'trial' && Number(t.price) > 0);
 
-  // In tiles mode: show all tariffs in their admin-configured positions.
-  // Trial tile is visible ONLY if user never activated trial before.
-  // Once used (even if expired) — hide it completely.
+  // In tiles mode: show all active tariffs in their admin-configured positions.
+  // Admin controls visibility via is_active toggle — backend already filters.
+  // Legacy 'trial' plan_key: hide once the user has used it.
   const tileModeTariffs = tariffs.filter(t => {
     if (t.plan_key === 'trial') return !user || !trialUsed;
     return true;
   });
+
+  // Unused var guard (trialUsed is read above and in tileModeTariffs)
+  void trialUsed;
 
   return (
     <div style={{ minHeight: '100vh', background: '#f4f4f4' }}>

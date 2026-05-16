@@ -222,11 +222,13 @@ export const adminApi = {
     duration_value: number; duration_unit: 'day' | 'month';
     description?: string; sort_order?: number; is_active?: boolean;
     width?: number; height?: number; parent_id?: number | null;
+    max_activations_per_user?: number;
   }) => api.post('/admin/tariff-configs', data),
   updateTariffConfig: (id: number, data: {
     name?: string; price?: number; description?: string; is_active?: boolean;
     duration_value?: number; duration_unit?: 'day' | 'month'; sort_order?: number;
     width?: number; height?: number; parent_id?: number | null;
+    max_activations_per_user?: number;
   }) => api.put(`/admin/tariff-configs/${id}`, data),
   deleteTariffConfig: (id: number) => api.delete(`/admin/tariff-configs/${id}`),
   uploadTariffImage: (id: number, fd: FormData) =>
@@ -259,6 +261,9 @@ export const paymentsApi = {
     api.post(`/payments/confirm/${paymentId}`),
   activateTrial: () =>
     api.post('/auth/trial'),
+  /** Activate a free (price = 0) tariff without going through YooKassa. */
+  activateFree: (planKey: string) =>
+    api.post('/payments/activate-free', { planKey }),
   /** Admin only: 1 ₽ test payment that exercises the full integration
    *  pipeline (виджет → webhook → e-mail чек) without extending subscription. */
   adminTestPayment: (returnUrl?: string) =>

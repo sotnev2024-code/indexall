@@ -420,6 +420,7 @@ export default function AdminPage() {
           width: t.width ?? 1,
           height: t.height ?? 3,
           parent_id: parentId,
+          max_activations_per_user: t.max_activations_per_user ?? 0,
         });
         created[t._tempId!] = createdCfg;
         working[i] = { ...createdCfg };
@@ -449,6 +450,7 @@ export default function AdminPage() {
         if (!orig || (orig.width ?? 1) !== (t.width ?? 1)) patch.width = t.width;
         if (!orig || (orig.height ?? 3) !== (t.height ?? 3)) patch.height = t.height;
         if (!orig || (orig.parent_id ?? null) !== (t.parent_id ?? null)) patch.parent_id = t.parent_id ?? null;
+        if (!orig || (orig.max_activations_per_user ?? 0) !== (t.max_activations_per_user ?? 0)) patch.max_activations_per_user = t.max_activations_per_user ?? 0;
         if (Object.keys(patch).length) {
           await adminApi.updateTariffConfig(t.id, patch);
         }

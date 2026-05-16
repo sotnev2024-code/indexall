@@ -29,6 +29,8 @@ export interface TariffTile {
   height: number;
   parent_id?: number | null;
   image_path?: string | null;
+  /** 0 = unlimited; N = max times one user can activate this tariff */
+  max_activations_per_user?: number;
 }
 
 interface Props {
@@ -88,11 +90,12 @@ function SortableTariff({
     attributes, listeners, setNodeRef, transform, transition, isDragging,
   } = useSortable({ id });
 
-  const [editingField, setEditingField] = useState<null | 'name' | 'price' | 'duration'>(null);
+  const [editingField, setEditingField] = useState<null | 'name' | 'price' | 'duration' | 'maxAct'>(null);
   const [localName, setLocalName] = useState(tile.name);
   const [localPrice, setLocalPrice] = useState(String(tile.price));
   const [localDur, setLocalDur] = useState(String(tile.duration_value));
   const [localDurUnit, setLocalDurUnit] = useState(tile.duration_unit || 'day');
+  const [localMaxAct, setLocalMaxAct] = useState(String(tile.max_activations_per_user ?? 0));
 
   const w = tile.width ?? 1;
   const h = tile.height ?? 3;
@@ -230,6 +233,31 @@ function SortableTariff({
             </span>
           )}
         </div>
+        {/* Max activations per user — relevant for free tariffs */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ minWidth: 38, opacity: 0.7 }}>Акт.</span>
+          {editingField === 'maxAct' ? (
+            <input
+              autoFocus type="number" min={0} value={localMaxAct}
+              onChange={e => setLocalMaxAct(e.target.value)}
+              onBlur={() => { onUpdateField(idx, { max_activations_per_user: Number(localMaxAct) }); setEditingField(null); }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') { onUpdateField(idx, { max_activations_per_user: Number(localMaxAct) }); setEditingField(null); }
+                if (e.key === 'Escape') { setLocalMaxAct(String(tile.max_activations_per_user ?? 0)); setEditingField(null); }
+              }}
+              style={{ width: 50, background: 'transparent', color: '#fff', border: '1px solid rgba(255,255,255,0.4)', padding: '0 4px', fontSize: 11, outline: 'none' }}
+            />
+          ) : (
+            <span
+              onDoubleClick={() => { setLocalMaxAct(String(tile.max_activations_per_user ?? 0)); setEditingField('maxAct'); }}
+              style={{ flex: 1, cursor: 'text', opacity: 0.9 }}
+              title="Двойной клик — изменить лимит активаций (0 = неограничено)"
+            >
+              {Number(tile.max_activations_per_user) > 0 ? `макс ${tile.max_activations_per_user}×` : '∞'}
+            </span>
+          )}
+        </div>
+
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span style={{ minWidth: 38, opacity: 0.7 }}>Срок</span>
           {editingField === 'duration' ? (
