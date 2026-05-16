@@ -21,20 +21,6 @@ interface Props {
   onBuy: (planKey: string) => void;
 }
 
-function fmt(n: number) { return Number(n).toLocaleString('ru-RU'); }
-
-function durationLabel(t: TariffConfig): string {
-  const v = Number(t.duration_value);
-  if (t.duration_unit === 'month') {
-    if (v === 1) return '/месяц';
-    if (v === 12) return '/год';
-    return `/${v} мес`;
-  }
-  if (v === 30) return '/месяц';
-  if (v === 365) return '/год';
-  if (v === 7) return '/неделя';
-  return `/${v} дн`;
-}
 
 function getImageUrl(path: string | null | undefined): string | null {
   if (!path) return null;
@@ -133,37 +119,17 @@ export default function PricingTilesGrid({ tariffs, loadingPlanKey, onBuy }: Pro
               </div>
             )}
 
-            {/* Footer: price + buy button */}
-            <div style={{
-              padding: '12px 16px',
-              background: '#111',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 10,
-              flexShrink: 0,
-            }}>
-              <div style={{ lineHeight: 1.2 }}>
-                <span style={{ fontSize: 22, fontWeight: 800, color: '#f5c800' }}>
-                  {fmt(Number(t.price))} ₽
-                </span>
-                <span style={{ fontSize: 12, fontWeight: 500, color: 'rgba(255,255,255,0.7)', marginLeft: 4 }}>
-                  {durationLabel(t)}
-                </span>
-              </div>
+            {/* Invisible click target — price/button are shown inside the image */}
+            {isLoading && (
               <div style={{
-                background: '#f5c800',
-                color: '#1a1a1a',
-                padding: '8px 18px',
-                borderRadius: 8,
-                fontSize: 13,
-                fontWeight: 700,
-                whiteSpace: 'nowrap',
-                flexShrink: 0,
+                position: 'absolute', inset: 0,
+                background: 'rgba(0,0,0,0.45)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 16, fontWeight: 700, color: '#fff',
               }}>
-                {isLoading ? 'Открываю…' : 'Купить →'}
+                Открываю оплату…
               </div>
-            </div>
+            )}
           </button>
         );
       })}
