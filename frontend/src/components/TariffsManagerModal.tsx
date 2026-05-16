@@ -91,6 +91,7 @@ function SortableTariff({
   } = useSortable({ id });
 
   const [editingField, setEditingField] = useState<null | 'name' | 'price' | 'duration' | 'maxAct'>(null);
+  const [editPanelOpen, setEditPanelOpen] = useState(false);
   const [localName, setLocalName] = useState(tile.name);
   const [localPrice, setLocalPrice] = useState(String(tile.price));
   const [localDur, setLocalDur] = useState(String(tile.duration_value));
@@ -182,6 +183,7 @@ function SortableTariff({
         )}
       </div>
 
+      {/* Delete button — visible on hover */}
       <button
         onClick={e => { e.stopPropagation(); if (confirm(`Удалить тариф «${tile.name}»?`)) onRemove(idx); }}
         onPointerDown={e => e.stopPropagation()}
@@ -198,115 +200,100 @@ function SortableTariff({
         ✕
       </button>
 
-      {/* Middle: price + duration editors (visible on hover via tm-tile-meta) */}
-      <div
-        className="tm-tile-meta"
-        onClick={e => e.stopPropagation()}
+      {/* Edit button — always visible */}
+      <button
+        onClick={e => { e.stopPropagation(); setEditPanelOpen(v => !v); }}
         onPointerDown={e => e.stopPropagation()}
+        title="Изменить параметры тарифа"
         style={{
-          position: 'absolute', left: 6, right: 6, top: 36,
-          display: 'flex', flexDirection: 'column', gap: 4,
-          background: 'rgba(0,0,0,0.55)', borderRadius: 4, padding: 6,
-          color: '#fff', fontSize: 11,
+          position: 'absolute', top: 32, right: 6,
+          background: editPanelOpen ? '#f5c800' : 'rgba(255,255,255,0.9)',
+          color: editPanelOpen ? '#1a1a1a' : '#555',
+          border: 'none', borderRadius: 4, padding: '3px 7px',
+          fontSize: 12, fontWeight: 700, cursor: 'pointer',
+          zIndex: 10,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span style={{ minWidth: 38, opacity: 0.7 }}>Цена</span>
-          {editingField === 'price' ? (
-            <input
-              autoFocus type="number" value={localPrice}
-              onChange={e => setLocalPrice(e.target.value)}
-              onBlur={() => { onUpdateField(idx, { price: Number(localPrice) }); setEditingField(null); }}
-              onKeyDown={e => {
-                if (e.key === 'Enter') { onUpdateField(idx, { price: Number(localPrice) }); setEditingField(null); }
-                if (e.key === 'Escape') { setLocalPrice(String(tile.price)); setEditingField(null); }
-              }}
-              style={{ flex: 1, background: 'transparent', color: '#fff', border: '1px solid rgba(255,255,255,0.4)', padding: '0 4px', fontSize: 11, outline: 'none' }}
-            />
-          ) : (
-            <span
-              onDoubleClick={() => { setLocalPrice(String(tile.price)); setEditingField('price'); }}
-              style={{ flex: 1, cursor: 'text', fontWeight: 700, color: '#f5c800' }}
-              title="Двойной клик — изменить"
-            >
-              {fmt(Number(tile.price))} ₽
-            </span>
-          )}
-        </div>
-        {/* Max activations per user — relevant for free tariffs */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span style={{ minWidth: 38, opacity: 0.7 }}>Акт.</span>
-          {editingField === 'maxAct' ? (
-            <input
-              autoFocus type="number" min={0} value={localMaxAct}
-              onChange={e => setLocalMaxAct(e.target.value)}
-              onBlur={() => { onUpdateField(idx, { max_activations_per_user: Number(localMaxAct) }); setEditingField(null); }}
-              onKeyDown={e => {
-                if (e.key === 'Enter') { onUpdateField(idx, { max_activations_per_user: Number(localMaxAct) }); setEditingField(null); }
-                if (e.key === 'Escape') { setLocalMaxAct(String(tile.max_activations_per_user ?? 0)); setEditingField(null); }
-              }}
-              style={{ width: 50, background: 'transparent', color: '#fff', border: '1px solid rgba(255,255,255,0.4)', padding: '0 4px', fontSize: 11, outline: 'none' }}
-            />
-          ) : (
-            <span
-              onDoubleClick={() => { setLocalMaxAct(String(tile.max_activations_per_user ?? 0)); setEditingField('maxAct'); }}
-              style={{ flex: 1, cursor: 'text', opacity: 0.9 }}
-              title="Двойной клик — изменить лимит активаций (0 = неограничено)"
-            >
-              {Number(tile.max_activations_per_user) > 0 ? `макс ${tile.max_activations_per_user}×` : '∞'}
-            </span>
-          )}
-        </div>
+        ✎
+      </button>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span style={{ minWidth: 38, opacity: 0.7 }}>Срок</span>
-          {editingField === 'duration' ? (
-            <>
+      {/* Edit panel — appears when ✎ is clicked */}
+      {editPanelOpen && (
+        <div
+          onClick={e => e.stopPropagation()}
+          onPointerDown={e => e.stopPropagation()}
+          style={{
+            position: 'absolute', left: 0, right: 0, top: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.88)', borderRadius: 10,
+            padding: 12, display: 'flex', flexDirection: 'column', gap: 10,
+            zIndex: 20, overflowY: 'auto',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+            <span style={{ color: '#f5c800', fontWeight: 700, fontSize: 12 }}>Параметры тарифа</span>
+            <button onClick={() => setEditPanelOpen(false)} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>✕</button>
+          </div>
+
+          {/* Name */}
+          <label style={{ color: '#aaa', fontSize: 11 }}>Название
+            <input
+              value={localName}
+              onChange={e => setLocalName(e.target.value)}
+              onBlur={() => onUpdateField(idx, { name: localName })}
+              style={{ display: 'block', width: '100%', marginTop: 3, padding: '5px 8px', borderRadius: 4, border: '1px solid #555', background: '#222', color: '#fff', fontSize: 12, outline: 'none', boxSizing: 'border-box' }}
+            />
+          </label>
+
+          {/* Price */}
+          <label style={{ color: '#aaa', fontSize: 11 }}>Цена (₽)
+            <input
+              type="number" min={0} value={localPrice}
+              onChange={e => setLocalPrice(e.target.value)}
+              onBlur={() => onUpdateField(idx, { price: Number(localPrice) })}
+              style={{ display: 'block', width: '100%', marginTop: 3, padding: '5px 8px', borderRadius: 4, border: '1px solid #555', background: '#222', color: '#f5c800', fontSize: 13, fontWeight: 700, outline: 'none', boxSizing: 'border-box' }}
+            />
+          </label>
+
+          {/* Duration */}
+          <label style={{ color: '#aaa', fontSize: 11 }}>Срок действия
+            <div style={{ display: 'flex', gap: 6, marginTop: 3 }}>
               <input
-                autoFocus type="number" min={1} value={localDur}
+                type="number" min={1} value={localDur}
                 onChange={e => setLocalDur(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    onUpdateField(idx, { duration_value: Number(localDur), duration_unit: localDurUnit });
-                    setEditingField(null);
-                  }
-                  if (e.key === 'Escape') {
-                    setLocalDur(String(tile.duration_value));
-                    setLocalDurUnit(tile.duration_unit);
-                    setEditingField(null);
-                  }
-                }}
-                style={{ width: 50, background: 'transparent', color: '#fff', border: '1px solid rgba(255,255,255,0.4)', padding: '0 4px', fontSize: 11, outline: 'none' }}
+                onBlur={() => onUpdateField(idx, { duration_value: Number(localDur), duration_unit: localDurUnit })}
+                style={{ flex: 1, padding: '5px 8px', borderRadius: 4, border: '1px solid #555', background: '#222', color: '#fff', fontSize: 12, outline: 'none' }}
               />
               <select
                 value={localDurUnit}
-                onChange={e => setLocalDurUnit(e.target.value)}
-                style={{ background: '#222', color: '#fff', border: '1px solid rgba(255,255,255,0.4)', fontSize: 11 }}
+                onChange={e => { setLocalDurUnit(e.target.value); onUpdateField(idx, { duration_value: Number(localDur), duration_unit: e.target.value }); }}
+                style={{ padding: '5px 6px', borderRadius: 4, border: '1px solid #555', background: '#222', color: '#fff', fontSize: 12, outline: 'none' }}
               >
-                <option value="day">дн</option>
-                <option value="month">мес</option>
+                <option value="day">дней</option>
+                <option value="month">месяцев</option>
               </select>
-              <button
-                onClick={() => {
-                  onUpdateField(idx, { duration_value: Number(localDur), duration_unit: localDurUnit });
-                  setEditingField(null);
-                }}
-                style={{ background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 3, padding: '1px 6px', fontSize: 10, cursor: 'pointer', fontWeight: 700 }}
-              >
-                ✓
-              </button>
-            </>
-          ) : (
-            <span
-              onDoubleClick={() => { setLocalDur(String(tile.duration_value)); setLocalDurUnit(tile.duration_unit); setEditingField('duration'); }}
-              style={{ flex: 1, cursor: 'text' }}
-              title="Двойной клик — изменить"
-            >
-              {tile.duration_value} {tile.duration_unit === 'month' ? 'мес' : 'дн'}
-            </span>
-          )}
+            </div>
+          </label>
+
+          {/* Max activations */}
+          <label style={{ color: '#aaa', fontSize: 11 }}>
+            Лимит активаций на пользователя
+            <div style={{ color: '#666', fontSize: 10, marginBottom: 3 }}>0 = без ограничений</div>
+            <input
+              type="number" min={0} value={localMaxAct}
+              onChange={e => setLocalMaxAct(e.target.value)}
+              onBlur={() => onUpdateField(idx, { max_activations_per_user: Number(localMaxAct) })}
+              style={{ display: 'block', width: '100%', padding: '5px 8px', borderRadius: 4, border: '1px solid #555', background: '#222', color: '#fff', fontSize: 12, outline: 'none', boxSizing: 'border-box' }}
+            />
+          </label>
+
+          <button
+            onClick={() => setEditPanelOpen(false)}
+            style={{ marginTop: 'auto', padding: '7px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 6, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}
+          >
+            Готово
+          </button>
         </div>
-      </div>
+      )}
 
       {/* Bottom toolbar */}
       <div
