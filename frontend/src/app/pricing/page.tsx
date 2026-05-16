@@ -151,9 +151,10 @@ function PricingContent() {
   const paidTariffs = tariffs.filter(t => t.plan_key !== 'trial' && Number(t.price) > 0);
 
   // In tiles mode: show all tariffs in their admin-configured positions.
-  // Hide the trial tile only if trial was already used and user is not currently on trial.
+  // Trial tile is visible ONLY if user never activated trial before.
+  // Once used (even if expired) — hide it completely.
   const tileModeTariffs = tariffs.filter(t => {
-    if (t.plan_key === 'trial') return showTrialBtn || isCurrentTrial;
+    if (t.plan_key === 'trial') return !user || !trialUsed;
     return true;
   });
 
