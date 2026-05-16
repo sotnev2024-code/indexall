@@ -38,22 +38,25 @@ export default function PricingTilesGrid({ tariffs, loadingPlanKey, onBuy }: Pro
   const sorted = [...tariffs].sort((a, b) =>
     (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || a.id - b.id);
 
+  // Calculate actual columns needed so tiles are centered
+  // (sum of all widths, capped at 4 — mirrors the admin 4-col grid)
+  const totalSpan = sorted.reduce((s, t) => s + Math.max(1, Math.min(4, Number(t.width) || 1)), 0);
+  const colCount = Math.min(4, totalSpan) || 1;
+
   return (
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(4, 1fr)',
-        gridAutoRows: '160px',
+        gridTemplateColumns: `repeat(${colCount}, minmax(0, 320px))`,
+        gridAutoRows: 'auto',
         gridAutoFlow: 'dense',
         gap: 14,
-        maxWidth: 1100,
         margin: '0 auto',
-        width: '100%',
+        justifyContent: 'center',
       }}
     >
       {sorted.map(t => {
-        const w = Math.max(1, Math.min(4, Number(t.width) || 1));
-        const h = Math.max(1, Math.min(6, Number(t.height) || 3));
+        const w = Math.max(1, Math.min(colCount, Number(t.width) || 1));
         const img = getImageUrl(t.image_path);
         const isLoading = loadingPlanKey === t.plan_key;
 
@@ -64,7 +67,6 @@ export default function PricingTilesGrid({ tariffs, loadingPlanKey, onBuy }: Pro
             disabled={isLoading}
             style={{
               gridColumn: `span ${w}`,
-              gridRow: `span ${h}`,
               border: 'none',
               borderRadius: 14,
               padding: 0,
@@ -75,8 +77,7 @@ export default function PricingTilesGrid({ tariffs, loadingPlanKey, onBuy }: Pro
               background: '#1a1a1a',
               color: '#fff',
               boxShadow: '0 4px 20px rgba(0,0,0,0.14)',
-              display: 'flex',
-              flexDirection: 'column',
+              display: 'block',
               transition: 'transform 0.15s ease, box-shadow 0.15s ease',
             }}
             onMouseEnter={e => {
@@ -88,43 +89,36 @@ export default function PricingTilesGrid({ tariffs, loadingPlanKey, onBuy }: Pro
               e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.14)';
             }}
           >
-            {/* Image body — fills all space above the footer */}
             {img ? (
-              <div style={{ flex: 1, overflow: 'hidden' }}>
-                <img
-                  src={img}
-                  alt={t.name}
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'cover',
-                    objectPosition: 'center top',
-                    display: 'block',
-                  }}
-                />
-              </div>
+              /* Full image — height is natural (no cropping, no empty space) */
+              <img
+                src={img}
+                alt={t.name}
+                style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 14 }}
+              />
             ) : (
               /* Fallback when no image uploaded */
               <div style={{
-                flex: 1,
+                minHeight: 320,
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                padding: '20px 16px',
+                padding: '24px 20px',
                 gap: 8,
               }}>
                 <div style={{ fontSize: 20, fontWeight: 800, textAlign: 'center' }}>{t.name}</div>
               </div>
             )}
 
-            {/* Invisible click target — price/button are shown inside the image */}
+            {/* Loading overlay */}
             {isLoading && (
               <div style={{
                 position: 'absolute', inset: 0,
                 background: 'rgba(0,0,0,0.45)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: 16, fontWeight: 700, color: '#fff',
+                borderRadius: 14,
               }}>
                 Открываю оплату…
               </div>
