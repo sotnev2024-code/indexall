@@ -39,31 +39,31 @@ function durationLabel(t: TariffConfig): string {
 function getImageUrl(path: string | null | undefined): string | null {
   if (!path) return null;
   const filename = String(path).split(/[\\/]/).pop();
-  // Static assets are served from /api/uploads/ (NEXT_PUBLIC_API_URL already
-  // includes the /api segment), so this matches the catalog tile pattern.
   return `${process.env.NEXT_PUBLIC_API_URL}/uploads/${filename}`;
 }
 
 /**
- * Tile grid for pricing/paywall — mirrors the admin tile layout
- * (`width × height`, `parent_id` for sub-blocks). Each tile is clickable
- * and triggers the YooKassa buy flow for its `plan_key` directly.
+ * Tariff tile grid for the public pricing page.
+ * When an admin uploads a cover image, that image fills the tile body (no cropping,
+ * objectFit: contain). The only code-generated overlay is the price/button footer
+ * at the very bottom — all other text (plan name, features) lives inside the image.
  */
 export default function PricingTilesGrid({ tariffs, loadingPlanKey, onBuy }: Props) {
-  // Sort by admin's sort_order so the visual order on the public site
-  // mirrors the tile manager exactly.
   const sorted = [...tariffs].sort((a, b) =>
     (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || a.id - b.id);
+
+  // Determine the number of columns dynamically so tiles fill the space nicely
+  const colCount = Math.min(4, Math.max(1, sorted.length));
 
   return (
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(4, 1fr)',
-        gridAutoRows: '120px',
+        gridTemplateColumns: `repeat(${colCount}, 1fr)`,
+        gridAutoRows: '160px',
         gridAutoFlow: 'dense',
-        gap: 10,
-        maxWidth: 980,
+        gap: 14,
+        maxWidth: Math.min(colCount * 320, 1100),
         margin: '0 auto',
       }}
     >
@@ -72,7 +72,6 @@ export default function PricingTilesGrid({ tariffs, loadingPlanKey, onBuy }: Pro
         const h = Math.max(1, Math.min(6, Number(t.height) || 3));
         const img = getImageUrl(t.image_path);
         const isLoading = loadingPlanKey === t.plan_key;
-        const isChild = t.parent_id != null;
 
         return (
           <button
@@ -83,51 +82,94 @@ export default function PricingTilesGrid({ tariffs, loadingPlanKey, onBuy }: Pro
               gridColumn: `span ${w}`,
               gridRow: `span ${h}`,
               border: 'none',
-              borderRadius: 12,
-              padding: 16,
+              borderRadius: 14,
+              padding: 0,
               textAlign: 'left',
               cursor: isLoading ? 'wait' : 'pointer',
               position: 'relative',
               overflow: 'hidden',
-              background: img
-                ? `linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.55) 100%), url("${img}") center/cover`
-                : '#1a1a1a',
+              background: '#1a1a1a',
               color: '#fff',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-              outline: isChild ? '2px dashed rgba(245,200,0,0.7)' : 'none',
-              outlineOffset: -3,
+              boxShadow: '0 4px 20px rgba(0,0,0,0.14)',
               display: 'flex',
               flexDirection: 'column',
-              justifyContent: 'space-between',
               transition: 'transform 0.15s ease, box-shadow 0.15s ease',
             }}
-            onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 18px rgba(0,0,0,0.18)'; }}
-            onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)'; }}
+            onMouseEnter={e => {
+              e.currentTarget.style.transform = 'translateY(-3px)';
+              e.currentTarget.style.boxShadow = '0 10px 28px rgba(0,0,0,0.22)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.transform = '';
+              e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.14)';
+            }}
           >
-            <div style={{ fontSize: w >= 2 || h >= 3 ? 18 : 15, fontWeight: 800, textShadow: '0 1px 3px rgba(0,0,0,0.6)' }}>
-              {t.name}
-            </div>
-            <div>
-              <div style={{ fontSize: w >= 2 || h >= 3 ? 28 : 20, fontWeight: 800, color: '#f5c800', textShadow: '0 1px 3px rgba(0,0,0,0.6)' }}>
-                {fmt(Number(t.price))} ₽
-                <span style={{ fontSize: 12, fontWeight: 500, color: '#fff', marginLeft: 4 }}>
+            {/* Image body — fills all space above the footer */}
+            {img ? (
+              <div style={{ flex: 1, overflow: 'hidden', background: '#fff' }}>
+                <img
+                  src={img}
+                  alt={t.name}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'contain',
+                    display: 'block',
+                  }}
+                />
+              </div>
+            ) : (
+              /* Fallback when no image uploaded */
+              <div style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '20px 16px',
+                gap: 8,
+              }}>
+                <div style={{ fontSize: 20, fontWeight: 800, textAlign: 'center' }}>{t.name}</div>
+              </div>
+            )}
+
+            {/* Footer: price + buy button */}
+            <div style={{
+              padding: '12px 16px',
+              background: '#111',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+              flexShrink: 0,
+            }}>
+              <div style={{ lineHeight: 1.2 }}>
+                <span style={{ fontSize: 22, fontWeight: 800, color: '#f5c800' }}>
+                  {fmt(Number(t.price))} ₽
+                </span>
+                <span style={{ fontSize: 12, fontWeight: 500, color: 'rgba(255,255,255,0.7)', marginLeft: 4 }}>
                   {durationLabel(t)}
                 </span>
               </div>
               <div style={{
-                marginTop: 8, display: 'inline-block',
-                background: '#f5c800', color: '#1a1a1a',
-                padding: '6px 12px', borderRadius: 6,
-                fontSize: 12, fontWeight: 700,
+                background: '#f5c800',
+                color: '#1a1a1a',
+                padding: '8px 18px',
+                borderRadius: 8,
+                fontSize: 13,
+                fontWeight: 700,
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
               }}>
-                {isLoading ? 'Открываю оплату…' : 'Купить →'}
+                {isLoading ? 'Открываю…' : 'Купить →'}
               </div>
             </div>
           </button>
         );
       })}
+
       {sorted.length === 0 && (
-        <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 40, color: '#6b7280' }}>
+        <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 60, color: '#6b7280', fontSize: 14 }}>
           Тарифы пока не настроены — обратитесь к администратору.
         </div>
       )}

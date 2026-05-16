@@ -150,44 +150,45 @@ function PricingContent() {
     <div style={{ minHeight: '100vh', background: '#f4f4f4' }}>
       <Header breadcrumb="Тарифы" />
 
-      <main style={{ padding: '72px 24px 48px', maxWidth: 880, margin: '0 auto', width: '100%' }}>
+      <main style={{ padding: '72px 24px 48px', maxWidth: 1200, margin: '0 auto', width: '100%' }}>
         <h1 style={{ textAlign: 'center', fontSize: 28, fontWeight: 800, marginBottom: 40, letterSpacing: -0.5 }}>
           Выберите тариф
         </h1>
 
         {tilesMode ? (
           <>
-            <PricingTilesGrid
-              tariffs={paidTariffs as any}
-              loadingPlanKey={loading}
-              onBuy={handleBuy}
-            />
-            {(showTrialBtn || isCurrentTrial) && (
-              <div style={{ maxWidth: 380, margin: '24px auto 0', background: '#fff', borderRadius: 14, padding: 24, border: isCurrentTrial ? '2px solid #f5c800' : '1px solid #e5e7eb', textAlign: 'center' }}>
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <PricingTilesGrid
+                tariffs={paidTariffs as any}
+                loadingPlanKey={loading}
+                onBuy={handleBuy}
+              />
+            </div>
+            {/* Trial block — only show if trial is actually available (not yet used) */}
+            {showTrialBtn && !isCurrentTrial && (
+              <div style={{ maxWidth: 380, margin: '28px auto 0', background: '#fff', borderRadius: 14, padding: 24, border: '1px solid #e5e7eb', textAlign: 'center', boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 8 }}>
                   <h3 style={{ fontSize: 18, fontWeight: 800 }}>Пробный период</h3>
                   <span style={{ background: '#f5c800', color: '#1a1a1a', padding: '3px 10px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>7 дней</span>
                 </div>
-                {isCurrentTrial ? (
-                  <>
-                    <div style={{ fontWeight: 700, fontSize: 13, color: '#059669' }}>✓ Trial активен</div>
-                    {expiresAt && (
-                      <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>
-                        До {new Date(expiresAt).toLocaleDateString('ru-RU')}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 14 }}>7 дней бесплатного Pro</p>
-                    <button
-                      style={{ width: '100%', padding: '12px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}
-                      onClick={handleActivateTrial}
-                      disabled={loading === 'trial'}
-                    >
-                      {loading === 'trial' ? 'Активация…' : 'Активировать пробный'}
-                    </button>
-                  </>
+                <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 14 }}>7 дней бесплатного Pro</p>
+                <button
+                  style={{ width: '100%', padding: '12px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}
+                  onClick={handleActivateTrial}
+                  disabled={loading === 'trial'}
+                >
+                  {loading === 'trial' ? 'Активация…' : 'Активировать пробный'}
+                </button>
+              </div>
+            )}
+            {/* If currently on trial — show status */}
+            {isCurrentTrial && (
+              <div style={{ maxWidth: 380, margin: '28px auto 0', background: '#f0fdf4', borderRadius: 14, padding: 20, border: '2px solid #f5c800', textAlign: 'center' }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: '#059669' }}>✓ Пробный период активен</div>
+                {expiresAt && (
+                  <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                    До {new Date(expiresAt).toLocaleDateString('ru-RU')}
+                  </div>
                 )}
               </div>
             )}
