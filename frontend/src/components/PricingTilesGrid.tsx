@@ -38,19 +38,17 @@ export default function PricingTilesGrid({ tariffs, loadingPlanKey, onBuy }: Pro
   const sorted = [...tariffs].sort((a, b) =>
     (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || a.id - b.id);
 
-  // Determine the number of columns dynamically so tiles fill the space nicely
-  const colCount = Math.min(4, Math.max(1, sorted.length));
-
   return (
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: `repeat(${colCount}, 1fr)`,
+        gridTemplateColumns: 'repeat(4, 1fr)',
         gridAutoRows: '160px',
         gridAutoFlow: 'dense',
         gap: 14,
-        maxWidth: Math.min(colCount * 320, 1100),
+        maxWidth: 1100,
         margin: '0 auto',
+        width: '100%',
       }}
     >
       {sorted.map(t => {
