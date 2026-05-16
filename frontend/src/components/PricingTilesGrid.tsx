@@ -92,14 +92,15 @@ export default function PricingTilesGrid({ tariffs, loadingPlanKey, onBuy }: Pro
           >
             {/* Image body — fills all space above the footer */}
             {img ? (
-              <div style={{ flex: 1, overflow: 'hidden', background: '#fff' }}>
+              <div style={{ flex: 1, overflow: 'hidden' }}>
                 <img
                   src={img}
                   alt={t.name}
                   style={{
                     width: '100%',
                     height: '100%',
-                    objectFit: 'contain',
+                    objectFit: 'cover',
+                    objectPosition: 'center top',
                     display: 'block',
                   }}
                 />
