@@ -130,11 +130,12 @@ export class AuthController {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);
 
-    await this.usersRepo.update(user.id, {
-      plan: UserPlan.TRIAL,
-      trialUsed: true,
-      subscriptionExpiresAt: expiresAt,
-    });
+    // Never downgrade admin plan
+    const trialPatch: any = { trialUsed: true, subscriptionExpiresAt: expiresAt };
+    if (user.plan !== UserPlan.ADMIN) {
+      trialPatch.plan = UserPlan.TRIAL;
+    }
+    await this.usersRepo.update(user.id, trialPatch);
 
     const updated = await this.usersRepo.findOne({ where: { id: user.id } });
     const { password, ...safe } = updated;

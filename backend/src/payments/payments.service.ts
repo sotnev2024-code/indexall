@@ -305,10 +305,12 @@ export class PaymentsService {
       label = '1 мес (legacy)';
     }
 
-    await this.usersRepo.update(userId, {
-      plan: UserPlan.PRO,
-      subscriptionExpiresAt: expiresAt,
-    });
+    // Never downgrade admin plan — just extend the subscription date.
+    const planPatch: Partial<User> = { subscriptionExpiresAt: expiresAt };
+    if (user.plan !== UserPlan.ADMIN) {
+      planPatch.plan = UserPlan.PRO;
+    }
+    await this.usersRepo.update(userId, planPatch);
 
     const planKey = (payment.metadata?.planKey as string) || planType;
 
@@ -372,10 +374,12 @@ export class PaymentsService {
       expiresAt.setDate(expiresAt.getDate() + Number(tariff.duration_value));
     }
 
-    await this.usersRepo.update(userId, {
-      plan: UserPlan.PRO,
-      subscriptionExpiresAt: expiresAt,
-    });
+    // Never downgrade admin plan — just extend the subscription date.
+    const planUpdate: Partial<User> = { subscriptionExpiresAt: expiresAt };
+    if (user.plan !== UserPlan.ADMIN) {
+      planUpdate.plan = UserPlan.PRO;
+    }
+    await this.usersRepo.update(userId, planUpdate);
 
     // Use a UUID so the unique constraint on payment_id is never violated
     // when the same user activates multiple free tariffs in a row.
