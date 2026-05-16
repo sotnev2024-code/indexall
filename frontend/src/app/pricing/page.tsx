@@ -74,6 +74,7 @@ function PricingContent() {
   const [loading, setLoading] = useState<string | null>(null);
   const [tariffs, setTariffs] = useState<TariffConfig[]>([]);
   const [tilesMode, setTilesMode] = useState(false);
+  const [myActivations, setMyActivations] = useState<Record<string, number>>({});
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -88,6 +89,15 @@ function PricingContent() {
       .then(({ data }) => setTilesMode(!!data?.pricingTilesEnabled))
       .catch(() => setTilesMode(false));
   }, []);
+
+  // Load per-user activation counts when user is logged in
+  useEffect(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    if (!token || !user) return;
+    paymentsApi.getMyActivations()
+      .then(({ data }) => setMyActivations(data || {}))
+      .catch(() => {});
+  }, [user]);
 
   async function handleBuy(planKey: string) {
     if (!mounted) return;
@@ -106,9 +116,13 @@ function PricingContent() {
       setLoading(planKey);
       try {
         await paymentsApi.activateFree(planKey);
-        // Refresh user data so Header/Profile reflect the new plan immediately
-        const { data: freshUser } = await authApi.me();
+        // Refresh user data and activation counts
+        const [{ data: freshUser }, { data: acts }] = await Promise.all([
+          authApi.me(),
+          paymentsApi.getMyActivations(),
+        ]);
         if (freshUser?.id) setAuth(freshUser, token);
+        setMyActivations(acts || {});
         toast.success('Тариф активирован!');
         router.push('/projects');
       } catch (e: any) {
@@ -173,15 +187,18 @@ function PricingContent() {
   const paidTariffs = tariffs.filter(t => t.plan_key !== 'trial' && Number(t.price) > 0);
 
   // In tiles mode: show all active tariffs in their admin-configured positions.
-  // Admin controls visibility via is_active toggle — backend already filters.
-  // Legacy 'trial' plan_key: hide once the user has used it.
+  // Hide a tile if the user has reached its max_activations_per_user limit.
   const tileModeTariffs = tariffs.filter(t => {
+    // Legacy trial plan: hide once used
     if (t.plan_key === 'trial') return !user || !trialUsed;
+    // Generic limit: hide if user exhausted allowed activations
+    const maxAct = Number((t as any).max_activations_per_user) || 0;
+    if (maxAct > 0 && user) {
+      const used = myActivations[t.plan_key] || 0;
+      if (used >= maxAct) return false;
+    }
     return true;
   });
-
-  // Unused var guard (trialUsed is read above and in tileModeTariffs)
-  void trialUsed;
 
   return (
     <div style={{ minHeight: '100vh', background: '#f4f4f4' }}>

@@ -73,6 +73,18 @@ export class PaymentsController {
   }
 
   /**
+   * Returns activation counts per plan_key for the current user.
+   * Frontend uses this to hide tiles the user has already maxed out.
+   * { planKey: count, ... }
+   */
+  @Get('my-activations')
+  @UseGuards(JwtAuthGuard)
+  async myActivations(@Request() req) {
+    const ops = await this.paymentsService.getUserActivationCounts(req.user.userId);
+    return ops;
+  }
+
+  /**
    * Activate a free (price = 0) tariff without going through YooKassa.
    * Returns the updated user so the frontend can refresh the auth store.
    */

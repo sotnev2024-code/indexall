@@ -340,6 +340,16 @@ export class PaymentsService {
     return true;
   }
 
+  /** Returns a map of planKey → activation count for the given user. */
+  async getUserActivationCounts(userId: number): Promise<Record<string, number>> {
+    const ops = await this.tariffOpsRepo.find({ where: { userId } });
+    const counts: Record<string, number> = {};
+    for (const op of ops) {
+      counts[op.plan] = (counts[op.plan] || 0) + 1;
+    }
+    return counts;
+  }
+
   /**
    * Activate a free (price = 0) tariff directly — no payment required.
    * Respects max_activations_per_user: if set to N > 0, the user can only

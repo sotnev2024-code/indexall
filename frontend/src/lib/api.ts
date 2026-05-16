@@ -264,6 +264,9 @@ export const paymentsApi = {
   /** Activate a free (price = 0) tariff without going through YooKassa. */
   activateFree: (planKey: string) =>
     api.post('/payments/activate-free', { planKey }),
+  /** Returns { planKey: activationCount } for the current user. */
+  getMyActivations: () =>
+    api.get<Record<string, number>>('/payments/my-activations'),
   /** Admin only: 1 ₽ test payment that exercises the full integration
    *  pipeline (виджет → webhook → e-mail чек) without extending subscription. */
   adminTestPayment: (returnUrl?: string) =>

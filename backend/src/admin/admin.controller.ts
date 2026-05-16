@@ -452,6 +452,7 @@ export class AdminController implements OnModuleInit {
     width?: number;
     height?: number;
     parent_id?: number | null;
+    max_activations_per_user?: number;
   }) {
     if (!body.name || !body.name.trim()) {
       throw new BadRequestException('Название обязательно');
@@ -497,6 +498,7 @@ export class AdminController implements OnModuleInit {
       width: body.width != null ? Math.max(1, Math.min(2, Math.floor(Number(body.width)))) : 1,
       height: body.height != null ? Math.max(1, Math.min(4, Math.floor(Number(body.height)))) : 3,
       parent_id: body.parent_id ?? null,
+      max_activations_per_user: body.max_activations_per_user != null ? Math.max(0, Math.floor(Number(body.max_activations_per_user))) : 0,
     }));
     return created;
   }
@@ -516,6 +518,7 @@ export class AdminController implements OnModuleInit {
       width?: number;
       height?: number;
       parent_id?: number | null;
+      max_activations_per_user?: number;
     },
   ) {
     if (body.duration_unit && !['day', 'month'].includes(body.duration_unit)) {
@@ -541,6 +544,7 @@ export class AdminController implements OnModuleInit {
       ...(body.width !== undefined && { width: Math.max(1, Math.min(2, Math.floor(Number(body.width)))) }),
       ...(body.height !== undefined && { height: Math.max(1, Math.min(4, Math.floor(Number(body.height)))) }),
       ...(body.parent_id !== undefined && { parent_id: body.parent_id }),
+      ...(body.max_activations_per_user !== undefined && { max_activations_per_user: Math.max(0, Math.floor(Number(body.max_activations_per_user))) }),
     });
     return this.tariffConfigRepo.findOne({ where: { id } });
   }
