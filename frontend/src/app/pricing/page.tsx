@@ -91,6 +91,11 @@ function PricingContent() {
 
   async function handleBuy(planKey: string) {
     if (!mounted) return;
+    // Trial tile in the grid routes here — delegate to the trial handler
+    if (planKey === 'trial') {
+      handleActivateTrial();
+      return;
+    }
     if (!PAYMENTS_ENABLED) {
       toast('Оплата временно недоступна. Свяжитесь с поддержкой для активации тарифа.', { duration: 5000 });
       return;
@@ -142,9 +147,15 @@ function PricingContent() {
   const trialAvailable = canActivateTrial(user as any);
   const showTrialBtn = !user || trialAvailable;
 
-  // Paid tariffs (price > 0) come from the admin-managed tariff_configs.
-  // Trial is a separate UI block — it never goes through createPayment.
+  // Paid tariffs for the non-tiles (list) mode
   const paidTariffs = tariffs.filter(t => t.plan_key !== 'trial' && Number(t.price) > 0);
+
+  // In tiles mode: show all tariffs in their admin-configured positions.
+  // Hide the trial tile only if trial was already used and user is not currently on trial.
+  const tileModeTariffs = tariffs.filter(t => {
+    if (t.plan_key === 'trial') return showTrialBtn || isCurrentTrial;
+    return true;
+  });
 
   return (
     <div style={{ minHeight: '100vh', background: '#f4f4f4' }}>
@@ -156,43 +167,14 @@ function PricingContent() {
         </h1>
 
         {tilesMode ? (
-          <>
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <PricingTilesGrid
-                tariffs={paidTariffs as any}
-                loadingPlanKey={loading}
-                onBuy={handleBuy}
-              />
-            </div>
-            {/* Trial block — only show if trial is actually available (not yet used) */}
-            {showTrialBtn && !isCurrentTrial && (
-              <div style={{ maxWidth: 380, margin: '28px auto 0', background: '#fff', borderRadius: 14, padding: 24, border: '1px solid #e5e7eb', textAlign: 'center', boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 8 }}>
-                  <h3 style={{ fontSize: 18, fontWeight: 800 }}>Пробный период</h3>
-                  <span style={{ background: '#f5c800', color: '#1a1a1a', padding: '3px 10px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>7 дней</span>
-                </div>
-                <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 14 }}>7 дней бесплатного Pro</p>
-                <button
-                  style={{ width: '100%', padding: '12px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}
-                  onClick={handleActivateTrial}
-                  disabled={loading === 'trial'}
-                >
-                  {loading === 'trial' ? 'Активация…' : 'Активировать пробный'}
-                </button>
-              </div>
-            )}
-            {/* If currently on trial — show status */}
-            {isCurrentTrial && (
-              <div style={{ maxWidth: 380, margin: '28px auto 0', background: '#f0fdf4', borderRadius: 14, padding: 20, border: '2px solid #f5c800', textAlign: 'center' }}>
-                <div style={{ fontWeight: 700, fontSize: 14, color: '#059669' }}>✓ Пробный период активен</div>
-                {expiresAt && (
-                  <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                    До {new Date(expiresAt).toLocaleDateString('ru-RU')}
-                  </div>
-                )}
-              </div>
-            )}
-          </>
+          /* Tiles mode: all tariffs (including trial) sit in their admin positions */
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <PricingTilesGrid
+              tariffs={tileModeTariffs as any}
+              loadingPlanKey={loading}
+              onBuy={handleBuy}
+            />
+          </div>
         ) : (
         <div style={{ display: 'grid', gridTemplateColumns: showTrialBtn || isCurrentTrial ? '1fr 1fr' : '1fr', gap: 20, maxWidth: showTrialBtn || isCurrentTrial ? 760 : 380, margin: '0 auto' }}>
 
