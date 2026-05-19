@@ -4,10 +4,12 @@ import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { LoginDto, RegisterDto, AuthPayload, JwtToken } from '../shared/types';
-import { User } from '../users/user.entity';
+import { User, UserPlan } from '../users/user.entity';
 import { EmailService } from './email.service';
+import { TariffConfig } from '../admin/tariff-config.entity';
+import { TariffOperation } from '../admin/tariff-operation.entity';
 import * as bcrypt from 'bcrypt';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 
 @Injectable()
 export class AuthService {
@@ -18,6 +20,8 @@ export class AuthService {
     private jwtService: JwtService,
     private emailService: EmailService,
     @InjectRepository(User) private usersRepo: Repository<User>,
+    @InjectRepository(TariffConfig) private tariffConfigRepo: Repository<TariffConfig>,
+    @InjectRepository(TariffOperation) private tariffOpsRepo: Repository<TariffOperation>,
   ) {}
 
   async validateUser(email: string, password: string): Promise<any> {
@@ -79,8 +83,8 @@ export class AuthService {
     return { message: 'Письмо с подтверждением отправлено на ' + registerDto.email };
   }
 
-  /** Confirm email by token → return JWT */
-  async confirmEmail(token: string): Promise<JwtToken> {
+  /** Confirm email by token → auto-activate free welcome tariff → return JWT */
+  async confirmEmail(token: string): Promise<JwtToken & { trialActivated?: boolean; trialName?: string; trialDays?: number }> {
     const user = await this.usersRepo.findOne({ where: { emailVerificationToken: token } });
 
     if (!user) {
@@ -96,9 +100,63 @@ export class AuthService {
       emailVerificationExpires: null,
     });
 
+    // Auto-activate the first active free (price=0) tariff for new users
+    let trialActivated = false;
+    let trialName = '';
+    let trialDays = 0;
+
+    if (!user.trialUsed && user.plan !== UserPlan.ADMIN) {
+      const freeTariff = await this.tariffConfigRepo.findOne({
+        where: { is_active: true },
+        order: { sort_order: 'ASC', id: 'ASC' },
+      }).then(async () => {
+        // Find first active tariff with price = 0
+        const all = await this.tariffConfigRepo.find({ where: { is_active: true }, order: { sort_order: 'ASC' } });
+        return all.find(t => Number(t.price) === 0) || null;
+      });
+
+      if (freeTariff) {
+        const now = new Date();
+        const expiresAt = new Date(now);
+        if (freeTariff.duration_unit === 'month') {
+          expiresAt.setMonth(expiresAt.getMonth() + Number(freeTariff.duration_value));
+        } else {
+          expiresAt.setDate(expiresAt.getDate() + Number(freeTariff.duration_value));
+        }
+
+        await this.usersRepo.update(user.id, {
+          plan: UserPlan.PRO,
+          trialUsed: true,
+          subscriptionExpiresAt: expiresAt,
+        });
+
+        try {
+          await this.tariffOpsRepo.save({
+            userId: user.id,
+            operator: 'auto',
+            plan: freeTariff.plan_key,
+            amount: 0,
+            status: 'active',
+            expiresAt,
+            comment: `Автоматическая активация при регистрации: ${freeTariff.name}`,
+            payment_id: `auto_${randomUUID()}`,
+          });
+        } catch {}
+
+        trialActivated = true;
+        trialName = freeTariff.name;
+        trialDays = freeTariff.duration_unit === 'month'
+          ? Number(freeTariff.duration_value) * 30
+          : Number(freeTariff.duration_value);
+
+        this.logger.log(`Auto-activated free tariff '${freeTariff.name}' for new user ${user.id}`);
+      }
+    }
+
     const updated = await this.usersRepo.findOne({ where: { id: user.id } });
     const { password, ...safe } = updated;
-    return this.login(safe);
+    const jwt = await this.login(safe);
+    return { ...jwt, trialActivated, trialName, trialDays };
   }
 
   /** Resend confirmation email */

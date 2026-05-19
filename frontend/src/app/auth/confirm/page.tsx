@@ -28,9 +28,13 @@ function ConfirmContent() {
         if (res.data.accessToken) {
           const jwt = res.data.accessToken;
           localStorage.setItem('token', jwt);
-          // Hydrate user into the store so any stale `user` from a previous
-          // session is overwritten — otherwise the profile page keeps the old
-          // plan until manual logout/login.
+          // Store welcome modal info if free tariff was auto-activated
+          if (res.data.trialActivated) {
+            localStorage.setItem('welcomeModal', JSON.stringify({
+              name: res.data.trialName || 'Пробный',
+              days: res.data.trialDays || 14,
+            }));
+          }
           try {
             const { data: me } = await axios.get(`${API_URL}/auth/me`, {
               headers: { Authorization: `Bearer ${jwt}` },
@@ -69,7 +73,11 @@ function ConfirmContent() {
             </svg>
           </div>
           <h2 className="text-xl font-bold mb-2">Email подтверждён!</h2>
-          <p className="text-sm text-gray-500">Перенаправляем вас в раздел проектов…</p>
+          <p className="text-sm text-gray-500 mb-3">Добро пожаловать в INDEXALL!</p>
+          <div style={{ background: '#fffbe6', border: '1px solid #f5c800', borderRadius: 10, padding: '12px 16px', marginBottom: 12, textAlign: 'left' }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>🎁 Вам подключён бесплатный тариф</div>
+            <div style={{ fontSize: 13, color: '#555' }}>Перенаправляем в раздел проектов…</div>
+          </div>
         </>
       )}
 

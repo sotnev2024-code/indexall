@@ -9,7 +9,7 @@ import TilesManagerModal from '@/components/TilesManagerModal';
 import TariffsManagerModal, { TariffTile } from '@/components/TariffsManagerModal';
 import AdminEtmLookup from '@/components/AdminEtmLookup';
 
-type Tab = 'pricelists' | 'base' | 'templates' | 'users' | 'conversions' | 'tariffs' | 'stats' | 'tiles' | 'accessories';
+type Tab = 'pricelists' | 'base' | 'templates' | 'users' | 'conversions' | 'tariffs' | 'stats' | 'tiles' | 'accessories' | 'activity';
 
 function getBackendOrigin(): string {
   try {
@@ -146,6 +146,16 @@ export default function AdminPage() {
   const [tileFilterCols, setTileFilterCols] = useState<{ col: string; label: string }[]>([]);
   const [tileUploading, setTileUploading] = useState(false);
 
+  // ── Activity log state ────────────────────────────────────────
+  const [activityLogs, setActivityLogs] = useState<any[]>([]);
+  const [activityTotal, setActivityTotal] = useState(0);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityFilter, setActivityFilter] = useState({ action: '', userId: '' });
+
+  // ── User projects viewer ──────────────────────────────────────
+  const [viewProjectsUserId, setViewProjectsUserId] = useState<number | null>(null);
+  const [viewProjectsData, setViewProjectsData] = useState<{ folders: any[]; sheets: any[] } | null>(null);
+
   // ── Accessories state ─────────────────────────────────────────
   const [accTables, setAccTables] = useState<any[]>([]);
   const [accAllTiles, setAccAllTiles] = useState<any[]>([]);
@@ -181,6 +191,7 @@ export default function AdminPage() {
     else if (tab === 'base') loadTiles();
     else if (tab === 'tiles') loadTiles();
     else if (tab === 'accessories') loadAccessories();
+    else if (tab === 'activity') loadActivity();
   }, [tab]);
 
   // While any price list is parsing on the server, refresh the table every
@@ -490,6 +501,25 @@ export default function AdminPage() {
   async function loadTiles() {
     try { const { data } = await catalogApi.getTilesAll(); setTiles(data); }
     catch { toast.error('Ошибка загрузки категорий'); }
+  }
+
+  async function loadActivity(filter?: { action?: string; userId?: string }) {
+    setActivityLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: '200' });
+      const f = filter || activityFilter;
+      if (f.action) params.set('action', f.action);
+      if (f.userId) params.set('userId', f.userId);
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/admin/activity-log?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('err');
+      const data = await res.json();
+      setActivityLogs(data.items || []);
+      setActivityTotal(data.total || 0);
+    } catch { toast.error('Ошибка загрузки журнала'); }
+    finally { setActivityLoading(false); }
   }
 
   async function loadAccessories() {
@@ -1000,6 +1030,7 @@ export default function AdminPage() {
 
   const navItems: { key: Tab; label: string }[] = [
     { key: 'users',     label: 'Пользователи' },
+    { key: 'activity',  label: 'Журнал действий' },
     { key: 'conversions', label: 'Конверсии' },
     { key: 'tariffs',   label: 'Тарифы и их операции' },
     { key: 'templates', label: 'Шаблоны' },
@@ -1149,11 +1180,26 @@ export default function AdminPage() {
                             <option value="sleep">sleep</option>
                           </select>
                         </td>
-                        <td>
+                        <td style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           <button className="btn-outline" style={{ padding: '3px 8px', fontSize: 11, whiteSpace: 'nowrap' }}
                             onClick={() => handleChangePassword(u.id, u.email)}
                             title="Сменить пароль пользователя">
                             Сменить пароль
+                          </button>
+                          <button className="btn-outline" style={{ padding: '3px 8px', fontSize: 11, whiteSpace: 'nowrap' }}
+                            onClick={async () => {
+                              try {
+                                const token = localStorage.getItem('token');
+                                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/admin/users/${u.id}/projects`, {
+                                  headers: { Authorization: `Bearer ${token}` },
+                                });
+                                const data = await res.json();
+                                setViewProjectsUserId(u.id);
+                                setViewProjectsData(data);
+                              } catch { toast.error('Ошибка загрузки'); }
+                            }}
+                            title="Посмотреть проекты пользователя">
+                            Проекты
                           </button>
                         </td>
                       </tr>
@@ -1164,6 +1210,77 @@ export default function AdminPage() {
                   </tbody>
                 </table>
               </div>
+
+              {/* User projects modal */}
+              {viewProjectsUserId !== null && viewProjectsData && (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 9000, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  onClick={() => { setViewProjectsUserId(null); setViewProjectsData(null); }}>
+                  <div style={{ background: '#fff', borderRadius: 12, padding: 24, width: '90%', maxWidth: 700, maxHeight: '80vh', overflowY: 'auto' }}
+                    onClick={e => e.stopPropagation()}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                      <div style={{ fontWeight: 700, fontSize: 16 }}>
+                        Проекты пользователя #{viewProjectsUserId}
+                        {' '}<span style={{ fontWeight: 400, fontSize: 13, color: '#888' }}>({users.find(u => u.id === viewProjectsUserId)?.email})</span>
+                      </div>
+                      <button onClick={() => { setViewProjectsUserId(null); setViewProjectsData(null); }} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}>✕</button>
+                    </div>
+                    {viewProjectsData.folders.length === 0 && viewProjectsData.sheets.length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: '32px 0', color: '#888' }}>Нет проектов и листов</div>
+                    ) : (
+                      <>
+                        {viewProjectsData.folders.length > 0 && (
+                          <>
+                            <div style={{ fontWeight: 600, marginBottom: 8 }}>Папки / Проекты ({viewProjectsData.folders.length})</div>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 20, fontSize: 13 }}>
+                              <thead>
+                                <tr style={{ borderBottom: '2px solid #eee' }}>
+                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>ID</th>
+                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Название</th>
+                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Создан</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {viewProjectsData.folders.map((f: any) => (
+                                  <tr key={f.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                                    <td style={{ padding: '6px 8px', color: '#888' }}>{f.id}</td>
+                                    <td style={{ padding: '6px 8px', fontWeight: 500 }}>{f.name}</td>
+                                    <td style={{ padding: '6px 8px', color: '#888' }}>{fmtDate(f.createdAt)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </>
+                        )}
+                        {viewProjectsData.sheets.length > 0 && (
+                          <>
+                            <div style={{ fontWeight: 600, marginBottom: 8 }}>Спецификации / Листы ({viewProjectsData.sheets.length})</div>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                              <thead>
+                                <tr style={{ borderBottom: '2px solid #eee' }}>
+                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>ID</th>
+                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Название</th>
+                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Создан</th>
+                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Обновлён</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {viewProjectsData.sheets.map((s: any) => (
+                                  <tr key={s.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                                    <td style={{ padding: '6px 8px', color: '#888' }}>{s.id}</td>
+                                    <td style={{ padding: '6px 8px', fontWeight: 500 }}>{s.name}</td>
+                                    <td style={{ padding: '6px 8px', color: '#888' }}>{fmtDate(s.createdAt)}</td>
+                                    <td style={{ padding: '6px 8px', color: '#888' }}>{fmtDate(s.updatedAt)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
             </>
           )}
 
@@ -2092,6 +2209,100 @@ export default function AdminPage() {
                   ))}
                 </div>
                   )}
+            </>
+          )}
+
+          {/* ── Журнал действий ── */}
+          {tab === 'activity' && (
+            <>
+              <div className="admin-section-title">Журнал действий пользователей</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                <select
+                  value={activityFilter.action}
+                  onChange={e => setActivityFilter(f => ({ ...f, action: e.target.value }))}
+                  style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13 }}
+                >
+                  <option value="">Все действия</option>
+                  <option value="login">Вход</option>
+                  <option value="register">Регистрация</option>
+                  <option value="logout">Выход</option>
+                  <option value="create_project">Создание проекта</option>
+                  <option value="delete_project">Удаление проекта</option>
+                  <option value="create_sheet">Создание листа</option>
+                  <option value="delete_sheet">Удаление листа</option>
+                  <option value="export">Экспорт</option>
+                  <option value="add_equipment">Добавление оборудования</option>
+                  <option value="open_catalog">Открытие каталога</option>
+                  <option value="activate_tariff">Активация тарифа</option>
+                </select>
+                <input
+                  type="text"
+                  placeholder="ID пользователя"
+                  value={activityFilter.userId}
+                  onChange={e => setActivityFilter(f => ({ ...f, userId: e.target.value }))}
+                  style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, width: 140 }}
+                />
+                <button className="btn-primary" style={{ padding: '6px 14px', fontSize: 13 }}
+                  onClick={() => loadActivity(activityFilter)}>
+                  Фильтровать
+                </button>
+                <button className="btn-outline" style={{ padding: '6px 14px', fontSize: 13 }}
+                  onClick={() => {
+                    const f = { action: '', userId: '' };
+                    setActivityFilter(f);
+                    loadActivity(f);
+                  }}>
+                  Сбросить
+                </button>
+                <span style={{ color: '#888', fontSize: 13 }}>
+                  {activityLoading ? 'Загрузка…' : `Записей: ${activityTotal}`}
+                </span>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="admin-table" style={{ minWidth: 800 }}>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Пользователь</th>
+                      <th>Действие</th>
+                      <th>Детали</th>
+                      <th>IP</th>
+                      <th>Дата</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activityLogs.map((log: any) => (
+                      <tr key={log.id}>
+                        <td style={{ color: '#888', fontSize: 12 }}>{log.id}</td>
+                        <td style={{ fontSize: 12 }}>
+                          {log.user ? (
+                            <span title={log.user.email}>
+                              <span style={{ fontWeight: 600 }}>{fmtId(log.userId)}</span>
+                              <br />
+                              <span style={{ color: '#888' }}>{log.user.email}</span>
+                            </span>
+                          ) : fmtId(log.userId)}
+                        </td>
+                        <td>
+                          <span style={{
+                            display: 'inline-block', padding: '2px 8px', borderRadius: 12, fontSize: 11,
+                            background: log.action === 'login' ? '#dcfce7' : log.action === 'register' ? '#dbeafe' : log.action === 'export' ? '#fef9c3' : log.action.startsWith('delete') ? '#fee2e2' : '#f3f4f6',
+                            color: log.action === 'login' ? '#166534' : log.action === 'register' ? '#1e40af' : log.action === 'export' ? '#92400e' : log.action.startsWith('delete') ? '#991b1b' : '#374151',
+                          }}>
+                            {log.action}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: 12, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.details || '—'}</td>
+                        <td style={{ fontSize: 12, color: '#888' }}>{log.ip || '—'}</td>
+                        <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{fmtDate(log.createdAt)}</td>
+                      </tr>
+                    ))}
+                    {!activityLoading && activityLogs.length === 0 && (
+                      <tr><td colSpan={6} style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Нет записей</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </>
           )}
 

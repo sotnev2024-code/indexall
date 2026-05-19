@@ -9,13 +9,17 @@ import { JwtStrategy } from './jwt.strategy';
 import { EmailService } from './email.service';
 import { UsersModule } from '../users/users.module';
 import { User } from '../users/user.entity';
+import { TariffConfig } from '../admin/tariff-config.entity';
+import { TariffOperation } from '../admin/tariff-operation.entity';
+import { UserActivityLog } from '../admin/user-activity-log.entity';
+import { ActivityLogService } from '../admin/activity-log.service';
 
 @Module({
   imports: [
     UsersModule,
     PassportModule,
     ConfigModule,
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, TariffConfig, TariffOperation, UserActivityLog]),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -27,8 +31,8 @@ import { User } from '../users/user.entity';
       }),
     }),
   ],
-  providers: [AuthService, JwtStrategy, EmailService],
+  providers: [AuthService, JwtStrategy, EmailService, ActivityLogService],
   controllers: [AuthController],
-  exports: [AuthService, JwtModule],
+  exports: [AuthService, JwtModule, ActivityLogService],
 })
 export class AuthModule {}

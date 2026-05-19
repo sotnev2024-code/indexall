@@ -6,6 +6,7 @@ import Header from '@/components/layout/Header';
 import { foldersApi, sheetsApi, trashApi, templatesApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 import RequireSubscription from '@/components/RequireSubscription';
+import WelcomeModal from '@/components/WelcomeModal';
 
 type TplFolderNode = {
   id: number;
@@ -627,6 +628,7 @@ function ProjectsPageInner() {
 
   return (
     <>
+      <WelcomeModal />
       <Header breadcrumb="Проекты" />
 
       <div className="projects-screen" onClick={() => setCtx(null)}>
