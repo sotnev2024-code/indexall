@@ -1,0 +1,58 @@
+version: '3.8'
+
+# Staging environment — runs alongside production on the same server
+# Backend: host port 4001, Frontend: container port 3001, DB: host port 5433
+# Start:  docker compose -f docker-compose.staging.yml up -d --build
+# Stop:   docker compose -f docker-compose.staging.yml down
+# Logs:   docker compose -f docker-compose.staging.yml logs -f
+
+services:
+  postgres-staging:
+    image: postgres:15-alpine
+    container_name: indexall-db-staging
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: indexall_staging
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_staging_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend-staging:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: indexall-backend-staging
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - ../backend/.env.staging
+    depends_on:
+      postgres-staging:
+        condition: service_healthy
+    volumes:
+      - uploads_staging_data:/app/uploads
+
+  frontend-staging:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: indexall-frontend-staging
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3000"
+    env_file:
+      - ../frontend/.env.staging
+    depends_on:
+      - backend-staging
+
+volumes:
+  postgres_staging_data:
+  uploads_staging_data:
