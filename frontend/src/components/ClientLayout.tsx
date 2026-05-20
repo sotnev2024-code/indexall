@@ -22,8 +22,18 @@ function AuthHydrator() {
     })
       .then(({ data }: any) => setAuth(data, token))
       .catch((err: any) => {
-        if (err?.response?.status === 401) clearAuth();
-        else setAuthReady(true);
+        if (err?.response?.status === 401) {
+          clearAuth();
+          // Redirect to login only if the current page requires auth (not public pages)
+          const pub = ['/', '/auth/', '/pricing'];
+          const isPublic = pub.some(p => window.location.pathname.startsWith(p));
+          if (!isPublic) {
+            window.location.href = '/auth/login';
+          }
+        } else {
+          // Network error / server down — don't log out, keep using cached user
+          setAuthReady(true);
+        }
       });
   }, []);
   return null;

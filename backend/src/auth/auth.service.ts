@@ -45,7 +45,7 @@ export class AuthService {
 
     return {
       accessToken: this.jwtService.sign(payload),
-      expiresIn: 7 * 24 * 60 * 60,
+      expiresIn: 30 * 24 * 60 * 60,
     };
   }
 
