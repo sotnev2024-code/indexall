@@ -193,16 +193,62 @@ export class EtmService {
     return loginPromise;
   }
 
+  /**
+   * Find any valid session for the given ETM login across all users (and the
+   * system account). This allows multiple app users sharing the same ETM login
+   * to reuse one session instead of each logging in separately — which would
+   * quickly exhaust the 1-login-per-2-minutes ETM rate limit.
+   */
+  private async findSharedSessionByLogin(login: string): Promise<{ key: string; expiry: number } | null> {
+    // Check system in-memory session first (fastest path)
+    if (
+      this.login === login &&
+      this.sessionKey &&
+      Date.now() < this.sessionExpiry
+    ) {
+      return { key: this.sessionKey, expiry: this.sessionExpiry };
+    }
+
+    // Search all credential records (including system record user_id=0) for a valid session
+    const rows = await this.credRepo.find({ where: { login } });
+    const now = new Date();
+    for (const row of rows) {
+      if (row.session_key && row.session_expires_at && row.session_expires_at > now) {
+        return { key: row.session_key, expiry: row.session_expires_at.getTime() };
+      }
+    }
+
+    return null;
+  }
+
   private async _doUserLogin(userId: number, forceRefresh: boolean): Promise<string | null> {
     // Load from DB
     const cred = await this.credRepo.findOne({ where: { user_id: userId } });
     if (!cred) return null;
 
-    // Check DB session (skip if forcing refresh)
+    // Check this user's own DB session (skip if forcing refresh)
     if (!forceRefresh && cred.session_key && cred.session_expires_at && new Date() < cred.session_expires_at) {
       const expiry = cred.session_expires_at.getTime();
       this.userSessions.set(userId, { key: cred.session_key, expiry });
       return cred.session_key;
+    }
+
+    // Before doing a fresh login, check if any other user (or system account)
+    // already has a valid session for the same ETM login. Reuse it to avoid
+    // hitting the 1-login-per-2-minutes rate limit when multiple app users
+    // share the same ETM credentials.
+    if (!forceRefresh) {
+      const shared = await this.findSharedSessionByLogin(cred.login);
+      if (shared) {
+        // Propagate to this user's record and in-memory cache
+        await this.credRepo.update({ user_id: userId }, {
+          session_key: shared.key,
+          session_expires_at: new Date(shared.expiry),
+        });
+        this.userSessions.set(userId, shared);
+        this.logger.log(`ETM session shared (login ${cred.login}) for user ${userId}`);
+        return shared.key;
+      }
     }
 
     // Re-authenticate using saved password
@@ -224,7 +270,7 @@ export class EtmService {
     const expiresAt = new Date(Date.now() + 7.5 * 60 * 60 * 1000);
     await this.credRepo.update({ user_id: userId }, { session_key: sessionKey, session_expires_at: expiresAt });
     this.userSessions.set(userId, { key: sessionKey, expiry: expiresAt.getTime() });
-    this.logger.log(`ETM session refreshed for user ${userId}`);
+    this.logger.log(`ETM session refreshed for user ${userId} (login ${cred.login})`);
     return sessionKey;
   }
 
@@ -346,6 +392,19 @@ export class EtmService {
     if (this.sessionKey && Date.now() < this.sessionExpiry) {
       return this.sessionKey;
     }
+
+    // Before doing a fresh login, check if any user credential record with the
+    // same ETM login already has a valid session (session sharing across accounts).
+    if (this.login) {
+      const shared = await this.findSharedSessionByLogin(this.login);
+      if (shared) {
+        this.sessionKey = shared.key;
+        this.sessionExpiry = shared.expiry;
+        this.logger.log(`ETM system session reused from shared login (${this.login})`);
+        return this.sessionKey;
+      }
+    }
+
     // Serialize login: if a login is already in progress, wait for it instead
     // of firing another one. Multiple concurrent callers hitting an expired session
     // would otherwise each call authenticate() → ETM rate-limits ("Превышен лимит").
