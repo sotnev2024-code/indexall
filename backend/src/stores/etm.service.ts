@@ -22,6 +22,10 @@ export class EtmService {
   /** Prevents parallel login calls: if one authenticate() is in flight,
    *  all other callers await the same promise instead of firing new logins. */
   private loginInFlight: Promise<string> | null = null;
+  /** Set to true after we've tried to restore the session from DB on startup */
+  private sessionRestored = false;
+  /** Special user_id used to persist the global (env-based) system session in etm_credentials */
+  private static readonly SYSTEM_SESSION_USER_ID = 0;
 
   private readonly host = 'ipro.etm.ru';
 
@@ -302,10 +306,43 @@ export class EtmService {
     this.sessionKey = String(json.data.session);
     this.sessionExpiry = Date.now() + 7.5 * 60 * 60 * 1000;
     this.logger.log('ETM session refreshed');
+
+    // Persist session to DB so server restarts can reuse it without a new login
+    try {
+      const expiresAt = new Date(this.sessionExpiry);
+      await this.credRepo.save({
+        user_id: EtmService.SYSTEM_SESSION_USER_ID,
+        login: this.login || '',
+        password_enc: '',
+        session_key: this.sessionKey,
+        session_expires_at: expiresAt,
+      });
+    } catch (e: any) {
+      this.logger.warn(`Could not persist ETM system session to DB: ${e?.message}`);
+    }
+
     return this.sessionKey;
   }
 
   private async getSession(): Promise<string> {
+    // On first call after server restart, try to restore the system session from DB.
+    // This avoids a login request when the server restarts but the ETM session is still valid.
+    if (!this.sessionRestored) {
+      this.sessionRestored = true;
+      try {
+        const sys = await this.credRepo.findOne({
+          where: { user_id: EtmService.SYSTEM_SESSION_USER_ID },
+        });
+        if (sys?.session_key && sys.session_expires_at && new Date() < sys.session_expires_at) {
+          this.sessionKey = sys.session_key;
+          this.sessionExpiry = sys.session_expires_at.getTime();
+          this.logger.log('ETM system session restored from DB (no login needed)');
+        }
+      } catch (e: any) {
+        this.logger.warn(`Could not restore ETM system session from DB: ${e?.message}`);
+      }
+    }
+
     if (this.sessionKey && Date.now() < this.sessionExpiry) {
       return this.sessionKey;
     }
