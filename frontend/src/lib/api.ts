@@ -15,8 +15,17 @@ api.interceptors.response.use(
   (r) => r,
   (err) => {
     if (err.response?.status === 401 && typeof window !== 'undefined') {
-      localStorage.removeItem('token');
-      window.location.href = '/auth/login';
+      const url: string = err.config?.url || '';
+      // Only force logout when the session itself is invalid (/auth/me returns 401).
+      // Requests to ETM, catalog, stores etc. can legitimately return 401
+      // (e.g. ETM credentials not set) — those must NOT log the user out.
+      const isAuthCheck =
+        url.includes('/auth/me') ||
+        url.includes('/auth/profile');
+      if (isAuthCheck) {
+        localStorage.removeItem('token');
+        window.location.href = '/auth/login';
+      }
     }
     return Promise.reject(err);
   }
