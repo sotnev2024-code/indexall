@@ -19,6 +19,9 @@ export class EtmService {
 
   private sessionKey: string | null = null;
   private sessionExpiry = 0;
+  /** Prevents parallel login calls: if one authenticate() is in flight,
+   *  all other callers await the same promise instead of firing new logins. */
+  private loginInFlight: Promise<string> | null = null;
 
   private readonly host = 'ipro.etm.ru';
 
@@ -29,6 +32,8 @@ export class EtmService {
 
   private readonly ENCRYPTION_KEY: Buffer;
   private readonly userSessions = new Map<number, { key: string; expiry: number }>();
+  /** Per-user login serialization: prevents parallel login calls for the same userId */
+  private readonly userLoginInFlight = new Map<number, Promise<string | null>>();
 
   // Global rate-limited request queue.
   // Official ETM API docs (24.01.2025): 1 request per second per endpoint. ETM reserves the right
@@ -173,6 +178,18 @@ export class EtmService {
       if (cached && Date.now() < cached.expiry) return cached.key;
     }
 
+    // Serialize per-user login to avoid parallel login calls hitting ETM rate limit
+    const inFlight = this.userLoginInFlight.get(userId);
+    if (inFlight && !forceRefresh) return inFlight;
+
+    const loginPromise = this._doUserLogin(userId, forceRefresh).finally(() => {
+      this.userLoginInFlight.delete(userId);
+    });
+    this.userLoginInFlight.set(userId, loginPromise);
+    return loginPromise;
+  }
+
+  private async _doUserLogin(userId: number, forceRefresh: boolean): Promise<string | null> {
     // Load from DB
     const cred = await this.credRepo.findOne({ where: { user_id: userId } });
     if (!cred) return null;
@@ -292,7 +309,16 @@ export class EtmService {
     if (this.sessionKey && Date.now() < this.sessionExpiry) {
       return this.sessionKey;
     }
-    return this.authenticate();
+    // Serialize login: if a login is already in progress, wait for it instead
+    // of firing another one. Multiple concurrent callers hitting an expired session
+    // would otherwise each call authenticate() → ETM rate-limits ("Превышен лимит").
+    if (this.loginInFlight) {
+      return this.loginInFlight;
+    }
+    this.loginInFlight = this.authenticate().finally(() => {
+      this.loginInFlight = null;
+    });
+    return this.loginInFlight;
   }
 
   private sleep(ms: number) {
