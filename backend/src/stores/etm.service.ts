@@ -738,24 +738,17 @@ export class EtmService {
     if (!article) return null;
     const mnf = (item.etmCode || '').trim() || undefined;
 
-    let session = await this.getUserSession(userId, false);
-    let usingShared = false;
-    if (!session) {
-      try {
-        session = await this.getSession();
-        usingShared = true;
-      } catch {
-        return null;
-      }
-    }
+    // Only fetch delivery term for users with their own ETM credentials.
+    // The shared system account is used for prices only — fetching terms for
+    // every article on the shared session doubles ETM load and hits rate limits.
+    const session = await this.getUserSession(userId, false);
+    if (!session) return null;
 
     try {
       return await this.fetchRemains(article, session, mnf);
     } catch (e: any) {
       if (e?.message === 'SESSION_EXPIRED') {
-        const newSession = usingShared
-          ? await this.authenticate()
-          : await this.getUserSession(userId, true);
+        const newSession = await this.getUserSession(userId, true);
         if (newSession) {
           try { return await this.fetchRemains(article, newSession, mnf); } catch { return null; }
         }
@@ -783,12 +776,17 @@ export class EtmService {
     if (unique.length === 0) return result;
 
     const prices = await this.getPricesForUser(unique, userId);
+
+    // Only request delivery terms when the user has their own ETM credentials.
+    // On the shared system account, term requests double the API load and hit rate limits.
+    const hasPersonalCreds = !!(await this.getUserSession(userId, false));
+
     for (const a of unique) {
       if (prices[a] == null) {
         result[a] = { price: null, term: 'нет' };
         continue;
       }
-      const term = await this.getTermForUser(a, userId);
+      const term = hasPersonalCreds ? await this.getTermForUser(a, userId) : null;
       result[a] = { price: prices[a], term: term || 'нет' };
     }
     return result;
