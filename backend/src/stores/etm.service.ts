@@ -278,7 +278,7 @@ export class EtmService {
     if (json?.status?.code !== 200) {
       throw new HttpException(
         `ETM login failed: ${json?.status?.message || 'unknown error'}`,
-        HttpStatus.UNAUTHORIZED,
+        HttpStatus.BAD_GATEWAY,
       );
     }
 
