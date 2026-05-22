@@ -952,4 +952,32 @@ export class AdminController implements OnModuleInit {
     const [items, total] = await qb.getManyAndCount();
     return { items, total };
   }
+
+  // ── Activity Stats ────────────────────────────────────────────
+
+  @Get('activity-stats')
+  async getActivityStats() {
+    // Group by action and count, for the last 90 days
+    const since = new Date();
+    since.setDate(since.getDate() - 90);
+
+    const rows: { action: string; cnt: string }[] = await this.activityRepo
+      .createQueryBuilder('log')
+      .select('log.action', 'action')
+      .addSelect('COUNT(*)', 'cnt')
+      .where('log.createdAt >= :since', { since })
+      .groupBy('log.action')
+      .getRawMany();
+
+    const map: Record<string, number> = {};
+    for (const r of rows) map[r.action] = parseInt(r.cnt, 10);
+
+    // Total users registered (all time)
+    const totalUsers = await this.usersRepo.count();
+    // Users registered in last 30 days
+    const last30 = new Date(); last30.setDate(last30.getDate() - 30);
+    const newUsers30 = await this.usersRepo.count({ where: { createdAt: require('typeorm').MoreThan(last30) } });
+
+    return { byAction: map, totalUsers, newUsers30 };
+  }
 }

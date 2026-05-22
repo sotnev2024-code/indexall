@@ -151,6 +151,7 @@ export default function AdminPage() {
   const [activityTotal, setActivityTotal] = useState(0);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityFilter, setActivityFilter] = useState({ action: '', userId: '' });
+  const [activityStats, setActivityStats] = useState<{ byAction: Record<string, number>; totalUsers: number; newUsers30: number } | null>(null);
 
   // ── User projects viewer ──────────────────────────────────────
   const [viewProjectsUserId, setViewProjectsUserId] = useState<number | null>(null);
@@ -506,18 +507,29 @@ export default function AdminPage() {
   async function loadActivity(filter?: { action?: string; userId?: string }) {
     setActivityLoading(true);
     try {
+      const token = localStorage.getItem('token');
+      const headers = { Authorization: `Bearer ${token}` };
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || '';
+
       const params = new URLSearchParams({ limit: '200' });
       const f = filter || activityFilter;
       if (f.action) params.set('action', f.action);
       if (f.userId) params.set('userId', f.userId);
-      const token = localStorage.getItem('token');
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/admin/activity-log?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('err');
-      const data = await res.json();
+
+      const [logRes, statsRes] = await Promise.all([
+        fetch(`${baseUrl}/admin/activity-log?${params}`, { headers }),
+        activityStats === null ? fetch(`${baseUrl}/admin/activity-stats`, { headers }) : Promise.resolve(null),
+      ]);
+
+      if (!logRes.ok) throw new Error('err');
+      const data = await logRes.json();
       setActivityLogs(data.items || []);
       setActivityTotal(data.total || 0);
+
+      if (statsRes) {
+        const stats = await statsRes.json();
+        setActivityStats(stats);
+      }
     } catch { toast.error('Ошибка загрузки журнала'); }
     finally { setActivityLoading(false); }
   }
@@ -2216,6 +2228,32 @@ export default function AdminPage() {
           {tab === 'activity' && (
             <>
               <div className="admin-section-title">Журнал действий пользователей</div>
+
+              {/* ── Статистика по источникам входа ── */}
+              {activityStats && (() => {
+                const s = activityStats.byAction;
+                const cards = [
+                  { label: 'Всего пользователей', value: activityStats.totalUsers, color: '#6366f1', icon: '👥' },
+                  { label: 'Новых за 30 дней', value: activityStats.newUsers30, color: '#0ea5e9', icon: '🆕' },
+                  { label: 'Входов (email)', value: s['login'] || 0, color: '#22c55e', icon: '📧' },
+                  { label: 'Входов Google', value: (s['login_google'] || 0) + (s['register_google'] || 0), color: '#ef4444', icon: '🔍' },
+                  { label: 'Входов Яндекс', value: (s['login_yandex'] || 0) + (s['register_yandex'] || 0), color: '#f59e0b', icon: '🟡' },
+                  { label: 'Входов Mail.ru', value: (s['login_mailru'] || 0) + (s['register_mailru'] || 0), color: '#3b82f6', icon: '✉️' },
+                  { label: 'Регистраций (email)', value: s['register'] || 0, color: '#8b5cf6', icon: '📝' },
+                  { label: 'Экспортов', value: s['export'] || 0, color: '#64748b', icon: '📊' },
+                ];
+                return (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 24 }}>
+                    {cards.map(c => (
+                      <div key={c.label} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 16px', borderLeft: `4px solid ${c.color}` }}>
+                        <div style={{ fontSize: 22, marginBottom: 4 }}>{c.icon}</div>
+                        <div style={{ fontSize: 24, fontWeight: 700, color: c.color }}>{c.value}</div>
+                        <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{c.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
               <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
                 <select
                   value={activityFilter.action}
@@ -2223,17 +2261,28 @@ export default function AdminPage() {
                   style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13 }}
                 >
                   <option value="">Все действия</option>
-                  <option value="login">Вход</option>
-                  <option value="register">Регистрация</option>
-                  <option value="logout">Выход</option>
-                  <option value="create_project">Создание проекта</option>
-                  <option value="delete_project">Удаление проекта</option>
-                  <option value="create_sheet">Создание листа</option>
-                  <option value="delete_sheet">Удаление листа</option>
-                  <option value="export">Экспорт</option>
-                  <option value="add_equipment">Добавление оборудования</option>
-                  <option value="open_catalog">Открытие каталога</option>
-                  <option value="activate_tariff">Активация тарифа</option>
+                  <optgroup label="Вход / регистрация">
+                    <option value="login">Вход (email)</option>
+                    <option value="login_google">Вход через Google</option>
+                    <option value="login_yandex">Вход через Яндекс</option>
+                    <option value="login_mailru">Вход через Mail.ru</option>
+                    <option value="register">Регистрация (email)</option>
+                    <option value="register_google">Регистрация через Google</option>
+                    <option value="register_yandex">Регистрация через Яндекс</option>
+                    <option value="register_mailru">Регистрация через Mail.ru</option>
+                    <option value="logout">Выход</option>
+                  </optgroup>
+                  <optgroup label="Работа в сервисе">
+                    <option value="create_project">Создание проекта</option>
+                    <option value="delete_project">Удаление проекта</option>
+                    <option value="create_sheet">Создание листа</option>
+                    <option value="delete_sheet">Удаление листа</option>
+                    <option value="open_catalog">Открытие раздела каталога</option>
+                    <option value="add_from_catalog">Добавление из каталога</option>
+                    <option value="add_from_pricelist">Добавление из прайса</option>
+                    <option value="export">Экспорт</option>
+                    <option value="activate_tariff">Активация тарифа</option>
+                  </optgroup>
                 </select>
                 <input
                   type="text"

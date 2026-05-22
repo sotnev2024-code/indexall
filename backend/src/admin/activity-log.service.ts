@@ -11,7 +11,7 @@ export class ActivityLogService {
   ) {}
 
   async log(
-    userId: number,
+    userId: number | undefined,
     action: ActivityAction,
     details?: string,
     ip?: string,

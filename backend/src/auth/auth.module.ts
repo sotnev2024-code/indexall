@@ -7,6 +7,8 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { EmailService } from './email.service';
+import { OAuthService } from './oauth.service';
+import { OAuthController } from './oauth.controller';
 import { UsersModule } from '../users/users.module';
 import { User } from '../users/user.entity';
 import { TariffConfig } from '../admin/tariff-config.entity';
@@ -29,8 +31,8 @@ import { TariffOperation } from '../admin/tariff-operation.entity';
       }),
     }),
   ],
-  providers: [AuthService, JwtStrategy, EmailService],
-  controllers: [AuthController],
+  providers: [AuthService, JwtStrategy, EmailService, OAuthService],
+  controllers: [AuthController, OAuthController],
   exports: [AuthService, JwtModule],
 })
 export class AuthModule {}

@@ -6,14 +6,22 @@ import { User } from '../users/user.entity';
 
 export type ActivityAction =
   | 'login'
+  | 'login_google'
+  | 'login_yandex'
+  | 'login_mailru'
   | 'logout'
   | 'register'
+  | 'register_google'
+  | 'register_yandex'
+  | 'register_mailru'
   | 'create_project'
   | 'delete_project'
   | 'create_sheet'
   | 'delete_sheet'
   | 'export'
   | 'add_equipment'
+  | 'add_from_catalog'
+  | 'add_from_pricelist'
   | 'open_catalog'
   | 'activate_tariff'
   | 'other';
@@ -24,7 +32,7 @@ export class UserActivityLog {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
+  @Column({ nullable: true, type: 'int' })
   userId: number;
 
   @ManyToOne(() => User, { onDelete: 'CASCADE', nullable: true, eager: false })
