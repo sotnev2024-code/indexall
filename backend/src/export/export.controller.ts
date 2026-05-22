@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ProjectsService } from '../projects/projects.service';
 import { SheetsService } from '../sheets/sheets.service';
 import { FoldersService } from '../folders/folders.service';
+import { ActivityLogService } from '../admin/activity-log.service';
 
 @Controller('export')
 @UseGuards(JwtAuthGuard)
@@ -16,6 +17,7 @@ export class ExportController {
     private readonly projectsService: ProjectsService,
     private readonly sheetsService: SheetsService,
     private readonly foldersService: FoldersService,
+    private readonly activityLog: ActivityLogService,
   ) {}
 
   @Post('xlsx')
@@ -52,6 +54,8 @@ export class ExportController {
 
       const buffer = this.exportService.exportToXlsx({ projectName, sheets });
       const filename = encodeURIComponent(`${projectName}.xlsx`);
+
+      this.activityLog.log(userId, 'export', `file: ${projectName}.xlsx, sheets: ${sheets.length}`);
 
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);

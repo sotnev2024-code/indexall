@@ -4,7 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import ImportModal from '@/components/ImportModal';
-import { sheetsApi, projectsApi, foldersApi, catalogApi, exportApi, storesApi, templatesApi } from '@/lib/api';
+import { sheetsApi, projectsApi, foldersApi, catalogApi, exportApi, storesApi, templatesApi, activityApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 
 const MAX_UNDO = 30;
@@ -874,6 +874,7 @@ export default function SpecPageClient() {
   // ── Import from price-list file ──────────────────────────────
   function handleImport(importedRows: any[], importMode: 'append' | 'replace') {
     pushHistorySnapshot(rowsRef.current);
+    activityApi.logEvent('add_from_pricelist', `rows: ${importedRows.length}, mode: ${importMode}`);
     const MIN_ROWS = 25;
     const emptyRowPad = (i: number) => ({ row_number: i + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: '', coef: '1', total: '', deadline: '' });
 

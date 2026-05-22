@@ -11,7 +11,6 @@ import { Template } from '../templates/template.entity';
 import { Folder } from '../folders/folder.entity';
 import { PriceList, Manufacturer, CatalogProduct, CatalogTile, CatalogCategory } from '../catalog/entities/catalog.entities';
 import { UserActivityLog } from './user-activity-log.entity';
-import { ActivityLogService } from './activity-log.service';
 
 @Module({
   imports: [
@@ -22,7 +21,5 @@ import { ActivityLogService } from './activity-log.service';
     ]),
   ],
   controllers: [AdminController],
-  providers: [ActivityLogService],
-  exports: [ActivityLogService],
 })
 export class AdminModule {}

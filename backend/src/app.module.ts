@@ -10,6 +10,7 @@ import { TemplatesModule } from './templates/templates.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { StoresModule } from './stores/stores.module';
 import { AdminModule } from './admin/admin.module';
+import { ActivityLogModule } from './admin/activity-log.module';
 import { TrashModule } from './trash/trash.module';
 import { MailModule } from './mail/mail.module';
 import { ExportModule } from './export/export.module';
@@ -42,6 +43,7 @@ import { FoldersModule } from './folders/folders.module';
     TemplatesModule,
     CatalogModule,
     StoresModule,
+    ActivityLogModule,
     AdminModule,
     TrashModule,
     MailModule,

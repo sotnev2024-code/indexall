@@ -14,13 +14,17 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ProjectsService } from './projects.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ProGuard } from '../auth/guards/pro.guard';
+import { ActivityLogService } from '../admin/activity-log.service';
 
 @ApiTags('projects')
 @Controller('projects')
 @UseGuards(JwtAuthGuard, ProGuard)
 @ApiBearerAuth()
 export class ProjectsController {
-  constructor(private readonly service: ProjectsService) {}
+  constructor(
+    private readonly service: ProjectsService,
+    private readonly activityLog: ActivityLogService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Получить все проекты пользователя' })
@@ -36,8 +40,10 @@ export class ProjectsController {
 
   @Post()
   @ApiOperation({ summary: 'Создать новый проект' })
-  create(@Body('name') name: string, @Request() req) {
-    return this.service.create(req.user.userId, name);
+  async create(@Body('name') name: string, @Request() req) {
+    const result = await this.service.create(req.user.userId, name);
+    this.activityLog.log(req.user.userId, 'create_project', `name: ${name}`);
+    return result;
   }
 
   @Put(':id')
@@ -74,7 +80,9 @@ export class ProjectsController {
 
   @Delete(':id')
   @ApiOperation({ summary: 'Удалить проект' })
-  remove(@Param('id', ParseIntPipe) id: number, @Request() req) {
-    return this.service.remove(id, req.user.userId);
+  async remove(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    const result = await this.service.remove(id, req.user.userId);
+    this.activityLog.log(req.user.userId, 'delete_project', `id: ${id}`);
+    return result;
   }
 }

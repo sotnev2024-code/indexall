@@ -2284,13 +2284,32 @@ export default function AdminPage() {
                           ) : fmtId(log.userId)}
                         </td>
                         <td>
-                          <span style={{
-                            display: 'inline-block', padding: '2px 8px', borderRadius: 12, fontSize: 11,
-                            background: log.action === 'login' ? '#dcfce7' : log.action === 'register' ? '#dbeafe' : log.action === 'export' ? '#fef9c3' : log.action.startsWith('delete') ? '#fee2e2' : '#f3f4f6',
-                            color: log.action === 'login' ? '#166534' : log.action === 'register' ? '#1e40af' : log.action === 'export' ? '#92400e' : log.action.startsWith('delete') ? '#991b1b' : '#374151',
-                          }}>
-                            {log.action}
-                          </span>
+                          {(() => {
+                            const actionMap: Record<string, { label: string; bg: string; color: string }> = {
+                              login:              { label: 'Вход',             bg: '#dcfce7', color: '#166534' },
+                              logout:             { label: 'Выход',            bg: '#f0fdf4', color: '#4b7a5a' },
+                              register:           { label: 'Регистрация',      bg: '#dbeafe', color: '#1e40af' },
+                              activate_tariff:    { label: 'Тариф активирован',bg: '#ede9fe', color: '#5b21b6' },
+                              create_project:     { label: 'Создан проект',    bg: '#e0f2fe', color: '#0369a1' },
+                              delete_project:     { label: 'Удалён проект',    bg: '#fee2e2', color: '#991b1b' },
+                              create_sheet:       { label: 'Создана спец.',    bg: '#e0f2fe', color: '#0369a1' },
+                              delete_sheet:       { label: 'Удалена спец.',    bg: '#fee2e2', color: '#991b1b' },
+                              open_catalog:       { label: 'Каталог раздел',   bg: '#fef3c7', color: '#92400e' },
+                              add_from_catalog:   { label: 'Добавлено (кат.)', bg: '#d1fae5', color: '#065f46' },
+                              add_from_pricelist: { label: 'Добавлено (прайс)',bg: '#d1fae5', color: '#065f46' },
+                              export:             { label: 'Экспорт',          bg: '#fef9c3', color: '#713f12' },
+                            };
+                            const cfg = actionMap[log.action];
+                            return (
+                              <span style={{
+                                display: 'inline-block', padding: '2px 8px', borderRadius: 12, fontSize: 11,
+                                background: cfg?.bg ?? '#f3f4f6',
+                                color: cfg?.color ?? '#374151',
+                              }}>
+                                {cfg?.label ?? log.action}
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td style={{ fontSize: 12, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.details || '—'}</td>
                         <td style={{ fontSize: 12, color: '#888' }}>{log.ip || '—'}</td>

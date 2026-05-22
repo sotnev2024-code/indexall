@@ -74,6 +74,16 @@ export class AuthController {
     return result;
   }
 
+  @Post('logout')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Выход из системы (логирование)' })
+  async logout(@Request() req: any) {
+    const ip = req.ip || req.connection?.remoteAddress;
+    this.activityLogService.log(req.user.userId, 'logout', undefined, ip);
+    return { ok: true };
+  }
+
   @Post('confirm/resend')
   @ApiOperation({ summary: 'Повторная отправка письма с подтверждением' })
   async resendConfirmation(@Body('email') email: string) {
@@ -156,5 +166,22 @@ export class AuthController {
     const updated = await this.usersRepo.findOne({ where: { id: user.id } });
     const { password, ...safe } = updated;
     return safe;
+  }
+
+  /** Frontend calls this to log events that don't have a dedicated backend endpoint
+   *  (e.g. opening a catalog section, adding equipment from catalog). */
+  @Post('log-event')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Записать действие пользователя' })
+  async logEvent(
+    @Body('action') action: string,
+    @Body('details') details: string,
+    @Request() req: any,
+  ) {
+    if (!action) return { ok: false };
+    const ip = req.ip || req.connection?.remoteAddress;
+    this.activityLogService.log(req.user.userId, action, details, ip);
+    return { ok: true };
   }
 }
