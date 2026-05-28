@@ -30,18 +30,6 @@ const PROVIDERS = [
       </svg>
     ),
   },
-  {
-    id: 'mailru',
-    label: 'Mail.ru',
-    bg: '#005FF9',
-    color: '#fff',
-    border: 'none',
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
-        <path d="M12 13.4L3 7.6V17a2 2 0 002 2h14a2 2 0 002-2V7.6l-9 5.8zm9-8H3l9 5.8 9-5.8z"/>
-      </svg>
-    ),
-  },
 ];
 
 interface Props {
