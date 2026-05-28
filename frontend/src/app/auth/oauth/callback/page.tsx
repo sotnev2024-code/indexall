@@ -44,7 +44,7 @@ export default function OAuthCallbackPage() {
         setAuth(me, token);
 
         if (trialActivated) {
-          localStorage.setItem('welcomeModal', JSON.stringify({ trialActivated, trialName, trialDays }));
+          localStorage.setItem('welcomeModal', JSON.stringify({ name: trialName, days: trialDays }));
         }
 
         router.replace('/projects');
