@@ -86,7 +86,7 @@ export default function WelcomeModal() {
           onMouseEnter={e => (e.currentTarget.style.opacity = '0.85')}
           onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
         >
-          Супер! 🚀
+          Супер!
         </button>
       </div>
     </div>
