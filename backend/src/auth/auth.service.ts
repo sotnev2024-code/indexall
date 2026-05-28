@@ -8,6 +8,7 @@ import { User, UserPlan } from '../users/user.entity';
 import { EmailService } from './email.service';
 import { TariffConfig } from '../admin/tariff-config.entity';
 import { TariffOperation } from '../admin/tariff-operation.entity';
+import { AppSetting } from '../admin/app-setting.entity';
 import * as bcrypt from 'bcrypt';
 import { randomBytes, randomUUID } from 'crypto';
 
@@ -22,6 +23,7 @@ export class AuthService {
     @InjectRepository(User) private usersRepo: Repository<User>,
     @InjectRepository(TariffConfig) private tariffConfigRepo: Repository<TariffConfig>,
     @InjectRepository(TariffOperation) private tariffOpsRepo: Repository<TariffOperation>,
+    @InjectRepository(AppSetting) private settingsRepo: Repository<AppSetting>,
   ) {}
 
   async validateUser(email: string, password: string): Promise<any> {
@@ -106,14 +108,7 @@ export class AuthService {
     let trialDays = 0;
 
     if (!user.trialUsed && user.plan !== UserPlan.ADMIN) {
-      const freeTariff = await this.tariffConfigRepo.findOne({
-        where: { is_active: true },
-        order: { sort_order: 'ASC', id: 'ASC' },
-      }).then(async () => {
-        // Find first active tariff with price = 0
-        const all = await this.tariffConfigRepo.find({ where: { is_active: true }, order: { sort_order: 'ASC' } });
-        return all.find(t => Number(t.price) === 0) || null;
-      });
+      const freeTariff = await this.getRegistrationTariff();
 
       if (freeTariff) {
         const now = new Date();
@@ -188,5 +183,21 @@ export class AuthService {
     }
 
     return { message: 'Письмо с подтверждением отправлено повторно' };
+  }
+
+  /** Returns the tariff to auto-activate on registration.
+   *  Admin can configure `registration_tariff` setting with a plan_key.
+   *  Falls back to the first active tariff with price = 0. */
+  async getRegistrationTariff(): Promise<TariffConfig | null> {
+    const all = await this.tariffConfigRepo.find({ where: { is_active: true }, order: { sort_order: 'ASC', id: 'ASC' } });
+    if (all.length === 0) return null;
+
+    const setting = await this.settingsRepo.findOne({ where: { key: 'registration_tariff' } });
+    if (setting?.value) {
+      const byKey = all.find(t => t.plan_key === setting.value);
+      if (byKey) return byKey;
+    }
+    // Fallback: first free tariff
+    return all.find(t => Number(t.price) === 0) || null;
   }
 }

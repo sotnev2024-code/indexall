@@ -98,6 +98,7 @@ export default function AdminPage() {
   const [tariffsManagerOpen, setTariffsManagerOpen] = useState(false);
   const [managedTariffs, setManagedTariffs] = useState<TariffTile[]>([]);
   const [pricingTilesEnabled, setPricingTilesEnabled] = useState(false);
+  const [registrationTariff, setRegistrationTariff] = useState<string>('');
 
   // Stats
   const [stats, setStats] = useState<any>(null);
@@ -241,6 +242,7 @@ export default function AdminPage() {
       if (users.length === 0) setUsers(us);
       setTariffConfigs(cfgs);
       setPricingTilesEnabled(settings?.pricing_tiles_enabled === 'true');
+      setRegistrationTariff(settings?.registration_tariff || '');
       const initial: Record<number, any> = {};
       cfgs.forEach((c: any) => {
         initial[c.id] = {
@@ -1426,6 +1428,41 @@ export default function AdminPage() {
                 </button>
               </div>
 
+              {/* ── Registration tariff setting ── */}
+              <div className="admin-form" style={{ marginBottom: 16 }}>
+                <div className="admin-form-title">Тариф при регистрации</div>
+                <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.5 }}>
+                  Этот тариф автоматически подключается новому пользователю при регистрации.
+                  Если не выбран — подключается первый активный тариф с ценой 0 ₽.
+                </p>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <select
+                    value={registrationTariff}
+                    onChange={e => setRegistrationTariff(e.target.value)}
+                    style={{ padding: '7px 12px', borderRadius: 7, border: '1px solid var(--border)', fontSize: 13, minWidth: 220 }}
+                  >
+                    <option value="">— Автоматически (первый бесплатный) —</option>
+                    {tariffConfigs.map(tc => (
+                      <option key={tc.id} value={tc.plan_key}>
+                        {tc.name || tc.plan_key} {Number(tc.price) === 0 ? '(0 ₽)' : `(${tc.price} ₽)`}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="btn-primary"
+                    style={{ padding: '7px 18px', fontSize: 13 }}
+                    onClick={async () => {
+                      try {
+                        await adminApi.setSetting('registration_tariff', registrationTariff);
+                        toast.success('Настройка сохранена');
+                      } catch { toast.error('Ошибка сохранения'); }
+                    }}
+                  >
+                    Сохранить
+                  </button>
+                </div>
+              </div>
+
               {/* ── Tariff plan editor (tile manager) ── */}
               <div className="admin-form" style={{ marginBottom: 24 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
@@ -2445,7 +2482,7 @@ export default function AdminPage() {
                               <span style={{ color: '#888' }}>{log.user.email}</span>
                             </span>
                           ) : fmtId(log.userId)}
-                        </td>
+                      </td>
                         <td>
                           {(() => {
                             const actionMap: Record<string, { label: string; bg: string; color: string }> = {
@@ -2491,13 +2528,13 @@ export default function AdminPage() {
                         <td style={{ fontSize: 12, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.details || '—'}</td>
                         <td style={{ fontSize: 12, color: '#888' }}>{log.ip || '—'}</td>
                         <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{fmtDate(log.createdAt)}</td>
-                      </tr>
-                    ))}
+                    </tr>
+                  ))}
                     {!activityLoading && activityLogs.length === 0 && (
                       <tr><td colSpan={6} style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Нет записей</td></tr>
-                    )}
-                  </tbody>
-                </table>
+                  )}
+                </tbody>
+              </table>
               </div>
             </>
           )}

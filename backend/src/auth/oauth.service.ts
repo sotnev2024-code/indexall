@@ -6,6 +6,7 @@ import { JwtService } from '@nestjs/jwt';
 import { User, UserPlan } from '../users/user.entity';
 import { TariffConfig } from '../admin/tariff-config.entity';
 import { TariffOperation } from '../admin/tariff-operation.entity';
+import { AppSetting } from '../admin/app-setting.entity';
 import { randomUUID } from 'crypto';
 
 export type OAuthProvider = 'google' | 'yandex' | 'mailru';
@@ -35,6 +36,7 @@ export class OAuthService {
     @InjectRepository(User) private usersRepo: Repository<User>,
     @InjectRepository(TariffConfig) private tariffConfigRepo: Repository<TariffConfig>,
     @InjectRepository(TariffOperation) private tariffOpsRepo: Repository<TariffOperation>,
+    @InjectRepository(AppSetting) private settingsRepo: Repository<AppSetting>,
   ) {}
 
   private getCallbackUrl(provider: OAuthProvider): string {
@@ -205,8 +207,7 @@ export class OAuthService {
       return { trialActivated: false, trialName: '', trialDays: 0 };
     }
 
-    const all = await this.tariffConfigRepo.find({ where: { is_active: true }, order: { sort_order: 'ASC' } });
-    const freeTariff = all.find(t => Number(t.price) === 0) || null;
+    const freeTariff = await this.getRegistrationTariff();
     if (!freeTariff) return { trialActivated: false, trialName: '', trialDays: 0 };
 
     const expiresAt = new Date();
@@ -235,5 +236,16 @@ export class OAuthService {
       : Number(freeTariff.duration_value);
 
     return { trialActivated: true, trialName: freeTariff.name, trialDays: days };
+  }
+
+  private async getRegistrationTariff(): Promise<TariffConfig | null> {
+    const all = await this.tariffConfigRepo.find({ where: { is_active: true }, order: { sort_order: 'ASC', id: 'ASC' } });
+    if (all.length === 0) return null;
+    const setting = await this.settingsRepo.findOne({ where: { key: 'registration_tariff' } });
+    if (setting?.value) {
+      const byKey = all.find(t => t.plan_key === setting.value);
+      if (byKey) return byKey;
+    }
+    return all.find(t => Number(t.price) === 0) || null;
   }
 }

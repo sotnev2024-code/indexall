@@ -13,13 +13,14 @@ import { UsersModule } from '../users/users.module';
 import { User } from '../users/user.entity';
 import { TariffConfig } from '../admin/tariff-config.entity';
 import { TariffOperation } from '../admin/tariff-operation.entity';
+import { AppSetting } from '../admin/app-setting.entity';
 
 @Module({
   imports: [
     UsersModule,
     PassportModule,
     ConfigModule,
-    TypeOrmModule.forFeature([User, TariffConfig, TariffOperation]),
+    TypeOrmModule.forFeature([User, TariffConfig, TariffOperation, AppSetting]),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
