@@ -5,6 +5,9 @@ import ClientLayout from '@/components/ClientLayout';
 export const metadata: Metadata = {
   title: 'INDEXALL',
   description: 'Сервис для сборки спецификаций электрооборудования',
+  icons: {
+    icon: '/favicon.jpg',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
