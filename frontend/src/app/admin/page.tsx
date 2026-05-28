@@ -1267,6 +1267,28 @@ export default function AdminPage() {
                             title="Посмотреть проекты пользователя">
                             Проекты
                           </button>
+                          {u.plan !== 'admin' && (
+                            <button
+                              style={{
+                                padding: '3px 8px', fontSize: 11, whiteSpace: 'nowrap',
+                                background: '#fee2e2', color: '#991b1b',
+                                border: '1px solid #fca5a5', borderRadius: 4, cursor: 'pointer',
+                              }}
+                              onClick={async () => {
+                                if (!confirm(`Удалить пользователя ${u.email}?\n\nБудут удалены все его проекты, листы и данные. Это действие необратимо.`)) return;
+                                try {
+                                  await adminApi.deleteUser(u.id);
+                                  setUsers(prev => prev.filter(x => x.id !== u.id));
+                                  toast.success(`Пользователь ${u.email} удалён`);
+                                } catch (e: any) {
+                                  toast.error(e?.response?.data?.message || 'Ошибка удаления');
+                                }
+                              }}
+                              title="Удалить пользователя и все его данные"
+                            >
+                              Удалить
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}

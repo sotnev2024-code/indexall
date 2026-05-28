@@ -254,6 +254,18 @@ export class AdminController implements OnModuleInit {
     return { success: true };
   }
 
+  // ── Delete user (with all data) ──────────────────────────────
+
+  @Delete('users/:id')
+  async deleteUser(@Param('id', ParseIntPipe) id: number) {
+    const user = await this.usersRepo.findOne({ where: { id } });
+    if (!user) throw new BadRequestException('Пользователь не найден');
+    if (user.plan === 'admin') throw new BadRequestException('Нельзя удалить администратора');
+    // CASCADE rules on DB handle sheets, equipment_rows, folders, tariff_operations, etc.
+    await this.usersRepo.delete(id);
+    return { deleted: true, id };
+  }
+
   // ── Conversions ──────────────────────────────────────────────
 
   @Get('conversions')
