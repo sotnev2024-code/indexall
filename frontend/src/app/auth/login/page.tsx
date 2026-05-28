@@ -75,13 +75,8 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-bg">
       <div className="bg-white rounded-lg shadow-lg p-8 w-full max-w-md">
-        <div className="flex items-center justify-center gap-3 mb-6">
-          <div className="w-12 h-12 bg-yellow rounded-full flex items-center justify-center">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-            </svg>
-          </div>
-          <h1 className="text-2xl font-bold tracking-wider">INDEXALL</h1>
+        <div className="flex items-center justify-center mb-6">
+          <img src="/logo.png" alt="INDEXALL" style={{ height: 56, width: 'auto', objectFit: 'contain' }} />
         </div>
 
         <div className="flex mb-6 border border-border rounded-lg overflow-hidden">
