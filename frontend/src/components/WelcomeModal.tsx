@@ -39,16 +39,6 @@ export default function WelcomeModal() {
         padding: '36px 32px', maxWidth: 420, width: '100%',
         textAlign: 'center', boxShadow: '0 8px 40px rgba(0,0,0,0.18)',
       }}>
-        {/* Icon */}
-        <div style={{
-          width: 72, height: 72, borderRadius: '50%',
-          background: '#fffbe6', border: '3px solid #f5c800',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          margin: '0 auto 20px', fontSize: 32,
-        }}>
-          🎁
-        </div>
-
         <h2 style={{ fontSize: 22, fontWeight: 800, marginBottom: 12 }}>
           Добро пожаловать в INDEXALL!
         </h2>
