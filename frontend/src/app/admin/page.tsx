@@ -2394,6 +2394,7 @@ export default function AdminPage() {
                     <option value="add_from_catalog">Добавление из каталога</option>
                     <option value="add_from_pricelist">Добавление из прайса</option>
                     <option value="export">Экспорт</option>
+                    <option value="click_tariff">Нажал на тариф</option>
                     <option value="activate_tariff">Активация тарифа</option>
                   </optgroup>
                 </select>
@@ -2458,6 +2459,7 @@ export default function AdminPage() {
                               register_yandex:    { label: 'Рег. Яндекс',     bg: '#dbeafe', color: '#1e40af' },
                               register_mailru:    { label: 'Рег. Mail.ru',     bg: '#dbeafe', color: '#1e40af' },
                               activate_tariff:    { label: 'Тариф активирован',bg: '#ede9fe', color: '#5b21b6' },
+                              click_tariff:       { label: 'Нажал на тариф',   bg: '#f5f3ff', color: '#7c3aed' },
                               create_project:     { label: 'Создан проект',    bg: '#e0f2fe', color: '#0369a1' },
                               delete_project:     { label: 'Удалён проект',    bg: '#fee2e2', color: '#991b1b' },
                               create_sheet:       { label: 'Создана спец.',    bg: '#e0f2fe', color: '#0369a1' },
@@ -2513,6 +2515,7 @@ export default function AdminPage() {
               register_google: { label: 'Рег. Google', bg: '#dbeafe', color: '#1e40af' },
               register_yandex: { label: 'Рег. Яндекс', bg: '#dbeafe', color: '#1e40af' },
               activate_tariff: { label: 'Тариф', bg: '#ede9fe', color: '#5b21b6' },
+              click_tariff: { label: 'Нажал тариф', bg: '#f5f3ff', color: '#7c3aed' },
               create_project: { label: 'Создал проект', bg: '#e0f2fe', color: '#0369a1' },
               delete_project: { label: 'Удалил проект', bg: '#fee2e2', color: '#991b1b' },
               create_sheet: { label: 'Создал спец.', bg: '#e0f2fe', color: '#0369a1' },

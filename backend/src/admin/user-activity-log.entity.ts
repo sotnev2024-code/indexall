@@ -31,6 +31,7 @@ export type ActivityAction =
   | 'delete_row'
   | 'insert_row'
   | 'activate_tariff'
+  | 'click_tariff'
   | 'other';
 
 @Entity('user_activity_logs')
