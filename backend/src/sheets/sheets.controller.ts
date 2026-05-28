@@ -14,22 +14,28 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { SheetsService } from './sheets.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ProGuard } from '../auth/guards/pro.guard';
+import { ActivityLogService } from '../admin/activity-log.service';
 
 @ApiTags('sheets')
 @Controller('sheets')
 @UseGuards(JwtAuthGuard, ProGuard)
 @ApiBearerAuth()
 export class SheetsController {
-  constructor(private readonly service: SheetsService) {}
+  constructor(
+    private readonly service: SheetsService,
+    private readonly activityLog: ActivityLogService,
+  ) {}
 
   @Post('project/:projectId')
   @ApiOperation({ summary: 'Создать лист в проекте' })
-  create(
+  async create(
     @Param('projectId', ParseIntPipe) projectId: number,
     @Body('name') name: string,
     @Request() req,
   ) {
-    return this.service.createSheet(projectId, req.user.userId, name);
+    const result = await this.service.createSheet(projectId, req.user.userId, name);
+    this.activityLog.log(req.user.userId, 'create_sheet', `name: ${name}, project id: ${projectId}`);
+    return result;
   }
 
   @Get(':id')
@@ -56,8 +62,10 @@ export class SheetsController {
 
   @Delete(':id')
   @ApiOperation({ summary: 'Удалить лист' })
-  remove(@Param('id', ParseIntPipe) id: number, @Request() req) {
-    return this.service.removeSheet(id, req.user.userId);
+  async remove(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    const result = await this.service.removeSheet(id, req.user.userId);
+    this.activityLog.log(req.user.userId, 'delete_sheet', `sheet id: ${id}`);
+    return result;
   }
 
   @Put(':id/rows')

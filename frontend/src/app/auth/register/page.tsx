@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import { useAppStore } from '@/store/app.store';
+import SocialLoginButtons from '@/components/SocialLoginButtons';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 
@@ -188,6 +189,8 @@ export default function RegisterPage() {
             {loading ? 'Регистрация…' : 'Зарегистрироваться'}
           </button>
         </form>
+
+        <SocialLoginButtons mode="register" />
       </div>
     </div>
   );

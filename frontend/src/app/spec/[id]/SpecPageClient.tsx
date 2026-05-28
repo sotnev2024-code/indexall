@@ -4,7 +4,8 @@ import { useParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import ImportModal from '@/components/ImportModal';
-import { sheetsApi, projectsApi, foldersApi, catalogApi, exportApi, storesApi, templatesApi } from '@/lib/api';
+import { sheetsApi, projectsApi, foldersApi, catalogApi, exportApi, storesApi, templatesApi, activityApi } from '@/lib/api';
+import { usePageTracker } from '@/hooks/usePageTracker';
 import { useAppStore } from '@/store/app.store';
 
 const MAX_UNDO = 30;
@@ -270,6 +271,8 @@ export default function SpecPageClient() {
   const [currentId, setCurrentId] = useState(() => Number(_routeId));
   const currentIdRef = useRef(Number(_routeId));
   useEffect(() => { currentIdRef.current = currentId; }, [currentId]);
+
+  usePageTracker('Спецификация', `sheet id: ${_routeId}`);
 
   // Normalize decimal separators (comma→dot) in numeric fields before saving.
   // Drop `id` and relation fields — backend uses (sheetId, sort_order) and
@@ -874,6 +877,7 @@ export default function SpecPageClient() {
   // ── Import from price-list file ──────────────────────────────
   function handleImport(importedRows: any[], importMode: 'append' | 'replace') {
     pushHistorySnapshot(rowsRef.current);
+    activityApi.logEvent('add_from_pricelist', `rows: ${importedRows.length}, mode: ${importMode}`);
     const MIN_ROWS = 25;
     const emptyRowPad = (i: number) => ({ row_number: i + 1, name: '', brand: '', article: '', qty: '', unit: '', price: '', store: '', coef: '1', total: '', deadline: '' });
 
@@ -1015,6 +1019,7 @@ export default function SpecPageClient() {
     if (!renamingSheetId || !renameVal.trim()) { setRenamingSheetId(null); return; }
     try {
       await sheetsApi.update(renamingSheetId, { name: renameVal.trim() });
+      activityApi.logEvent('rename_sheet', `id: ${renamingSheetId}, новое имя: "${renameVal.trim()}"`);
       setProject((p: any) => p ? {
         ...p,
         sheets: p.sheets?.map((s: any) => s.id === renamingSheetId ? { ...s, name: renameVal.trim() } : s),
@@ -1154,6 +1159,7 @@ export default function SpecPageClient() {
       const toSave = rows.filter(r => r.name || r.article).map(normRowForSave);
       await queueSaveRows(sid, toSave);
       if (currentIdRef.current === sid) setUnsaved(false);
+      activityApi.logEvent('save_sheet', `sheet id: ${sid}, строк: ${toSave.length}, лист: "${sheet?.name || ''}"`);
       toast.success('Сохранено');
     } catch { toast.error('Ошибка сохранения'); }
   }
@@ -1330,6 +1336,7 @@ export default function SpecPageClient() {
   // Single-row delete used by keyboard flow
   const deleteRow = useCallback((rowIdx: number) => {
     pushHistorySnapshot(rowsRef.current);
+    const deleted = rowsRef.current[rowIdx];
     setRows(prev => {
       const next = prev.filter((_, i) => i !== rowIdx);
       // Keep length stable: append exactly one empty row to compensate
@@ -1337,8 +1344,9 @@ export default function SpecPageClient() {
       return next;
     });
     setUnsaved(true);
+    activityApi.logEvent('delete_row', `лист: "${sheet?.name || currentIdRef.current}", строка ${rowIdx + 1}: "${deleted?.name || deleted?.article || ''}"`);
     toast.success('Строка удалена');
-  }, [setUnsaved]);
+  }, [setUnsaved, sheet]);
 
   // Insert empty row below given index (used by row action button)
   const insertRowBelow = useCallback((rowIdx: number) => {

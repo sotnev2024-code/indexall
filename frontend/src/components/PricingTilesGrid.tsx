@@ -74,7 +74,7 @@ export default function PricingTilesGrid({ tariffs, loadingPlanKey, onBuy }: Pro
               cursor: isLoading ? 'wait' : 'pointer',
               position: 'relative',
               overflow: 'hidden',
-              background: '#1a1a1a',
+              background: img ? 'transparent' : '#1a1a1a',
               color: '#fff',
               boxShadow: '0 4px 20px rgba(0,0,0,0.14)',
               display: 'block',

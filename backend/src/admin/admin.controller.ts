@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Patch, Delete, Put,
-  Param, Body, UseGuards, ParseIntPipe, ParseEnumPipe, OnModuleInit,
+  Param, Body, Query, UseGuards, ParseIntPipe, ParseEnumPipe, OnModuleInit,
   BadRequestException, UseInterceptors, UploadedFile,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -47,6 +47,7 @@ import {
 import { TariffOperation } from './tariff-operation.entity';
 import { TariffConfig } from './tariff-config.entity';
 import { AppSetting } from './app-setting.entity';
+import { UserActivityLog } from './user-activity-log.entity';
 
 /** Seed tariffs created on first start. After that the table is admin-managed
  *  (CRUD via admin API). The init logic only ADDS missing seeds — it never
@@ -101,6 +102,7 @@ export class AdminController implements OnModuleInit {
     @InjectRepository(TariffOperation) private tariffRepo: Repository<TariffOperation>,
     @InjectRepository(TariffConfig) private tariffConfigRepo: Repository<TariffConfig>,
     @InjectRepository(AppSetting) private settingsRepo: Repository<AppSetting>,
+    @InjectRepository(UserActivityLog) private activityRepo: Repository<UserActivityLog>,
   ) {}
 
   async onModuleInit() {
@@ -172,6 +174,23 @@ export class AdminController implements OnModuleInit {
       projects_count: projectMap[safe.id] || 0,
       sheets_count: sheetMap[safe.id] || 0,
     }));
+  }
+
+  @Get('users/:id/projects')
+  async getUserProjects(@Param('id', ParseIntPipe) id: number) {
+    const [folders, sheets] = await Promise.all([
+      this.foldersRepo.find({
+        where: [{ owner_id: id, type: 'projects' as any }],
+        order: { createdAt: 'DESC' },
+      }),
+      this.sheetsRepo.find({
+        where: { owner_id: id },
+        order: { createdAt: 'DESC' },
+        select: ['id', 'name', 'createdAt', 'updatedAt', 'owner_id', 'folder_id'],
+      }),
+    ]);
+
+    return { folders, sheets };
   }
 
   @Patch('users/:id/plan')
@@ -906,5 +925,67 @@ export class AdminController implements OnModuleInit {
       newProjectsMonth: newProjectsMonth + newFoldersMonth,
       topUsers,
     };
+  }
+
+  // ── Activity Log ─────────────────────────────────────────────
+
+  @Get('activity-log')
+  async getActivityLog(
+    @Query('userId') userIdStr?: string,
+    @Query('action') action?: string,
+    @Query('limit') limitStr?: string,
+    @Query('offset') offsetStr?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+  ) {
+    const limit = Math.min(parseInt(limitStr || '100', 10), 500);
+    const skip = parseInt(offsetStr || '0', 10);
+
+    const qb = this.activityRepo.createQueryBuilder('log')
+      .leftJoin('log.user', 'u')
+      .addSelect(['u.id', 'u.email', 'u.name'])
+      .orderBy('log.createdAt', 'DESC')
+      .take(limit)
+      .skip(skip);
+
+    if (userIdStr) qb.andWhere('log.userId = :uid', { uid: parseInt(userIdStr, 10) });
+    if (action) qb.andWhere('log.action = :action', { action });
+    if (dateFrom) qb.andWhere('log.createdAt >= :from', { from: new Date(dateFrom) });
+    if (dateTo) {
+      const to = new Date(dateTo);
+      to.setHours(23, 59, 59, 999);
+      qb.andWhere('log.createdAt <= :to', { to });
+    }
+
+    const [items, total] = await qb.getManyAndCount();
+    return { items, total };
+  }
+
+  // ── Activity Stats ────────────────────────────────────────────
+
+  @Get('activity-stats')
+  async getActivityStats() {
+    // Group by action and count, for the last 90 days
+    const since = new Date();
+    since.setDate(since.getDate() - 90);
+
+    const rows: { action: string; cnt: string }[] = await this.activityRepo
+      .createQueryBuilder('log')
+      .select('log.action', 'action')
+      .addSelect('COUNT(*)', 'cnt')
+      .where('log.createdAt >= :since', { since })
+      .groupBy('log.action')
+      .getRawMany();
+
+    const map: Record<string, number> = {};
+    for (const r of rows) map[r.action] = parseInt(r.cnt, 10);
+
+    // Total users registered (all time)
+    const totalUsers = await this.usersRepo.count();
+    // Users registered in last 30 days
+    const last30 = new Date(); last30.setDate(last30.getDate() - 30);
+    const newUsers30 = await this.usersRepo.count({ where: { createdAt: require('typeorm').MoreThan(last30) } });
+
+    return { byAction: map, totalUsers, newUsers30 };
   }
 }

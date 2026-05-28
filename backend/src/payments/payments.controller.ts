@@ -10,11 +10,13 @@ import { AdminGuard } from '../auth/guards/admin.guard';
 import { TariffConfig } from '../admin/tariff-config.entity';
 import { AppSetting } from '../admin/app-setting.entity';
 import { YookassaWebhookGuard } from './yookassa-webhook.guard';
+import { ActivityLogService } from '../admin/activity-log.service';
 
 @Controller('payments')
 export class PaymentsController {
   constructor(
     private readonly paymentsService: PaymentsService,
+    private readonly activityLogService: ActivityLogService,
     @InjectRepository(TariffConfig) private tariffConfigRepo: Repository<TariffConfig>,
     @InjectRepository(AppSetting) private settingsRepo: Repository<AppSetting>,
   ) {}
@@ -47,11 +49,13 @@ export class PaymentsController {
   ) {
     const returnUrl = body.returnUrl || `${process.env.FRONTEND_URL || 'http://localhost:3000'}/pricing?success=1`;
     try {
-      return await this.paymentsService.createPayment({
+      const result = await this.paymentsService.createPayment({
         userId: req.user.userId,
         planType: body.planType,
         returnUrl,
       });
+      this.activityLogService.log(req.user.userId, 'click_tariff', `Переход к оплате тарифа: ${body.planType}`);
+      return result;
     } catch (err: any) {
       throw new BadRequestException(err.message || 'Ошибка создания платежа в YooKassa');
     }
@@ -97,6 +101,7 @@ export class PaymentsController {
     if (!body?.planKey) throw new BadRequestException('planKey обязателен');
     try {
       const result = await this.paymentsService.activateFree(req.user.userId, body.planKey);
+      this.activityLogService.log(req.user.userId, 'activate_tariff', `Активирован бесплатный тариф: ${body.planKey}`);
       return { activated: true, expiresAt: result.expiresAt };
     } catch (err: any) {
       throw new BadRequestException(err.message || 'Ошибка активации тарифа');

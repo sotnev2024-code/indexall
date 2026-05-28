@@ -3,9 +3,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
-import { foldersApi, sheetsApi, trashApi, templatesApi } from '@/lib/api';
+import { foldersApi, sheetsApi, trashApi, templatesApi, activityApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 import RequireSubscription from '@/components/RequireSubscription';
+import WelcomeModal from '@/components/WelcomeModal';
+import { usePageTracker } from '@/hooks/usePageTracker';
 
 type TplFolderNode = {
   id: number;
@@ -92,6 +94,8 @@ export default function ProjectsPage() {
 function ProjectsPageInner() {
   const router = useRouter();
   const { setActive } = useAppStore();
+
+  usePageTracker('Проекты');
 
   const [tree, setTree] = useState<{ children: FolderNode[]; items: SheetItem[] }>({ children: [], items: [] });
   const [loading, setLoading] = useState(true);
@@ -213,6 +217,7 @@ function ProjectsPageInner() {
     if (!name.trim()) return;
     try {
       await foldersApi.rename(id, name.trim());
+      activityApi.logEvent('rename_project', `id: ${id}, новое имя: "${name.trim()}"`);
       await loadTree();
     } catch { toast.error('Ошибка переименования'); }
   }
@@ -240,6 +245,7 @@ function ProjectsPageInner() {
     if (!name.trim()) return;
     try {
       await sheetsApi.update(id, { name: name.trim() });
+      activityApi.logEvent('rename_sheet', `id: ${id}, новое имя: "${name.trim()}"`);
       await loadTree();
     } catch { toast.error('Ошибка переименования'); }
   }
@@ -627,6 +633,7 @@ function ProjectsPageInner() {
 
   return (
     <>
+      <WelcomeModal />
       <Header breadcrumb="Проекты" />
 
       <div className="projects-screen" onClick={() => setCtx(null)}>

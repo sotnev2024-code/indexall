@@ -7,6 +7,7 @@ import * as crypto from 'crypto';
 import { User, UserPlan } from '../users/user.entity';
 import { TariffConfig } from '../admin/tariff-config.entity';
 import { TariffOperation } from '../admin/tariff-operation.entity';
+import { ActivityLogService } from '../admin/activity-log.service';
 
 export interface CreatePaymentDto {
   userId: number;
@@ -30,6 +31,7 @@ export class PaymentsService {
 
   constructor(
     private configService: ConfigService,
+    private activityLogService: ActivityLogService,
     @InjectRepository(User) private usersRepo: Repository<User>,
     @InjectRepository(TariffConfig) private tariffConfigRepo: Repository<TariffConfig>,
     @InjectRepository(TariffOperation) private tariffOpsRepo: Repository<TariffOperation>,
@@ -337,6 +339,7 @@ export class PaymentsService {
       `Subscription activated via ${source} for user ${userId}, plan: ${planKey} (+${label}), ` +
       `from ${currentExpires?.toISOString() || 'now'} → ${expiresAt.toISOString()}`,
     );
+    this.activityLogService.log(userId, 'activate_tariff', `Оплачен тариф: ${planKey} (+${label}), до ${expiresAt.toLocaleDateString('ru-RU')}`);
     return true;
   }
 

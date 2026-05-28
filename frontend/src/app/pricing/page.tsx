@@ -2,11 +2,12 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { paymentsApi, authApi } from '@/lib/api';
+import { paymentsApi, authApi, activityApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 import { canActivateTrial, PAYMENTS_ENABLED } from '@/lib/permissions';
 import Header from '@/components/layout/Header';
 import PricingTilesGrid from '@/components/PricingTilesGrid';
+import { usePageTracker } from '@/hooks/usePageTracker';
 
 interface TariffConfig {
   id: number;
@@ -104,6 +105,8 @@ function PricingContent() {
     const token = localStorage.getItem('token');
     if (!token) { router.push('/auth/login?redirect=/pricing'); return; }
 
+    activityApi.logEvent('click_tariff', `Нажал на тариф: ${planKey}`).catch(() => {});
+
     // Legacy trial plan_key — delegate to the existing trial endpoint
     if (planKey === 'trial') {
       handleActivateTrial();
@@ -174,6 +177,8 @@ function PricingContent() {
       setLoading(null);
     }
   }
+
+  usePageTracker('Тарифы');
 
   const plan = user?.plan;
   const trialUsed = (user as any)?.trialUsed ?? false;

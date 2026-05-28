@@ -249,6 +249,15 @@ export const adminApi = {
   setSetting: (key: string, value: string) => api.put(`/admin/settings/${key}`, { value }),
 };
 
+// ── Activity log ──────────────────────────────────────────────
+export const activityApi = {
+  /** Log a client-side event (catalog section open, add from catalog, etc.) */
+  logEvent: (action: string, details?: string) =>
+    api.post('/auth/log-event', { action, details }).catch(() => {}),
+  /** Call on logout so the server records the event. */
+  logout: () => api.post('/auth/logout').catch(() => {}),
+};
+
 // ── Profile ───────────────────────────────────────────────────
 export const profileApi = {
   updateProfile: (data: { name?: string; email?: string }) => api.patch('/auth/profile', data),

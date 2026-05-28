@@ -9,7 +9,7 @@ import TilesManagerModal from '@/components/TilesManagerModal';
 import TariffsManagerModal, { TariffTile } from '@/components/TariffsManagerModal';
 import AdminEtmLookup from '@/components/AdminEtmLookup';
 
-type Tab = 'pricelists' | 'base' | 'templates' | 'users' | 'conversions' | 'tariffs' | 'stats' | 'tiles' | 'accessories';
+type Tab = 'pricelists' | 'base' | 'templates' | 'users' | 'conversions' | 'tariffs' | 'stats' | 'tiles' | 'accessories' | 'activity';
 
 function getBackendOrigin(): string {
   try {
@@ -146,6 +146,29 @@ export default function AdminPage() {
   const [tileFilterCols, setTileFilterCols] = useState<{ col: string; label: string }[]>([]);
   const [tileUploading, setTileUploading] = useState(false);
 
+  // ── Activity log state ────────────────────────────────────────
+  const [activityLogs, setActivityLogs] = useState<any[]>([]);
+  const [activityTotal, setActivityTotal] = useState(0);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityFilter, setActivityFilter] = useState({ action: '', userId: '' });
+  const [activityStats, setActivityStats] = useState<{ byAction: Record<string, number>; totalUsers: number; newUsers30: number } | null>(null);
+  const [activityUserSearch, setActivityUserSearch] = useState('');
+
+  // ── User activity modal ───────────────────────────────────────
+  const [userActivityModal, setUserActivityModal] = useState<{
+    user: any;
+    logs: any[];
+    total: number;
+    offset: number;
+    loading: boolean;
+    dateFrom: string;
+    dateTo: string;
+  } | null>(null);
+
+  // ── User projects viewer ──────────────────────────────────────
+  const [viewProjectsUserId, setViewProjectsUserId] = useState<number | null>(null);
+  const [viewProjectsData, setViewProjectsData] = useState<{ folders: any[]; sheets: any[] } | null>(null);
+
   // ── Accessories state ─────────────────────────────────────────
   const [accTables, setAccTables] = useState<any[]>([]);
   const [accAllTiles, setAccAllTiles] = useState<any[]>([]);
@@ -181,6 +204,7 @@ export default function AdminPage() {
     else if (tab === 'base') loadTiles();
     else if (tab === 'tiles') loadTiles();
     else if (tab === 'accessories') loadAccessories();
+    else if (tab === 'activity') { loadActivity(); if (users.length === 0) loadUsers(); }
   }, [tab]);
 
   // While any price list is parsing on the server, refresh the table every
@@ -490,6 +514,76 @@ export default function AdminPage() {
   async function loadTiles() {
     try { const { data } = await catalogApi.getTilesAll(); setTiles(data); }
     catch { toast.error('Ошибка загрузки категорий'); }
+  }
+
+  async function loadActivity(filter?: { action?: string; userId?: string }) {
+    setActivityLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const headers = { Authorization: `Bearer ${token}` };
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || '';
+
+      const params = new URLSearchParams({ limit: '200' });
+      const f = filter || activityFilter;
+      if (f.action) params.set('action', f.action);
+      if (f.userId) params.set('userId', f.userId);
+
+      const [logRes, statsRes] = await Promise.all([
+        fetch(`${baseUrl}/admin/activity-log?${params}`, { headers }),
+        activityStats === null ? fetch(`${baseUrl}/admin/activity-stats`, { headers }) : Promise.resolve(null),
+      ]);
+
+      if (!logRes.ok) throw new Error('err');
+      const data = await logRes.json();
+      setActivityLogs(data.items || []);
+      setActivityTotal(data.total || 0);
+
+      if (statsRes) {
+        const stats = await statsRes.json();
+        setActivityStats(stats);
+      }
+    } catch { toast.error('Ошибка загрузки журнала'); }
+    finally { setActivityLoading(false); }
+  }
+
+  async function openUserActivityModal(user: any) {
+    setUserActivityModal({ user, logs: [], total: 0, offset: 0, loading: true, dateFrom: '', dateTo: '' });
+    await fetchUserActivityLogs(user, 0, '', '');
+  }
+
+  async function fetchUserActivityLogs(
+    user: any,
+    offset: number,
+    dateFrom: string,
+    dateTo: string,
+    append = false,
+  ) {
+    setUserActivityModal(prev => prev ? { ...prev, loading: true } : prev);
+    try {
+      const token = localStorage.getItem('token');
+      const LIMIT = offset === 0 ? 40 : 30;
+      const params = new URLSearchParams({ userId: String(user.id), limit: String(LIMIT), offset: String(offset) });
+      if (dateFrom) params.set('dateFrom', dateFrom);
+      if (dateTo) params.set('dateTo', dateTo);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/admin/activity-log?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setUserActivityModal(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          logs: append ? [...prev.logs, ...(data.items || [])] : (data.items || []),
+          total: data.total || 0,
+          offset: offset + (data.items?.length || 0),
+          loading: false,
+          dateFrom,
+          dateTo,
+        };
+      });
+    } catch {
+      setUserActivityModal(prev => prev ? { ...prev, loading: false } : prev);
+    }
   }
 
   async function loadAccessories() {
@@ -1000,6 +1094,7 @@ export default function AdminPage() {
 
   const navItems: { key: Tab; label: string }[] = [
     { key: 'users',     label: 'Пользователи' },
+    { key: 'activity',  label: 'Журнал действий' },
     { key: 'conversions', label: 'Конверсии' },
     { key: 'tariffs',   label: 'Тарифы и их операции' },
     { key: 'templates', label: 'Шаблоны' },
@@ -1149,11 +1244,26 @@ export default function AdminPage() {
                             <option value="sleep">sleep</option>
                           </select>
                         </td>
-                        <td>
+                        <td style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           <button className="btn-outline" style={{ padding: '3px 8px', fontSize: 11, whiteSpace: 'nowrap' }}
                             onClick={() => handleChangePassword(u.id, u.email)}
                             title="Сменить пароль пользователя">
                             Сменить пароль
+                          </button>
+                          <button className="btn-outline" style={{ padding: '3px 8px', fontSize: 11, whiteSpace: 'nowrap' }}
+                            onClick={async () => {
+                              try {
+                                const token = localStorage.getItem('token');
+                                const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/admin/users/${u.id}/projects`, {
+                                  headers: { Authorization: `Bearer ${token}` },
+                                });
+                                const data = await res.json();
+                                setViewProjectsUserId(u.id);
+                                setViewProjectsData(data);
+                              } catch { toast.error('Ошибка загрузки'); }
+                            }}
+                            title="Посмотреть проекты пользователя">
+                            Проекты
                           </button>
                         </td>
                       </tr>
@@ -1164,6 +1274,77 @@ export default function AdminPage() {
                   </tbody>
                 </table>
               </div>
+
+              {/* User projects modal */}
+              {viewProjectsUserId !== null && viewProjectsData && (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 9000, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  onClick={() => { setViewProjectsUserId(null); setViewProjectsData(null); }}>
+                  <div style={{ background: '#fff', borderRadius: 12, padding: 24, width: '90%', maxWidth: 700, maxHeight: '80vh', overflowY: 'auto' }}
+                    onClick={e => e.stopPropagation()}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                      <div style={{ fontWeight: 700, fontSize: 16 }}>
+                        Проекты пользователя #{viewProjectsUserId}
+                        {' '}<span style={{ fontWeight: 400, fontSize: 13, color: '#888' }}>({users.find(u => u.id === viewProjectsUserId)?.email})</span>
+                      </div>
+                      <button onClick={() => { setViewProjectsUserId(null); setViewProjectsData(null); }} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}>✕</button>
+                    </div>
+                    {viewProjectsData.folders.length === 0 && viewProjectsData.sheets.length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: '32px 0', color: '#888' }}>Нет проектов и листов</div>
+                    ) : (
+                      <>
+                        {viewProjectsData.folders.length > 0 && (
+                          <>
+                            <div style={{ fontWeight: 600, marginBottom: 8 }}>Папки / Проекты ({viewProjectsData.folders.length})</div>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 20, fontSize: 13 }}>
+                              <thead>
+                                <tr style={{ borderBottom: '2px solid #eee' }}>
+                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>ID</th>
+                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Название</th>
+                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Создан</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {viewProjectsData.folders.map((f: any) => (
+                                  <tr key={f.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                                    <td style={{ padding: '6px 8px', color: '#888' }}>{f.id}</td>
+                                    <td style={{ padding: '6px 8px', fontWeight: 500 }}>{f.name}</td>
+                                    <td style={{ padding: '6px 8px', color: '#888' }}>{fmtDate(f.createdAt)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </>
+                        )}
+                        {viewProjectsData.sheets.length > 0 && (
+                          <>
+                            <div style={{ fontWeight: 600, marginBottom: 8 }}>Спецификации / Листы ({viewProjectsData.sheets.length})</div>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                              <thead>
+                                <tr style={{ borderBottom: '2px solid #eee' }}>
+                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>ID</th>
+                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Название</th>
+                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Создан</th>
+                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Обновлён</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {viewProjectsData.sheets.map((s: any) => (
+                                  <tr key={s.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                                    <td style={{ padding: '6px 8px', color: '#888' }}>{s.id}</td>
+                                    <td style={{ padding: '6px 8px', fontWeight: 500 }}>{s.name}</td>
+                                    <td style={{ padding: '6px 8px', color: '#888' }}>{fmtDate(s.createdAt)}</td>
+                                    <td style={{ padding: '6px 8px', color: '#888' }}>{fmtDate(s.updatedAt)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
             </>
           )}
 
@@ -2094,6 +2275,384 @@ export default function AdminPage() {
                   )}
             </>
           )}
+
+          {/* ── Журнал действий ── */}
+          {tab === 'activity' && (
+            <>
+              <div className="admin-section-title">Журнал действий пользователей</div>
+
+              {/* ── Список пользователей ── */}
+              <div style={{ marginBottom: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                  <span style={{ fontWeight: 600, fontSize: 14 }}>Пользователи</span>
+                  <input
+                    type="text"
+                    placeholder="Поиск по email или имени…"
+                    value={activityUserSearch}
+                    onChange={e => setActivityUserSearch(e.target.value)}
+                    style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, width: 220 }}
+                  />
+                  <span style={{ color: '#9ca3af', fontSize: 12 }}>Нажмите на пользователя чтобы увидеть его действия</span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {users
+                    .filter(u => {
+                      if (!activityUserSearch) return true;
+                      const q = activityUserSearch.toLowerCase();
+                      return (u.email || '').toLowerCase().includes(q) || (u.name || '').toLowerCase().includes(q);
+                    })
+                    .slice(0, 50)
+                    .map((u: any) => (
+                      <button
+                        key={u.id}
+                        onClick={() => openUserActivityModal(u)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          padding: '6px 12px', borderRadius: 20, border: '1px solid #e5e7eb',
+                          background: '#fff', cursor: 'pointer', fontSize: 13,
+                          transition: 'all 0.15s',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = '#f0f9ff'; e.currentTarget.style.borderColor = '#0ea5e9'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.borderColor = '#e5e7eb'; }}
+                      >
+                        <span style={{
+                          width: 28, height: 28, borderRadius: '50%',
+                          background: u.plan === 'admin' ? '#7c3aed' : u.plan === 'pro' ? '#0ea5e9' : '#9ca3af',
+                          color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 11, fontWeight: 700, flexShrink: 0,
+                        }}>
+                          {(u.name || u.email || '?')[0].toUpperCase()}
+                        </span>
+                        <span>
+                          <span style={{ fontWeight: 600 }}>{u.name || '—'}</span>
+                          <br />
+                          <span style={{ color: '#6b7280', fontSize: 11 }}>{u.email}</span>
+                        </span>
+                      </button>
+                    ))}
+                  {users.length === 0 && <span style={{ color: '#9ca3af', fontSize: 13 }}>Загрузка пользователей…</span>}
+                </div>
+              </div>
+
+              {/* ── Статистика по источникам входа ── */}
+              {activityStats && (() => {
+                const s = activityStats.byAction;
+                const cards = [
+                  { label: 'Всего пользователей', value: activityStats.totalUsers, color: '#6366f1', icon: '👥' },
+                  { label: 'Новых за 30 дней', value: activityStats.newUsers30, color: '#0ea5e9', icon: '🆕' },
+                  { label: 'Входов (email)', value: s['login'] || 0, color: '#22c55e', icon: '📧' },
+                  { label: 'Входов Google', value: (s['login_google'] || 0) + (s['register_google'] || 0), color: '#ef4444', icon: '🔍' },
+                  { label: 'Входов Яндекс', value: (s['login_yandex'] || 0) + (s['register_yandex'] || 0), color: '#f59e0b', icon: '🟡' },
+                  { label: 'Входов Mail.ru', value: (s['login_mailru'] || 0) + (s['register_mailru'] || 0), color: '#3b82f6', icon: '✉️' },
+                  { label: 'Регистраций (email)', value: s['register'] || 0, color: '#8b5cf6', icon: '📝' },
+                  { label: 'Экспортов', value: s['export'] || 0, color: '#64748b', icon: '📊' },
+                ];
+                return (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 24 }}>
+                    {cards.map(c => (
+                      <div key={c.label} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 16px', borderLeft: `4px solid ${c.color}` }}>
+                        <div style={{ fontSize: 22, marginBottom: 4 }}>{c.icon}</div>
+                        <div style={{ fontSize: 24, fontWeight: 700, color: c.color }}>{c.value}</div>
+                        <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{c.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                <select
+                  value={activityFilter.action}
+                  onChange={e => setActivityFilter(f => ({ ...f, action: e.target.value }))}
+                  style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13 }}
+                >
+                  <option value="">Все действия</option>
+                  <optgroup label="Вход / регистрация">
+                    <option value="login">Вход (email)</option>
+                    <option value="login_google">Вход через Google</option>
+                    <option value="login_yandex">Вход через Яндекс</option>
+                    <option value="login_mailru">Вход через Mail.ru</option>
+                    <option value="register">Регистрация (email)</option>
+                    <option value="register_google">Регистрация через Google</option>
+                    <option value="register_yandex">Регистрация через Яндекс</option>
+                    <option value="register_mailru">Регистрация через Mail.ru</option>
+                    <option value="logout">Выход</option>
+                  </optgroup>
+                  <optgroup label="Навигация по разделам">
+                    <option value="open_section">Открыл раздел</option>
+                    <option value="leave_section">Вышел из раздела</option>
+                    <option value="open_catalog">Открыл раздел каталога</option>
+                  </optgroup>
+                  <optgroup label="Работа в сервисе">
+                    <option value="create_project">Создание проекта</option>
+                    <option value="delete_project">Удаление проекта</option>
+                    <option value="rename_project">Переименование проекта</option>
+                    <option value="create_sheet">Создание листа</option>
+                    <option value="delete_sheet">Удаление листа</option>
+                    <option value="rename_sheet">Переименование листа</option>
+                    <option value="save_sheet">Сохранение листа</option>
+                    <option value="delete_row">Удаление строки</option>
+                    <option value="add_from_catalog">Добавление из каталога</option>
+                    <option value="add_from_pricelist">Добавление из прайса</option>
+                    <option value="export">Экспорт</option>
+                    <option value="click_tariff">Нажал на тариф</option>
+                    <option value="activate_tariff">Активация тарифа</option>
+                  </optgroup>
+                </select>
+                <input
+                  type="text"
+                  placeholder="ID пользователя"
+                  value={activityFilter.userId}
+                  onChange={e => setActivityFilter(f => ({ ...f, userId: e.target.value }))}
+                  style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, width: 140 }}
+                />
+                <button className="btn-primary" style={{ padding: '6px 14px', fontSize: 13 }}
+                  onClick={() => loadActivity(activityFilter)}>
+                  Фильтровать
+                </button>
+                <button className="btn-outline" style={{ padding: '6px 14px', fontSize: 13 }}
+                  onClick={() => {
+                    const f = { action: '', userId: '' };
+                    setActivityFilter(f);
+                    loadActivity(f);
+                  }}>
+                  Сбросить
+                </button>
+                <span style={{ color: '#888', fontSize: 13 }}>
+                  {activityLoading ? 'Загрузка…' : `Записей: ${activityTotal}`}
+                </span>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="admin-table" style={{ minWidth: 800 }}>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Пользователь</th>
+                      <th>Действие</th>
+                      <th>Детали</th>
+                      <th>IP</th>
+                      <th>Дата</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activityLogs.map((log: any) => (
+                      <tr key={log.id}>
+                        <td style={{ color: '#888', fontSize: 12 }}>{log.id}</td>
+                        <td style={{ fontSize: 12 }}>
+                          {log.user ? (
+                            <span title={log.user.email}>
+                              <span style={{ fontWeight: 600 }}>{fmtId(log.userId)}</span>
+                              <br />
+                              <span style={{ color: '#888' }}>{log.user.email}</span>
+                            </span>
+                          ) : fmtId(log.userId)}
+                        </td>
+                        <td>
+                          {(() => {
+                            const actionMap: Record<string, { label: string; bg: string; color: string }> = {
+                              login:              { label: 'Вход',             bg: '#dcfce7', color: '#166534' },
+                              login_google:       { label: 'Вход Google',      bg: '#dcfce7', color: '#166534' },
+                              login_yandex:       { label: 'Вход Яндекс',      bg: '#dcfce7', color: '#166534' },
+                              login_mailru:       { label: 'Вход Mail.ru',     bg: '#dcfce7', color: '#166534' },
+                              logout:             { label: 'Выход',            bg: '#f0fdf4', color: '#4b7a5a' },
+                              register:           { label: 'Регистрация',      bg: '#dbeafe', color: '#1e40af' },
+                              register_google:    { label: 'Регистрация Google',bg:'#dbeafe', color: '#1e40af' },
+                              register_yandex:    { label: 'Рег. Яндекс',     bg: '#dbeafe', color: '#1e40af' },
+                              register_mailru:    { label: 'Рег. Mail.ru',     bg: '#dbeafe', color: '#1e40af' },
+                              activate_tariff:    { label: 'Тариф активирован',bg: '#ede9fe', color: '#5b21b6' },
+                              click_tariff:       { label: 'Нажал на тариф',   bg: '#f5f3ff', color: '#7c3aed' },
+                              create_project:     { label: 'Создан проект',    bg: '#e0f2fe', color: '#0369a1' },
+                              delete_project:     { label: 'Удалён проект',    bg: '#fee2e2', color: '#991b1b' },
+                              create_sheet:       { label: 'Создана спец.',    bg: '#e0f2fe', color: '#0369a1' },
+                              delete_sheet:       { label: 'Удалена спец.',    bg: '#fee2e2', color: '#991b1b' },
+                              rename_project:     { label: 'Переим. проект',   bg: '#f0f9ff', color: '#0369a1' },
+                              rename_sheet:       { label: 'Переим. спец.',    bg: '#f0f9ff', color: '#0369a1' },
+                              open_section:       { label: '▶ Открыл раздел', bg: '#f8fafc', color: '#475569' },
+                              leave_section:      { label: '◀ Вышел из раздела',bg:'#f8fafc', color: '#94a3b8' },
+                              open_catalog:       { label: 'Раздел каталога',  bg: '#fef3c7', color: '#92400e' },
+                              add_from_catalog:   { label: 'Добавил (кат.)',   bg: '#d1fae5', color: '#065f46' },
+                              add_from_pricelist: { label: 'Добавил (прайс)',  bg: '#d1fae5', color: '#065f46' },
+                              save_sheet:         { label: 'Сохранил спец.',   bg: '#fefce8', color: '#854d0e' },
+                              delete_row:         { label: 'Удалил строку',    bg: '#fff1f2', color: '#9f1239' },
+                              insert_row:         { label: 'Вставил строку',   bg: '#f0fdf4', color: '#166534' },
+                              export:             { label: 'Экспорт',          bg: '#fef9c3', color: '#713f12' },
+                            };
+                            const cfg = actionMap[log.action];
+                            return (
+                              <span style={{
+                                display: 'inline-block', padding: '2px 8px', borderRadius: 12, fontSize: 11,
+                                background: cfg?.bg ?? '#f3f4f6',
+                                color: cfg?.color ?? '#374151',
+                              }}>
+                                {cfg?.label ?? log.action}
+                              </span>
+                            );
+                          })()}
+                        </td>
+                        <td style={{ fontSize: 12, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.details || '—'}</td>
+                        <td style={{ fontSize: 12, color: '#888' }}>{log.ip || '—'}</td>
+                        <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{fmtDate(log.createdAt)}</td>
+                      </tr>
+                    ))}
+                    {!activityLoading && activityLogs.length === 0 && (
+                      <tr><td colSpan={6} style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Нет записей</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {/* ── Модальное окно: журнал конкретного пользователя ── */}
+          {userActivityModal && (() => {
+            const m = userActivityModal;
+            const u = m.user;
+            const ACTION_LABELS: Record<string, { label: string; bg: string; color: string }> = {
+              login: { label: 'Вход', bg: '#dcfce7', color: '#166534' },
+              login_google: { label: 'Вход Google', bg: '#dcfce7', color: '#166534' },
+              login_yandex: { label: 'Вход Яндекс', bg: '#dcfce7', color: '#166534' },
+              logout: { label: 'Выход', bg: '#f0fdf4', color: '#4b7a5a' },
+              register: { label: 'Регистрация', bg: '#dbeafe', color: '#1e40af' },
+              register_google: { label: 'Рег. Google', bg: '#dbeafe', color: '#1e40af' },
+              register_yandex: { label: 'Рег. Яндекс', bg: '#dbeafe', color: '#1e40af' },
+              activate_tariff: { label: 'Тариф', bg: '#ede9fe', color: '#5b21b6' },
+              click_tariff: { label: 'Нажал тариф', bg: '#f5f3ff', color: '#7c3aed' },
+              create_project: { label: 'Создал проект', bg: '#e0f2fe', color: '#0369a1' },
+              delete_project: { label: 'Удалил проект', bg: '#fee2e2', color: '#991b1b' },
+              create_sheet: { label: 'Создал спец.', bg: '#e0f2fe', color: '#0369a1' },
+              delete_sheet: { label: 'Удалил спец.', bg: '#fee2e2', color: '#991b1b' },
+              rename_project: { label: 'Переим. проект', bg: '#f0f9ff', color: '#0369a1' },
+              rename_sheet: { label: 'Переим. спец.', bg: '#f0f9ff', color: '#0369a1' },
+              open_section: { label: '▶ Раздел', bg: '#f8fafc', color: '#475569' },
+              leave_section: { label: '◀ Вышел', bg: '#f8fafc', color: '#94a3b8' },
+              open_catalog: { label: 'Каталог', bg: '#fef3c7', color: '#92400e' },
+              add_from_catalog: { label: '+Из каталога', bg: '#d1fae5', color: '#065f46' },
+              add_from_pricelist: { label: '+Из прайса', bg: '#d1fae5', color: '#065f46' },
+              save_sheet: { label: 'Сохранил', bg: '#fefce8', color: '#854d0e' },
+              delete_row: { label: 'Удалил строку', bg: '#fff1f2', color: '#9f1239' },
+              export: { label: 'Экспорт', bg: '#fef9c3', color: '#713f12' },
+            };
+
+            return (
+              <div style={{
+                position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 1000,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+              }} onClick={() => setUserActivityModal(null)}>
+                <div style={{
+                  background: '#fff', borderRadius: 14, width: '100%', maxWidth: 760,
+                  maxHeight: '90vh', display: 'flex', flexDirection: 'column',
+                  boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+                }} onClick={e => e.stopPropagation()}>
+
+                  {/* Header */}
+                  <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{
+                      width: 44, height: 44, borderRadius: '50%', flexShrink: 0,
+                      background: u.plan === 'admin' ? '#7c3aed' : u.plan === 'pro' ? '#0ea5e9' : '#9ca3af',
+                      color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 18, fontWeight: 700,
+                    }}>
+                      {(u.name || u.email || '?')[0].toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: 16 }}>{u.name || '—'}</div>
+                      <div style={{ color: '#6b7280', fontSize: 13 }}>{u.email} · ID {u.id}</div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 12, color: '#9ca3af' }}>
+                        {m.loading ? 'Загрузка…' : `Показано ${m.logs.length} из ${m.total}`}
+                      </span>
+                      <button onClick={() => setUserActivityModal(null)}
+                        style={{ width: 32, height: 32, borderRadius: '50%', border: 'none', background: '#f1f5f9', cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        ×
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Filters */}
+                  <div style={{ padding: '12px 24px', borderBottom: '1px solid #f1f5f9', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span style={{ fontSize: 13, color: '#6b7280', fontWeight: 500 }}>Период:</span>
+                    <input type="date" value={m.dateFrom}
+                      onChange={e => setUserActivityModal(prev => prev ? { ...prev, dateFrom: e.target.value } : prev)}
+                      style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13 }}
+                    />
+                    <span style={{ color: '#9ca3af', fontSize: 13 }}>—</span>
+                    <input type="date" value={m.dateTo}
+                      onChange={e => setUserActivityModal(prev => prev ? { ...prev, dateTo: e.target.value } : prev)}
+                      style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13 }}
+                    />
+                    <button
+                      onClick={() => fetchUserActivityLogs(u, 0, m.dateFrom, m.dateTo)}
+                      style={{ padding: '4px 14px', borderRadius: 6, background: '#0f172a', color: '#fff', border: 'none', fontSize: 13, cursor: 'pointer', fontWeight: 500 }}
+                    >
+                      Применить
+                    </button>
+                    {(m.dateFrom || m.dateTo) && (
+                      <button
+                        onClick={() => fetchUserActivityLogs(u, 0, '', '')}
+                        style={{ padding: '4px 10px', borderRadius: 6, background: '#f1f5f9', color: '#475569', border: 'none', fontSize: 13, cursor: 'pointer' }}
+                      >
+                        Сбросить
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Log list */}
+                  <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+                    {m.loading && m.logs.length === 0 ? (
+                      <div style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}>Загрузка…</div>
+                    ) : m.logs.length === 0 ? (
+                      <div style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}>Нет записей за выбранный период</div>
+                    ) : (
+                      m.logs.map((log: any, i: number) => {
+                        const cfg = ACTION_LABELS[log.action];
+                        return (
+                          <div key={log.id} style={{
+                            display: 'flex', alignItems: 'flex-start', gap: 12,
+                            padding: '9px 24px',
+                            background: i % 2 === 0 ? '#fff' : '#fafafa',
+                            borderBottom: '1px solid #f1f5f9',
+                          }}>
+                            <span style={{ fontSize: 11, color: '#9ca3af', whiteSpace: 'nowrap', paddingTop: 2, minWidth: 130 }}>
+                              {fmtDate(log.createdAt)}
+                            </span>
+                            <span style={{
+                              flexShrink: 0, padding: '2px 9px', borderRadius: 12, fontSize: 11, fontWeight: 500,
+                              background: cfg?.bg ?? '#f3f4f6', color: cfg?.color ?? '#374151',
+                            }}>
+                              {cfg?.label ?? log.action}
+                            </span>
+                            <span style={{ fontSize: 13, color: '#374151', flex: 1, wordBreak: 'break-word' }}>
+                              {log.details || '—'}
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Footer: pagination */}
+                  <div style={{ padding: '14px 24px', borderTop: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 13, color: '#6b7280' }}>
+                      {m.total > 0 ? `Показано ${m.logs.length} из ${m.total}` : ''}
+                    </span>
+                    {m.logs.length < m.total && (
+                      <button
+                        disabled={m.loading}
+                        onClick={() => fetchUserActivityLogs(u, m.offset, m.dateFrom, m.dateTo, true)}
+                        style={{
+                          padding: '8px 20px', borderRadius: 8, border: 'none',
+                          background: '#0f172a', color: '#fff', fontWeight: 600, fontSize: 14,
+                          cursor: m.loading ? 'not-allowed' : 'pointer', opacity: m.loading ? 0.6 : 1,
+                        }}
+                      >
+                        {m.loading ? 'Загрузка…' : `Показать ещё (осталось ${m.total - m.logs.length})`}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ── Статистика ── */}
           {tab === 'stats' && (

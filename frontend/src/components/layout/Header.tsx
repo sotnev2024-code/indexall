@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app.store';
 import toast from 'react-hot-toast';
 import AdminEtmLookup from '@/components/AdminEtmLookup';
+import { activityApi } from '@/lib/api';
 
 interface HeaderProps {
   breadcrumb?: string;
@@ -24,6 +25,7 @@ export default function Header({ breadcrumb = 'Проекты', projectCost, sho
   const [etmLookupOpen, setEtmLookupOpen] = useState(false);
 
   function logout() {
+    activityApi.logout();
     clearAuth();
     router.push('/auth/login');
   }

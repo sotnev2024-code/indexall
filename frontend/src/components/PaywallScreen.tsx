@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { paymentsApi } from '@/lib/api';
+import { paymentsApi, authApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 import { canActivateTrial, PAYMENTS_ENABLED } from '@/lib/permissions';
 import Header from '@/components/layout/Header';
@@ -22,6 +22,7 @@ interface TariffConfig {
   height?: number;
   parent_id?: number | null;
   image_path?: string | null;
+  max_activations_per_user?: number | null;
 }
 
 function durationLabel(t: TariffConfig): string {
@@ -59,25 +60,44 @@ export default function PaywallScreen() {
   const [configs, setConfigs] = useState<TariffConfig[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
   const [tilesMode, setTilesMode] = useState(false);
+  const [myActivations, setMyActivations] = useState<Record<string, number>>({});
 
   useEffect(() => {
     paymentsApi.getPlans()
       .then(({ data }) => setConfigs(data || []))
-      .catch(() => { /* keep defaults */ });
+      .catch(() => {});
     paymentsApi.getPublicSettings()
       .then(({ data }) => setTilesMode(!!data?.pricingTilesEnabled))
       .catch(() => setTilesMode(false));
   }, []);
+
+  useEffect(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    if (!token || !user) return;
+    paymentsApi.getMyActivations()
+      .then(({ data }) => setMyActivations(data || {}))
+      .catch(() => {});
+  }, [user]);
+
+  const trialUsed = !!(user as any)?.trialUsed;
+  const trialAvailable = !user || canActivateTrial(user as any);
+  const isLoggedOut = !user;
 
   const paidTariffs = configs
     .filter(c => c.plan_key !== 'trial' && Number(c.price) > 0)
     .slice()
     .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0));
 
-  // Show trial card for logged-out users (lead them to sign up) or logged-in users who can activate it
-  const trialUsed = !!(user as any)?.trialUsed;
-  const trialAvailable = !user || canActivateTrial(user as any);
-  const isLoggedOut = !user;
+  // All tariffs for tiles mode (same logic as /pricing page)
+  const tileModeTariffs = configs.filter(t => {
+    if (t.plan_key === 'trial') return trialAvailable;
+    const maxAct = Number(t.max_activations_per_user) || 0;
+    if (maxAct > 0 && user) {
+      const used = myActivations[t.plan_key] || 0;
+      if (used >= maxAct) return false;
+    }
+    return true;
+  });
 
   async function handleActivateTrial() {
     // If not logged in, redirect to register — trial activation happens after sign up
@@ -103,13 +123,40 @@ export default function PaywallScreen() {
   }
 
   async function handleBuy(planKey: string) {
-    if (!PAYMENTS_ENABLED) {
-      toast('Оплата временно недоступна. Свяжитесь с поддержкой для активации тарифа.', { duration: 5000 });
+    // If trial key — delegate
+    if (planKey === 'trial') {
+      handleActivateTrial();
       return;
     }
-    // If not logged in, send to login first — purchase happens after auth
+    // If not logged in, send to login first
     if (!user) {
       router.push('/auth/login?redirect=/pricing');
+      return;
+    }
+    // Free tariff (price = 0) — activate without YooKassa
+    const tariff = configs.find(t => t.plan_key === planKey);
+    if (tariff && Number(tariff.price) === 0) {
+      setLoading(planKey);
+      try {
+        await paymentsApi.activateFree(planKey);
+        const token = localStorage.getItem('token') || '';
+        const [{ data: freshUser }, { data: acts }] = await Promise.all([
+          authApi.me(),
+          paymentsApi.getMyActivations(),
+        ]);
+        if (freshUser?.id) setAuth(freshUser, token);
+        setMyActivations(acts || {});
+        toast.success('Тариф активирован!');
+        router.push('/projects');
+      } catch (e: any) {
+        toast.error(e?.response?.data?.message || 'Ошибка активации тарифа');
+      } finally {
+        setLoading(null);
+      }
+      return;
+    }
+    if (!PAYMENTS_ENABLED) {
+      toast('Оплата временно недоступна. Свяжитесь с поддержкой для активации тарифа.', { duration: 5000 });
       return;
     }
     setLoading(planKey);
@@ -141,33 +188,14 @@ export default function PaywallScreen() {
           </p>
         </div>
 
-        {/* Tile mode (toggle in admin → Тарифы) — clicking a tile triggers
-            the YooKassa buy flow directly. Trial card is rendered separately
-            below so unregistered/eligible users can still claim 7 free days. */}
         {tilesMode ? (
-          <>
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
             <PricingTilesGrid
-              tariffs={paidTariffs as any}
+              tariffs={tileModeTariffs as any}
               loadingPlanKey={loading}
               onBuy={handleBuy}
             />
-            {trialAvailable && (
-              <div style={{ maxWidth: 380, margin: '24px auto 0', background: '#fff', borderRadius: 14, padding: 24, border: '1px solid #e5e7eb', textAlign: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 8 }}>
-                  <h3 style={{ fontSize: 18, fontWeight: 800 }}>Пробный период</h3>
-                  <span style={{ background: '#f5c800', color: '#1a1a1a', padding: '3px 10px', borderRadius: 4, fontSize: 10, fontWeight: 700 }}>7 дней</span>
-                </div>
-                <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 14 }}>7 дней бесплатного Pro</p>
-                <button
-                  onClick={handleActivateTrial}
-                  disabled={loading === 'trial'}
-                  style={{ width: '100%', padding: '12px', background: '#f5c800', color: '#1a1a1a', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}
-                >
-                  {loading === 'trial' ? '...' : (isLoggedOut ? 'Зарегистрироваться' : 'Активировать пробный')}
-                </button>
-              </div>
-            )}
-          </>
+          </div>
         ) : (
         <div style={{ display: 'grid', gridTemplateColumns: trialAvailable ? '1fr 1fr' : '1fr', gap: 20, maxWidth: trialAvailable ? 760 : 380, margin: '0 auto' }}>
           {/* Pro tariff */}

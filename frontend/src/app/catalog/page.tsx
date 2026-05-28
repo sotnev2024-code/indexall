@@ -19,7 +19,8 @@ function saveState(patch: Record<string, unknown>) {
     sessionStorage.setItem(SS_KEY, JSON.stringify({ ...prev, ...patch }));
   } catch { /* ignore */ }
 }
-import { catalogApi, sheetsApi, storesApi } from '@/lib/api';
+import { catalogApi, sheetsApi, storesApi, activityApi } from '@/lib/api';
+import { usePageTracker } from '@/hooks/usePageTracker';
 import { useAppStore } from '@/store/app.store';
 import RequireSubscription from '@/components/RequireSubscription';
 
@@ -30,6 +31,7 @@ export default function CatalogPage() {
 function CatalogPageInner() {
   const router = useRouter();
   const { activeSheetId, user } = useAppStore();
+  usePageTracker('Подбор по каталогу');
   const isAdmin = user?.plan === 'admin';
   const [adminInfo, setAdminInfo] = useState<{ loading: boolean; data: any | null; productName: string } | null>(null);
 
@@ -198,6 +200,7 @@ function CatalogPageInner() {
     const tree = manufTrees[manufId] || [];
     const nodePath = findNodePath(tree, node.id) || [node.name];
     setBreadcrumbPath([manufName, ...nodePath]);
+    activityApi.logEvent('open_catalog', `${manufName} / ${nodePath.join(' / ')}`);
     try {
       const { data } = await catalogApi.getProducts(node.id);
       setProducts(data);
@@ -227,6 +230,7 @@ function CatalogPageInner() {
     const isSameSlug = selectedSlug === slug;
     setSelectedSlug(slug);
     setSelectedProduct(null); setSearch('');
+    if (!isSameSlug) activityApi.logEvent('open_catalog', `filter: ${slug}`);
 
     if (!isSameSlug) {
       // New category — reset filters and reload
@@ -582,6 +586,7 @@ function CatalogPageInner() {
         store: finalStore, qty: '1', coef: '1',
         deadline: finalDeadline,
       }]);
+      activityApi.logEvent('add_from_catalog', `${product.name?.slice(0, 60)}, article: ${article}`);
       toast.success(`«${product.name.slice(0, 40)}» добавлен в лист`);
     } catch { toast.error('Ошибка добавления в лист'); }
     finally { addingRef.current = false; }

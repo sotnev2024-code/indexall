@@ -65,6 +65,14 @@ export class User {
   @Column({ nullable: true, type: 'timestamptz' })
   subscriptionExpiresAt: Date;
 
+  /** OAuth provider used to create this account (google / yandex / mailru / null for email) */
+  @Column({ nullable: true, type: 'varchar' })
+  oauthProvider: string;
+
+  /** Provider's user ID (for linking existing account on re-login) */
+  @Column({ nullable: true, type: 'varchar' })
+  oauthId: string;
+
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   lastSeen: Date;
 

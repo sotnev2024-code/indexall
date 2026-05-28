@@ -16,13 +16,17 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { FoldersService } from './folders.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ProGuard } from '../auth/guards/pro.guard';
+import { ActivityLogService } from '../admin/activity-log.service';
 
 @ApiTags('folders')
 @Controller('folders')
 @UseGuards(JwtAuthGuard, ProGuard)
 @ApiBearerAuth()
 export class FoldersController {
-  constructor(private readonly service: FoldersService) {}
+  constructor(
+    private readonly service: FoldersService,
+    private readonly activityLog: ActivityLogService,
+  ) {}
 
   /** GET /folders?type=projects — full tree for current user */
   @Get()
@@ -41,13 +45,17 @@ export class FoldersController {
   /** POST /folders */
   @Post()
   @ApiOperation({ summary: 'Создать папку' })
-  create(
+  async create(
     @Body('name') name: string,
     @Body('parent_id') parent_id: number | null,
     @Body('type') type = 'projects',
     @Request() req,
   ) {
-    return this.service.createFolder(req.user.userId, name, parent_id ?? null, type);
+    const result = await this.service.createFolder(req.user.userId, name, parent_id ?? null, type);
+    if (type === 'projects') {
+      this.activityLog.log(req.user.userId, 'create_project', `name: ${name}`);
+    }
+    return result;
   }
 
   /** PUT /folders/:id — rename */
@@ -75,19 +83,23 @@ export class FoldersController {
   /** DELETE /folders/:id */
   @Delete(':id')
   @ApiOperation({ summary: 'Удалить папку' })
-  remove(@Param('id', ParseIntPipe) id: number, @Request() req) {
-    return this.service.deleteFolder(id, req.user.userId);
+  async remove(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    const result = await this.service.deleteFolder(id, req.user.userId);
+    this.activityLog.log(req.user.userId, 'delete_project', `folder id: ${id}`);
+    return result;
   }
 
   /** POST /folders/:id/sheets — create sheet inside folder */
   @Post(':id/sheets')
   @ApiOperation({ summary: 'Создать лист в папке' })
-  createSheet(
+  async createSheet(
     @Param('id', ParseIntPipe) id: number,
     @Body('name') name: string,
     @Request() req,
   ) {
-    return this.service.createSheet(id, req.user.userId, name);
+    const result = await this.service.createSheet(id, req.user.userId, name);
+    this.activityLog.log(req.user.userId, 'create_sheet', `name: ${name}, folder id: ${id}`);
+    return result;
   }
 
   /** PUT /folders/:id/sheets/reorder */
