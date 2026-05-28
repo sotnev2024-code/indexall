@@ -169,6 +169,8 @@ export default function AdminPage() {
   // ── User projects viewer ──────────────────────────────────────
   const [viewProjectsUserId, setViewProjectsUserId] = useState<number | null>(null);
   const [viewProjectsData, setViewProjectsData] = useState<{ folders: any[]; sheets: any[] } | null>(null);
+  const [viewSheetData, setViewSheetData] = useState<{ sheet: any; rows: any[] } | null>(null);
+  const [viewSheetLoading, setViewSheetLoading] = useState(false);
 
   // ── Accessories state ─────────────────────────────────────────
   const [accTables, setAccTables] = useState<any[]>([]);
@@ -1300,75 +1302,187 @@ export default function AdminPage() {
               </div>
 
               {/* User projects modal */}
-              {viewProjectsUserId !== null && viewProjectsData && (
-                <div style={{ position: 'fixed', inset: 0, zIndex: 9000, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  onClick={() => { setViewProjectsUserId(null); setViewProjectsData(null); }}>
-                  <div style={{ background: '#fff', borderRadius: 12, padding: 24, width: '90%', maxWidth: 700, maxHeight: '80vh', overflowY: 'auto' }}
-                    onClick={e => e.stopPropagation()}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                      <div style={{ fontWeight: 700, fontSize: 16 }}>
-                        Проекты пользователя #{viewProjectsUserId}
-                        {' '}<span style={{ fontWeight: 400, fontSize: 13, color: '#888' }}>({users.find(u => u.id === viewProjectsUserId)?.email})</span>
+              {viewProjectsUserId !== null && viewProjectsData && (() => {
+                const modalUser = users.find(u => u.id === viewProjectsUserId);
+                const allFolders = viewProjectsData.folders;
+                const allSheets = viewProjectsData.sheets;
+
+                // Recursive folder tree renderer
+                const renderFolder = (folder: any, depth = 0): React.ReactNode => {
+                  const children = allFolders.filter((f: any) => f.parent_id === folder.id);
+                  const sheets = allSheets.filter((s: any) => s.folder_id === folder.id);
+                  return (
+                    <div key={folder.id} style={{ marginLeft: depth * 16 }}>
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        padding: '6px 8px', borderRadius: 6, marginBottom: 2,
+                        background: depth === 0 ? '#f8fafc' : 'transparent',
+                        borderLeft: depth > 0 ? '2px solid #e5e7eb' : 'none',
+                      }}>
+                        <span style={{ fontSize: 14 }}>{depth === 0 ? '📁' : '📂'}</span>
+                        <span style={{ fontWeight: 600, fontSize: 14 }}>{folder.name || '—'}</span>
+                        <span style={{ color: '#9ca3af', fontSize: 11 }}>#{folder.id} · {fmtDate(folder.createdAt)}</span>
                       </div>
-                      <button onClick={() => { setViewProjectsUserId(null); setViewProjectsData(null); }} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}>✕</button>
+                      {sheets.map((s: any) => (
+                        <div key={s.id}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            padding: '5px 8px 5px 24px', borderRadius: 6, marginBottom: 2,
+                            cursor: 'pointer', marginLeft: depth * 16 + 8,
+                            transition: 'background 0.1s',
+                          }}
+                          onMouseEnter={e => (e.currentTarget.style.background = '#f0f9ff')}
+                          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                          onClick={async () => {
+                            setViewSheetLoading(true);
+                            try {
+                              const token = localStorage.getItem('token');
+                              const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/admin/sheets/${s.id}/rows`, {
+                                headers: { Authorization: `Bearer ${token}` },
+                              });
+                              const data = await res.json();
+                              setViewSheetData(data);
+                            } catch { toast.error('Ошибка загрузки листа'); }
+                            finally { setViewSheetLoading(false); }
+                          }}
+                        >
+                          <span style={{ fontSize: 13 }}>📄</span>
+                          <span style={{ fontSize: 13, flex: 1 }}>{s.name || 'Без названия'}</span>
+                          <span style={{ color: '#9ca3af', fontSize: 11 }}>{fmtDate(s.updatedAt)}</span>
+                          <span style={{ fontSize: 11, color: '#0ea5e9', fontWeight: 500 }}>Открыть →</span>
+                        </div>
+                      ))}
+                      {children.map((c: any) => renderFolder(c, depth + 1))}
                     </div>
-                    {viewProjectsData.folders.length === 0 && viewProjectsData.sheets.length === 0 ? (
-                      <div style={{ textAlign: 'center', padding: '32px 0', color: '#888' }}>Нет проектов и листов</div>
-                    ) : (
-                      <>
-                        {viewProjectsData.folders.length > 0 && (
-                          <>
-                            <div style={{ fontWeight: 600, marginBottom: 8 }}>Папки / Проекты ({viewProjectsData.folders.length})</div>
-                            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 20, fontSize: 13 }}>
-                              <thead>
-                                <tr style={{ borderBottom: '2px solid #eee' }}>
-                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>ID</th>
-                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Название</th>
-                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Создан</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {viewProjectsData.folders.map((f: any) => (
-                                  <tr key={f.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                                    <td style={{ padding: '6px 8px', color: '#888' }}>{f.id}</td>
-                                    <td style={{ padding: '6px 8px', fontWeight: 500 }}>{f.name}</td>
-                                    <td style={{ padding: '6px 8px', color: '#888' }}>{fmtDate(f.createdAt)}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </>
+                  );
+                };
+
+                // Top-level folders (no parent or parent not in list)
+                const rootFolders = allFolders.filter((f: any) => !f.parent_id || !allFolders.find((p: any) => p.id === f.parent_id));
+                // Loose sheets not in any folder
+                const looseSheets = allSheets.filter((s: any) => !s.folder_id || !allFolders.find((f: any) => f.id === s.folder_id));
+
+                return (
+                  <div style={{ position: 'fixed', inset: 0, zIndex: 9000, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+                    onClick={() => { setViewProjectsUserId(null); setViewProjectsData(null); setViewSheetData(null); }}>
+                    <div style={{ background: '#fff', borderRadius: 14, width: '100%', maxWidth: viewSheetData ? 920 : 660, maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}
+                      onClick={e => e.stopPropagation()}>
+
+                      {/* Header */}
+                      <div style={{ padding: '18px 24px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 10 }}>
+                        {viewSheetData && (
+                          <button onClick={() => setViewSheetData(null)}
+                            style={{ padding: '5px 12px', borderRadius: 7, border: '1px solid #e5e7eb', background: '#f8fafc', cursor: 'pointer', fontSize: 13, fontWeight: 500, marginRight: 4 }}>
+                            ← Назад
+                          </button>
                         )}
-                        {viewProjectsData.sheets.length > 0 && (
-                          <>
-                            <div style={{ fontWeight: 600, marginBottom: 8 }}>Спецификации / Листы ({viewProjectsData.sheets.length})</div>
-                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                              <thead>
-                                <tr style={{ borderBottom: '2px solid #eee' }}>
-                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>ID</th>
-                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Название</th>
-                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Создан</th>
-                                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Обновлён</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {viewProjectsData.sheets.map((s: any) => (
-                                  <tr key={s.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                                    <td style={{ padding: '6px 8px', color: '#888' }}>{s.id}</td>
-                                    <td style={{ padding: '6px 8px', fontWeight: 500 }}>{s.name}</td>
-                                    <td style={{ padding: '6px 8px', color: '#888' }}>{fmtDate(s.createdAt)}</td>
-                                    <td style={{ padding: '6px 8px', color: '#888' }}>{fmtDate(s.updatedAt)}</td>
+                        <div style={{ flex: 1 }}>
+                          <span style={{ fontWeight: 700, fontSize: 15 }}>
+                            {viewSheetData ? `📄 ${viewSheetData.sheet.name || 'Без названия'}` : `Проекты пользователя`}
+                          </span>
+                          {!viewSheetData && (
+                            <span style={{ fontWeight: 400, fontSize: 13, color: '#888', marginLeft: 8 }}>
+                              {modalUser?.name || ''} ({modalUser?.email})
+                            </span>
+                          )}
+                          {viewSheetData && (
+                            <span style={{ fontWeight: 400, fontSize: 12, color: '#9ca3af', marginLeft: 8 }}>
+                              {viewSheetData.rows.length} строк
+                            </span>
+                          )}
+                        </div>
+                        <button onClick={() => { setViewProjectsUserId(null); setViewProjectsData(null); setViewSheetData(null); }}
+                          style={{ width: 32, height: 32, borderRadius: '50%', border: 'none', background: '#f1f5f9', cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          ×
+                        </button>
+                      </div>
+
+                      {/* Content */}
+                      <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+                        {viewSheetLoading ? (
+                          <div style={{ textAlign: 'center', padding: 40, color: '#9ca3af' }}>Загрузка…</div>
+                        ) : viewSheetData ? (
+                          /* Sheet rows view */
+                          <div style={{ overflowX: 'auto' }}>
+                            {viewSheetData.rows.length === 0 ? (
+                              <div style={{ textAlign: 'center', padding: 40, color: '#9ca3af' }}>Лист пустой</div>
+                            ) : (
+                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                                <thead>
+                                  <tr style={{ background: '#f8fafc' }}>
+                                    <th style={{ padding: '7px 10px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: 600, whiteSpace: 'nowrap' }}>№</th>
+                                    <th style={{ padding: '7px 10px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: 600 }}>Наименование</th>
+                                    <th style={{ padding: '7px 10px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: 600 }}>Артикул</th>
+                                    <th style={{ padding: '7px 10px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: 600 }}>Бренд</th>
+                                    <th style={{ padding: '7px 10px', textAlign: 'right', borderBottom: '2px solid #e5e7eb', fontWeight: 600 }}>Кол-во</th>
+                                    <th style={{ padding: '7px 10px', textAlign: 'right', borderBottom: '2px solid #e5e7eb', fontWeight: 600 }}>Цена</th>
+                                    <th style={{ padding: '7px 10px', textAlign: 'right', borderBottom: '2px solid #e5e7eb', fontWeight: 600 }}>Сумма</th>
                                   </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </>
+                                </thead>
+                                <tbody>
+                                  {viewSheetData.rows.map((row: any, i: number) => (
+                                    <tr key={row.id} style={{ background: i % 2 === 0 ? '#fff' : '#fafafa', borderBottom: '1px solid #f1f5f9' }}>
+                                      <td style={{ padding: '6px 10px', color: '#9ca3af' }}>{i + 1}</td>
+                                      <td style={{ padding: '6px 10px', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.name}>{row.name || '—'}</td>
+                                      <td style={{ padding: '6px 10px', color: '#6b7280', fontFamily: 'monospace' }}>{row.article || '—'}</td>
+                                      <td style={{ padding: '6px 10px', color: '#6b7280' }}>{row.brand || '—'}</td>
+                                      <td style={{ padding: '6px 10px', textAlign: 'right' }}>{row.qty} {row.unit}</td>
+                                      <td style={{ padding: '6px 10px', textAlign: 'right' }}>{Number(row.price).toLocaleString('ru-RU')} ₽</td>
+                                      <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600 }}>{Number(row.total).toLocaleString('ru-RU')} ₽</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                                <tfoot>
+                                  <tr style={{ borderTop: '2px solid #e5e7eb' }}>
+                                    <td colSpan={6} style={{ padding: '8px 10px', fontWeight: 700, textAlign: 'right' }}>Итого:</td>
+                                    <td style={{ padding: '8px 10px', fontWeight: 700, textAlign: 'right', color: '#0f172a' }}>
+                                      {viewSheetData.rows.reduce((sum: number, r: any) => sum + (Number(r.total) || 0), 0).toLocaleString('ru-RU')} ₽
+                                    </td>
+                                  </tr>
+                                </tfoot>
+                              </table>
+                            )}
+                          </div>
+                        ) : (
+                          /* Projects tree view */
+                          allFolders.length === 0 && allSheets.length === 0 ? (
+                            <div style={{ textAlign: 'center', padding: 40, color: '#9ca3af' }}>Нет проектов и листов</div>
+                          ) : (
+                            <div>
+                              {rootFolders.map((f: any) => renderFolder(f, 0))}
+                              {looseSheets.length > 0 && (
+                                <div style={{ marginTop: 12 }}>
+                                  <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 6 }}>Листы без папки</div>
+                                  {looseSheets.map((s: any) => (
+                                    <div key={s.id}
+                                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px', borderRadius: 6, marginBottom: 2, cursor: 'pointer' }}
+                                      onMouseEnter={e => (e.currentTarget.style.background = '#f0f9ff')}
+                                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                                      onClick={async () => {
+                                        setViewSheetLoading(true);
+                                        try {
+                                          const token = localStorage.getItem('token');
+                                          const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/admin/sheets/${s.id}/rows`, { headers: { Authorization: `Bearer ${token}` } });
+                                          setViewSheetData(await res.json());
+                                        } catch { toast.error('Ошибка загрузки'); }
+                                        finally { setViewSheetLoading(false); }
+                                      }}
+                                    >
+                                      <span>📄</span>
+                                      <span style={{ fontSize: 13, flex: 1 }}>{s.name || 'Без названия'}</span>
+                                      <span style={{ fontSize: 11, color: '#0ea5e9', fontWeight: 500 }}>Открыть →</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )
                         )}
-                      </>
-                    )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </>
           )}
 

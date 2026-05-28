@@ -40,6 +40,7 @@ import { Project } from '../projects/project.entity';
 import { Sheet } from '../sheets/sheet.entity';
 import { Template } from '../templates/template.entity';
 import { Folder } from '../folders/folder.entity';
+import { EquipmentRow } from '../equipment/equipment-row.entity';
 import {
   PriceList, PriceListStatus, Manufacturer,
   CatalogProduct, CatalogTile, CatalogCategory,
@@ -103,6 +104,7 @@ export class AdminController implements OnModuleInit {
     @InjectRepository(TariffConfig) private tariffConfigRepo: Repository<TariffConfig>,
     @InjectRepository(AppSetting) private settingsRepo: Repository<AppSetting>,
     @InjectRepository(UserActivityLog) private activityRepo: Repository<UserActivityLog>,
+    @InjectRepository(EquipmentRow) private equipmentRowsRepo: Repository<EquipmentRow>,
   ) {}
 
   async onModuleInit() {
@@ -180,17 +182,27 @@ export class AdminController implements OnModuleInit {
   async getUserProjects(@Param('id', ParseIntPipe) id: number) {
     const [folders, sheets] = await Promise.all([
       this.foldersRepo.find({
-        where: [{ owner_id: id, type: 'projects' as any }],
-        order: { createdAt: 'DESC' },
+        where: { owner_id: id },
+        order: { sort_order: 'ASC', createdAt: 'ASC' },
       }),
       this.sheetsRepo.find({
         where: { owner_id: id },
-        order: { createdAt: 'DESC' },
+        order: { sort_order: 'ASC', createdAt: 'ASC' },
         select: ['id', 'name', 'createdAt', 'updatedAt', 'owner_id', 'folder_id'],
       }),
     ]);
-
     return { folders, sheets };
+  }
+
+  @Get('sheets/:id/rows')
+  async getSheetRows(@Param('id', ParseIntPipe) id: number) {
+    const sheet = await this.sheetsRepo.findOne({ where: { id } });
+    if (!sheet) throw new BadRequestException('Лист не найден');
+    const rows = await this.equipmentRowsRepo.find({
+      where: { sheetId: id },
+      order: { sort_order: 'ASC' },
+    });
+    return { sheet, rows };
   }
 
   @Patch('users/:id/plan')
