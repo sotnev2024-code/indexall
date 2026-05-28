@@ -23,6 +23,13 @@ export type ActivityAction =
   | 'add_from_catalog'
   | 'add_from_pricelist'
   | 'open_catalog'
+  | 'open_section'
+  | 'leave_section'
+  | 'rename_project'
+  | 'rename_sheet'
+  | 'save_sheet'
+  | 'delete_row'
+  | 'insert_row'
   | 'activate_tariff'
   | 'other';
 

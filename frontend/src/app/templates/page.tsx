@@ -6,6 +6,7 @@ import Header from '@/components/layout/Header';
 import { foldersApi, templatesApi, sheetsApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 import RequireSubscription from '@/components/RequireSubscription';
+import { usePageTracker } from '@/hooks/usePageTracker';
 
 const SHIELD_TYPES = ['ГРЩ', 'ВРУ', 'ВП', 'РП', 'ПЭСПЗ', 'ЩО', 'ЩС'];
 
@@ -18,6 +19,7 @@ export default function TemplatesPage() {
 function TemplatesPageInner() {
   const router = useRouter();
   const { activeSheetId, activeProjectId } = useAppStore();
+  usePageTracker('Шаблоны');
   const [templates, setTemplates] = useState<any[]>([]);
   const [folderTree, setFolderTree] = useState<{ children: FolderNode[]; items: any[] }>({ children: [], items: [] });
   const [selected, setSelected] = useState<any | null>(null);

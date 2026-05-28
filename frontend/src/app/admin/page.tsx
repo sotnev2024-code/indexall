@@ -2272,12 +2272,20 @@ export default function AdminPage() {
                     <option value="register_mailru">Регистрация через Mail.ru</option>
                     <option value="logout">Выход</option>
                   </optgroup>
+                  <optgroup label="Навигация по разделам">
+                    <option value="open_section">Открыл раздел</option>
+                    <option value="leave_section">Вышел из раздела</option>
+                    <option value="open_catalog">Открыл раздел каталога</option>
+                  </optgroup>
                   <optgroup label="Работа в сервисе">
                     <option value="create_project">Создание проекта</option>
                     <option value="delete_project">Удаление проекта</option>
+                    <option value="rename_project">Переименование проекта</option>
                     <option value="create_sheet">Создание листа</option>
                     <option value="delete_sheet">Удаление листа</option>
-                    <option value="open_catalog">Открытие раздела каталога</option>
+                    <option value="rename_sheet">Переименование листа</option>
+                    <option value="save_sheet">Сохранение листа</option>
+                    <option value="delete_row">Удаление строки</option>
                     <option value="add_from_catalog">Добавление из каталога</option>
                     <option value="add_from_pricelist">Добавление из прайса</option>
                     <option value="export">Экспорт</option>
@@ -2336,16 +2344,29 @@ export default function AdminPage() {
                           {(() => {
                             const actionMap: Record<string, { label: string; bg: string; color: string }> = {
                               login:              { label: 'Вход',             bg: '#dcfce7', color: '#166534' },
+                              login_google:       { label: 'Вход Google',      bg: '#dcfce7', color: '#166534' },
+                              login_yandex:       { label: 'Вход Яндекс',      bg: '#dcfce7', color: '#166534' },
+                              login_mailru:       { label: 'Вход Mail.ru',     bg: '#dcfce7', color: '#166534' },
                               logout:             { label: 'Выход',            bg: '#f0fdf4', color: '#4b7a5a' },
                               register:           { label: 'Регистрация',      bg: '#dbeafe', color: '#1e40af' },
+                              register_google:    { label: 'Регистрация Google',bg:'#dbeafe', color: '#1e40af' },
+                              register_yandex:    { label: 'Рег. Яндекс',     bg: '#dbeafe', color: '#1e40af' },
+                              register_mailru:    { label: 'Рег. Mail.ru',     bg: '#dbeafe', color: '#1e40af' },
                               activate_tariff:    { label: 'Тариф активирован',bg: '#ede9fe', color: '#5b21b6' },
                               create_project:     { label: 'Создан проект',    bg: '#e0f2fe', color: '#0369a1' },
                               delete_project:     { label: 'Удалён проект',    bg: '#fee2e2', color: '#991b1b' },
                               create_sheet:       { label: 'Создана спец.',    bg: '#e0f2fe', color: '#0369a1' },
                               delete_sheet:       { label: 'Удалена спец.',    bg: '#fee2e2', color: '#991b1b' },
-                              open_catalog:       { label: 'Каталог раздел',   bg: '#fef3c7', color: '#92400e' },
-                              add_from_catalog:   { label: 'Добавлено (кат.)', bg: '#d1fae5', color: '#065f46' },
-                              add_from_pricelist: { label: 'Добавлено (прайс)',bg: '#d1fae5', color: '#065f46' },
+                              rename_project:     { label: 'Переим. проект',   bg: '#f0f9ff', color: '#0369a1' },
+                              rename_sheet:       { label: 'Переим. спец.',    bg: '#f0f9ff', color: '#0369a1' },
+                              open_section:       { label: '▶ Открыл раздел', bg: '#f8fafc', color: '#475569' },
+                              leave_section:      { label: '◀ Вышел из раздела',bg:'#f8fafc', color: '#94a3b8' },
+                              open_catalog:       { label: 'Раздел каталога',  bg: '#fef3c7', color: '#92400e' },
+                              add_from_catalog:   { label: 'Добавил (кат.)',   bg: '#d1fae5', color: '#065f46' },
+                              add_from_pricelist: { label: 'Добавил (прайс)',  bg: '#d1fae5', color: '#065f46' },
+                              save_sheet:         { label: 'Сохранил спец.',   bg: '#fefce8', color: '#854d0e' },
+                              delete_row:         { label: 'Удалил строку',    bg: '#fff1f2', color: '#9f1239' },
+                              insert_row:         { label: 'Вставил строку',   bg: '#f0fdf4', color: '#166534' },
                               export:             { label: 'Экспорт',          bg: '#fef9c3', color: '#713f12' },
                             };
                             const cfg = actionMap[log.action];

@@ -20,6 +20,7 @@ function saveState(patch: Record<string, unknown>) {
   } catch { /* ignore */ }
 }
 import { catalogApi, sheetsApi, storesApi, activityApi } from '@/lib/api';
+import { usePageTracker } from '@/hooks/usePageTracker';
 import { useAppStore } from '@/store/app.store';
 import RequireSubscription from '@/components/RequireSubscription';
 
@@ -30,6 +31,7 @@ export default function CatalogPage() {
 function CatalogPageInner() {
   const router = useRouter();
   const { activeSheetId, user } = useAppStore();
+  usePageTracker('Подбор по каталогу');
   const isAdmin = user?.plan === 'admin';
   const [adminInfo, setAdminInfo] = useState<{ loading: boolean; data: any | null; productName: string } | null>(null);
 
