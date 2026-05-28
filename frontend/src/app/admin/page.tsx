@@ -1414,29 +1414,44 @@ export default function AdminPage() {
                                     <th style={{ padding: '7px 10px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: 600 }}>Наименование</th>
                                     <th style={{ padding: '7px 10px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: 600 }}>Артикул</th>
                                     <th style={{ padding: '7px 10px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: 600 }}>Бренд</th>
+                                    <th style={{ padding: '7px 10px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', fontWeight: 600 }}>Источник</th>
                                     <th style={{ padding: '7px 10px', textAlign: 'right', borderBottom: '2px solid #e5e7eb', fontWeight: 600 }}>Кол-во</th>
-                                    <th style={{ padding: '7px 10px', textAlign: 'right', borderBottom: '2px solid #e5e7eb', fontWeight: 600 }}>Цена</th>
-                                    <th style={{ padding: '7px 10px', textAlign: 'right', borderBottom: '2px solid #e5e7eb', fontWeight: 600 }}>Сумма</th>
+                                    <th style={{ padding: '7px 10px', textAlign: 'right', borderBottom: '2px solid #e5e7eb', fontWeight: 600 }}>Цена с НДС</th>
+                                    <th style={{ padding: '7px 10px', textAlign: 'right', borderBottom: '2px solid #e5e7eb', fontWeight: 600 }}>Коэф.</th>
+                                    <th style={{ padding: '7px 10px', textAlign: 'right', borderBottom: '2px solid #e5e7eb', fontWeight: 600 }}>Итого</th>
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {viewSheetData.rows.map((row: any, i: number) => (
-                                    <tr key={row.id} style={{ background: i % 2 === 0 ? '#fff' : '#fafafa', borderBottom: '1px solid #f1f5f9' }}>
-                                      <td style={{ padding: '6px 10px', color: '#9ca3af' }}>{i + 1}</td>
-                                      <td style={{ padding: '6px 10px', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.name}>{row.name || '—'}</td>
-                                      <td style={{ padding: '6px 10px', color: '#6b7280', fontFamily: 'monospace' }}>{row.article || '—'}</td>
-                                      <td style={{ padding: '6px 10px', color: '#6b7280' }}>{row.brand || '—'}</td>
-                                      <td style={{ padding: '6px 10px', textAlign: 'right' }}>{row.qty} {row.unit}</td>
-                                      <td style={{ padding: '6px 10px', textAlign: 'right' }}>{Number(row.price).toLocaleString('ru-RU')} ₽</td>
-                                      <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600 }}>{Number(row.total).toLocaleString('ru-RU')} ₽</td>
-                                    </tr>
-                                  ))}
+                                  {viewSheetData.rows.map((row: any, i: number) => {
+                                    const qty = parseFloat(row.qty) || 0;
+                                    const price = parseFloat(row.price) || 0;
+                                    const coef = parseFloat(row.coef) || 1;
+                                    const rowTotal = qty * price * coef;
+                                    return (
+                                      <tr key={row.id} style={{ background: i % 2 === 0 ? '#fff' : '#fafafa', borderBottom: '1px solid #f1f5f9' }}>
+                                        <td style={{ padding: '6px 10px', color: '#9ca3af' }}>{i + 1}</td>
+                                        <td style={{ padding: '6px 10px', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.name}>{row.name || '—'}</td>
+                                        <td style={{ padding: '6px 10px', color: '#6b7280', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{row.article || '—'}</td>
+                                        <td style={{ padding: '6px 10px', color: '#6b7280' }}>{row.brand || '—'}</td>
+                                        <td style={{ padding: '6px 10px', color: '#6b7280' }}>{row.store || '—'}</td>
+                                        <td style={{ padding: '6px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>{row.qty} {row.unit}</td>
+                                        <td style={{ padding: '6px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>{price.toLocaleString('ru-RU')} ₽</td>
+                                        <td style={{ padding: '6px 10px', textAlign: 'right' }}>{coef}</td>
+                                        <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap' }}>{rowTotal.toLocaleString('ru-RU')} ₽</td>
+                                      </tr>
+                                    );
+                                  })}
                                 </tbody>
                                 <tfoot>
-                                  <tr style={{ borderTop: '2px solid #e5e7eb' }}>
-                                    <td colSpan={6} style={{ padding: '8px 10px', fontWeight: 700, textAlign: 'right' }}>Итого:</td>
-                                    <td style={{ padding: '8px 10px', fontWeight: 700, textAlign: 'right', color: '#0f172a' }}>
-                                      {viewSheetData.rows.reduce((sum: number, r: any) => sum + (Number(r.total) || 0), 0).toLocaleString('ru-RU')} ₽
+                                  <tr style={{ borderTop: '2px solid #e5e7eb', background: '#f8fafc' }}>
+                                    <td colSpan={8} style={{ padding: '8px 10px', fontWeight: 700, textAlign: 'right' }}>Итого:</td>
+                                    <td style={{ padding: '8px 10px', fontWeight: 700, textAlign: 'right', color: '#0f172a', whiteSpace: 'nowrap' }}>
+                                      {viewSheetData.rows.reduce((sum: number, r: any) => {
+                                        const qty = parseFloat(r.qty) || 0;
+                                        const price = parseFloat(r.price) || 0;
+                                        const coef = parseFloat(r.coef) || 1;
+                                        return sum + qty * price * coef;
+                                      }, 0).toLocaleString('ru-RU')} ₽
                                     </td>
                                   </tr>
                                 </tfoot>
