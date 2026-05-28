@@ -152,6 +152,18 @@ export default function AdminPage() {
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityFilter, setActivityFilter] = useState({ action: '', userId: '' });
   const [activityStats, setActivityStats] = useState<{ byAction: Record<string, number>; totalUsers: number; newUsers30: number } | null>(null);
+  const [activityUserSearch, setActivityUserSearch] = useState('');
+
+  // ── User activity modal ───────────────────────────────────────
+  const [userActivityModal, setUserActivityModal] = useState<{
+    user: any;
+    logs: any[];
+    total: number;
+    offset: number;
+    loading: boolean;
+    dateFrom: string;
+    dateTo: string;
+  } | null>(null);
 
   // ── User projects viewer ──────────────────────────────────────
   const [viewProjectsUserId, setViewProjectsUserId] = useState<number | null>(null);
@@ -192,7 +204,7 @@ export default function AdminPage() {
     else if (tab === 'base') loadTiles();
     else if (tab === 'tiles') loadTiles();
     else if (tab === 'accessories') loadAccessories();
-    else if (tab === 'activity') loadActivity();
+    else if (tab === 'activity') { loadActivity(); if (users.length === 0) loadUsers(); }
   }, [tab]);
 
   // While any price list is parsing on the server, refresh the table every
@@ -532,6 +544,46 @@ export default function AdminPage() {
       }
     } catch { toast.error('Ошибка загрузки журнала'); }
     finally { setActivityLoading(false); }
+  }
+
+  async function openUserActivityModal(user: any) {
+    setUserActivityModal({ user, logs: [], total: 0, offset: 0, loading: true, dateFrom: '', dateTo: '' });
+    await fetchUserActivityLogs(user, 0, '', '');
+  }
+
+  async function fetchUserActivityLogs(
+    user: any,
+    offset: number,
+    dateFrom: string,
+    dateTo: string,
+    append = false,
+  ) {
+    setUserActivityModal(prev => prev ? { ...prev, loading: true } : prev);
+    try {
+      const token = localStorage.getItem('token');
+      const LIMIT = offset === 0 ? 40 : 30;
+      const params = new URLSearchParams({ userId: String(user.id), limit: String(LIMIT), offset: String(offset) });
+      if (dateFrom) params.set('dateFrom', dateFrom);
+      if (dateTo) params.set('dateTo', dateTo);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/admin/activity-log?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setUserActivityModal(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          logs: append ? [...prev.logs, ...(data.items || [])] : (data.items || []),
+          total: data.total || 0,
+          offset: offset + (data.items?.length || 0),
+          loading: false,
+          dateFrom,
+          dateTo,
+        };
+      });
+    } catch {
+      setUserActivityModal(prev => prev ? { ...prev, loading: false } : prev);
+    }
   }
 
   async function loadAccessories() {
@@ -2229,6 +2281,59 @@ export default function AdminPage() {
             <>
               <div className="admin-section-title">Журнал действий пользователей</div>
 
+              {/* ── Список пользователей ── */}
+              <div style={{ marginBottom: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                  <span style={{ fontWeight: 600, fontSize: 14 }}>Пользователи</span>
+                  <input
+                    type="text"
+                    placeholder="Поиск по email или имени…"
+                    value={activityUserSearch}
+                    onChange={e => setActivityUserSearch(e.target.value)}
+                    style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 13, width: 220 }}
+                  />
+                  <span style={{ color: '#9ca3af', fontSize: 12 }}>Нажмите на пользователя чтобы увидеть его действия</span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {users
+                    .filter(u => {
+                      if (!activityUserSearch) return true;
+                      const q = activityUserSearch.toLowerCase();
+                      return (u.email || '').toLowerCase().includes(q) || (u.name || '').toLowerCase().includes(q);
+                    })
+                    .slice(0, 50)
+                    .map((u: any) => (
+                      <button
+                        key={u.id}
+                        onClick={() => openUserActivityModal(u)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          padding: '6px 12px', borderRadius: 20, border: '1px solid #e5e7eb',
+                          background: '#fff', cursor: 'pointer', fontSize: 13,
+                          transition: 'all 0.15s',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = '#f0f9ff'; e.currentTarget.style.borderColor = '#0ea5e9'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.borderColor = '#e5e7eb'; }}
+                      >
+                        <span style={{
+                          width: 28, height: 28, borderRadius: '50%',
+                          background: u.plan === 'admin' ? '#7c3aed' : u.plan === 'pro' ? '#0ea5e9' : '#9ca3af',
+                          color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 11, fontWeight: 700, flexShrink: 0,
+                        }}>
+                          {(u.name || u.email || '?')[0].toUpperCase()}
+                        </span>
+                        <span>
+                          <span style={{ fontWeight: 600 }}>{u.name || '—'}</span>
+                          <br />
+                          <span style={{ color: '#6b7280', fontSize: 11 }}>{u.email}</span>
+                        </span>
+                      </button>
+                    ))}
+                  {users.length === 0 && <span style={{ color: '#9ca3af', fontSize: 13 }}>Загрузка пользователей…</span>}
+                </div>
+              </div>
+
               {/* ── Статистика по источникам входа ── */}
               {activityStats && (() => {
                 const s = activityStats.byAction;
@@ -2394,6 +2499,157 @@ export default function AdminPage() {
               </div>
             </>
           )}
+
+          {/* ── Модальное окно: журнал конкретного пользователя ── */}
+          {userActivityModal && (() => {
+            const m = userActivityModal;
+            const u = m.user;
+            const ACTION_LABELS: Record<string, { label: string; bg: string; color: string }> = {
+              login: { label: 'Вход', bg: '#dcfce7', color: '#166534' },
+              login_google: { label: 'Вход Google', bg: '#dcfce7', color: '#166534' },
+              login_yandex: { label: 'Вход Яндекс', bg: '#dcfce7', color: '#166534' },
+              logout: { label: 'Выход', bg: '#f0fdf4', color: '#4b7a5a' },
+              register: { label: 'Регистрация', bg: '#dbeafe', color: '#1e40af' },
+              register_google: { label: 'Рег. Google', bg: '#dbeafe', color: '#1e40af' },
+              register_yandex: { label: 'Рег. Яндекс', bg: '#dbeafe', color: '#1e40af' },
+              activate_tariff: { label: 'Тариф', bg: '#ede9fe', color: '#5b21b6' },
+              create_project: { label: 'Создал проект', bg: '#e0f2fe', color: '#0369a1' },
+              delete_project: { label: 'Удалил проект', bg: '#fee2e2', color: '#991b1b' },
+              create_sheet: { label: 'Создал спец.', bg: '#e0f2fe', color: '#0369a1' },
+              delete_sheet: { label: 'Удалил спец.', bg: '#fee2e2', color: '#991b1b' },
+              rename_project: { label: 'Переим. проект', bg: '#f0f9ff', color: '#0369a1' },
+              rename_sheet: { label: 'Переим. спец.', bg: '#f0f9ff', color: '#0369a1' },
+              open_section: { label: '▶ Раздел', bg: '#f8fafc', color: '#475569' },
+              leave_section: { label: '◀ Вышел', bg: '#f8fafc', color: '#94a3b8' },
+              open_catalog: { label: 'Каталог', bg: '#fef3c7', color: '#92400e' },
+              add_from_catalog: { label: '+Из каталога', bg: '#d1fae5', color: '#065f46' },
+              add_from_pricelist: { label: '+Из прайса', bg: '#d1fae5', color: '#065f46' },
+              save_sheet: { label: 'Сохранил', bg: '#fefce8', color: '#854d0e' },
+              delete_row: { label: 'Удалил строку', bg: '#fff1f2', color: '#9f1239' },
+              export: { label: 'Экспорт', bg: '#fef9c3', color: '#713f12' },
+            };
+
+            return (
+              <div style={{
+                position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 1000,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+              }} onClick={() => setUserActivityModal(null)}>
+                <div style={{
+                  background: '#fff', borderRadius: 14, width: '100%', maxWidth: 760,
+                  maxHeight: '90vh', display: 'flex', flexDirection: 'column',
+                  boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+                }} onClick={e => e.stopPropagation()}>
+
+                  {/* Header */}
+                  <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{
+                      width: 44, height: 44, borderRadius: '50%', flexShrink: 0,
+                      background: u.plan === 'admin' ? '#7c3aed' : u.plan === 'pro' ? '#0ea5e9' : '#9ca3af',
+                      color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 18, fontWeight: 700,
+                    }}>
+                      {(u.name || u.email || '?')[0].toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: 16 }}>{u.name || '—'}</div>
+                      <div style={{ color: '#6b7280', fontSize: 13 }}>{u.email} · ID {u.id}</div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 12, color: '#9ca3af' }}>
+                        {m.loading ? 'Загрузка…' : `Показано ${m.logs.length} из ${m.total}`}
+                      </span>
+                      <button onClick={() => setUserActivityModal(null)}
+                        style={{ width: 32, height: 32, borderRadius: '50%', border: 'none', background: '#f1f5f9', cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        ×
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Filters */}
+                  <div style={{ padding: '12px 24px', borderBottom: '1px solid #f1f5f9', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <span style={{ fontSize: 13, color: '#6b7280', fontWeight: 500 }}>Период:</span>
+                    <input type="date" value={m.dateFrom}
+                      onChange={e => setUserActivityModal(prev => prev ? { ...prev, dateFrom: e.target.value } : prev)}
+                      style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13 }}
+                    />
+                    <span style={{ color: '#9ca3af', fontSize: 13 }}>—</span>
+                    <input type="date" value={m.dateTo}
+                      onChange={e => setUserActivityModal(prev => prev ? { ...prev, dateTo: e.target.value } : prev)}
+                      style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13 }}
+                    />
+                    <button
+                      onClick={() => fetchUserActivityLogs(u, 0, m.dateFrom, m.dateTo)}
+                      style={{ padding: '4px 14px', borderRadius: 6, background: '#0f172a', color: '#fff', border: 'none', fontSize: 13, cursor: 'pointer', fontWeight: 500 }}
+                    >
+                      Применить
+                    </button>
+                    {(m.dateFrom || m.dateTo) && (
+                      <button
+                        onClick={() => fetchUserActivityLogs(u, 0, '', '')}
+                        style={{ padding: '4px 10px', borderRadius: 6, background: '#f1f5f9', color: '#475569', border: 'none', fontSize: 13, cursor: 'pointer' }}
+                      >
+                        Сбросить
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Log list */}
+                  <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+                    {m.loading && m.logs.length === 0 ? (
+                      <div style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}>Загрузка…</div>
+                    ) : m.logs.length === 0 ? (
+                      <div style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}>Нет записей за выбранный период</div>
+                    ) : (
+                      m.logs.map((log: any, i: number) => {
+                        const cfg = ACTION_LABELS[log.action];
+                        return (
+                          <div key={log.id} style={{
+                            display: 'flex', alignItems: 'flex-start', gap: 12,
+                            padding: '9px 24px',
+                            background: i % 2 === 0 ? '#fff' : '#fafafa',
+                            borderBottom: '1px solid #f1f5f9',
+                          }}>
+                            <span style={{ fontSize: 11, color: '#9ca3af', whiteSpace: 'nowrap', paddingTop: 2, minWidth: 130 }}>
+                              {fmtDate(log.createdAt)}
+                            </span>
+                            <span style={{
+                              flexShrink: 0, padding: '2px 9px', borderRadius: 12, fontSize: 11, fontWeight: 500,
+                              background: cfg?.bg ?? '#f3f4f6', color: cfg?.color ?? '#374151',
+                            }}>
+                              {cfg?.label ?? log.action}
+                            </span>
+                            <span style={{ fontSize: 13, color: '#374151', flex: 1, wordBreak: 'break-word' }}>
+                              {log.details || '—'}
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Footer: pagination */}
+                  <div style={{ padding: '14px 24px', borderTop: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 13, color: '#6b7280' }}>
+                      {m.total > 0 ? `Показано ${m.logs.length} из ${m.total}` : ''}
+                    </span>
+                    {m.logs.length < m.total && (
+                      <button
+                        disabled={m.loading}
+                        onClick={() => fetchUserActivityLogs(u, m.offset, m.dateFrom, m.dateTo, true)}
+                        style={{
+                          padding: '8px 20px', borderRadius: 8, border: 'none',
+                          background: '#0f172a', color: '#fff', fontWeight: 600, fontSize: 14,
+                          cursor: m.loading ? 'not-allowed' : 'pointer', opacity: m.loading ? 0.6 : 1,
+                        }}
+                      >
+                        {m.loading ? 'Загрузка…' : `Показать ещё (осталось ${m.total - m.logs.length})`}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ── Статистика ── */}
           {tab === 'stats' && (

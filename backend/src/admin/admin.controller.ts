@@ -935,6 +935,8 @@ export class AdminController implements OnModuleInit {
     @Query('action') action?: string,
     @Query('limit') limitStr?: string,
     @Query('offset') offsetStr?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
   ) {
     const limit = Math.min(parseInt(limitStr || '100', 10), 500);
     const skip = parseInt(offsetStr || '0', 10);
@@ -948,6 +950,12 @@ export class AdminController implements OnModuleInit {
 
     if (userIdStr) qb.andWhere('log.userId = :uid', { uid: parseInt(userIdStr, 10) });
     if (action) qb.andWhere('log.action = :action', { action });
+    if (dateFrom) qb.andWhere('log.createdAt >= :from', { from: new Date(dateFrom) });
+    if (dateTo) {
+      const to = new Date(dateTo);
+      to.setHours(23, 59, 59, 999);
+      qb.andWhere('log.createdAt <= :to', { to });
+    }
 
     const [items, total] = await qb.getManyAndCount();
     return { items, total };
