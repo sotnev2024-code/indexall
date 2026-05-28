@@ -101,14 +101,6 @@ export class AuthController {
     return safe;
   }
 
-  @Post('logout')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Выход из системы' })
-  async logout() {
-    return { message: 'Успешный выход' };
-  }
-
   @Patch('profile')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -181,7 +173,7 @@ export class AuthController {
   ) {
     if (!action) return { ok: false };
     const ip = req.ip || req.connection?.remoteAddress;
-    this.activityLogService.log(req.user.userId, action, details, ip);
+    this.activityLogService.log(req.user.userId, action as any, details, ip);
     return { ok: true };
   }
 }
