@@ -622,7 +622,21 @@ function ProjectsPageInner() {
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)' }}>{formatDate(sheet.updatedAt)}</div>
         <div style={{ fontSize: 12 }}>{formatMoney(sheet.total)}</div>
-        <div></div>
+        <div>
+          <button
+            onClick={e => { e.stopPropagation(); router.push(`/spec/${sheet.id}`); }}
+            style={{
+              padding: '3px 12px', borderRadius: 6, border: '1px solid #e5e7eb',
+              background: '#f8fafc', color: '#374151', fontSize: 12, cursor: 'pointer',
+              fontWeight: 500, whiteSpace: 'nowrap',
+              transition: 'background 0.15s, border-color 0.15s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = '#0f172a'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#0f172a'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = '#f8fafc'; e.currentTarget.style.color = '#374151'; e.currentTarget.style.borderColor = '#e5e7eb'; }}
+          >
+            Открыть
+          </button>
+        </div>
       </div>
     );
   }
