@@ -401,7 +401,7 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 }
 .project-row {
   display: grid;
-  grid-template-columns: 1fr 160px 160px 40px;
+  grid-template-columns: 1fr 160px 160px 90px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   align-items: center;
