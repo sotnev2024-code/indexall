@@ -74,6 +74,7 @@ export class OAuthController {
         token: result.accessToken,
         provider,
         ...(result.isNew ? { isNew: '1' } : {}),
+        ...(result.demoSheetId ? { demoSheetId: String(result.demoSheetId) } : {}),
         ...(result.trialActivated ? {
           trialActivated: '1',
           trialName: result.trialName,

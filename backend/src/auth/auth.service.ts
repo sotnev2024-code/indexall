@@ -124,7 +124,7 @@ export class AuthService {
   }
 
   /** Creates "Проект для ознакомления" folder + sheet filled from the default template */
-  private async createDemoProject(userId: number): Promise<number | null> {
+  async createDemoProject(userId: number): Promise<number | null> {
     this.logger.log(`createDemoProject: starting for user ${userId}`);
     try {
       this.logger.log(`createDemoProject: looking for default template`);

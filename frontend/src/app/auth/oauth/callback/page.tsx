@@ -18,6 +18,7 @@ export default function OAuthCallbackPage() {
     const token = searchParams.get('token');
     const error = searchParams.get('error');
     const isNew = searchParams.get('isNew') === '1';
+    const demoSheetId = searchParams.get('demoSheetId');
     const trialActivated = searchParams.get('trialActivated') === '1';
     const trialName = searchParams.get('trialName') || '';
     const trialDays = parseInt(searchParams.get('trialDays') || '0', 10);
@@ -47,7 +48,7 @@ export default function OAuthCallbackPage() {
           localStorage.setItem('welcomeModal', JSON.stringify({ name: trialName, days: trialDays }));
         }
 
-        router.replace('/projects');
+        router.replace(demoSheetId ? `/spec/${demoSheetId}` : '/projects');
       } catch {
         setErrorMsg('Не удалось получить данные профиля');
         setStatus('error');

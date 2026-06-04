@@ -7,6 +7,7 @@ import { User, UserPlan } from '../users/user.entity';
 import { TariffConfig } from '../admin/tariff-config.entity';
 import { TariffOperation } from '../admin/tariff-operation.entity';
 import { AppSetting } from '../admin/app-setting.entity';
+import { AuthService } from './auth.service';
 import { randomUUID } from 'crypto';
 
 export type OAuthProvider = 'google' | 'yandex' | 'mailru';
@@ -33,6 +34,7 @@ export class OAuthService {
   constructor(
     private configService: ConfigService,
     private jwtService: JwtService,
+    private authService: AuthService,
     @InjectRepository(User) private usersRepo: Repository<User>,
     @InjectRepository(TariffConfig) private tariffConfigRepo: Repository<TariffConfig>,
     @InjectRepository(TariffOperation) private tariffOpsRepo: Repository<TariffOperation>,
@@ -150,6 +152,7 @@ export class OAuthService {
     trialActivated: boolean;
     trialName: string;
     trialDays: number;
+    demoSheetId: number | null;
   }> {
     const accessToken = await this.exchangeCode(provider, code);
     const info = await this.fetchUserInfo(provider, accessToken);
@@ -168,6 +171,7 @@ export class OAuthService {
     let trialActivated = false;
     let trialName = '';
     let trialDays = 0;
+    let demoSheetId: number | null = null;
 
     if (!user) {
       // Create new user — no email verification needed for OAuth
@@ -188,6 +192,11 @@ export class OAuthService {
       trialActivated = result.trialActivated;
       trialName = result.trialName;
       trialDays = result.trialDays;
+
+      // Create demo project from default template (same as email registration)
+      this.logger.log(`OAuth: creating demo project for new user ${user.id}`);
+      demoSheetId = await this.authService.createDemoProject(user.id);
+      this.logger.log(`OAuth: demo project created, demoSheetId=${demoSheetId}`);
     } else {
       // Link OAuth provider to existing account if not yet linked
       if (!user.oauthProvider) {
@@ -199,7 +208,7 @@ export class OAuthService {
     const fresh = await this.usersRepo.findOne({ where: { id: user.id } });
     const jwt = this.jwtService.sign({ userId: fresh.id, email: fresh.email, plan: fresh.plan });
 
-    return { accessToken: jwt, isNew, trialActivated, trialName, trialDays };
+    return { accessToken: jwt, isNew, trialActivated, trialName, trialDays, demoSheetId };
   }
 
   private async autoActivateFreeTariff(user: User): Promise<{ trialActivated: boolean; trialName: string; trialDays: number }> {
