@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
+import toast from 'react-hot-toast';
 import { useAppStore } from '@/store/app.store';
 import SocialLoginButtons from '@/components/SocialLoginButtons';
 
@@ -36,6 +37,13 @@ export default function RegisterPage() {
           });
           setAuth(me, token);
         } catch { /* AuthHydrator will hydrate on next render */ }
+        // Show tariff activation message
+        if (data.activatedTariffName) {
+          toast.success(
+            `Вам подключён тариф «${data.activatedTariffName}»${data.activatedTariffDays ? ` на ${data.activatedTariffDays} дней` : ''}`,
+            { duration: 5000 },
+          );
+        }
         // Redirect to demo spec if created, otherwise to projects
         router.push(data.demoSheetId ? `/spec/${data.demoSheetId}` : '/projects');
       } else {

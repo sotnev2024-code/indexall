@@ -140,8 +140,7 @@ function ProjectsPageInner() {
   const [moveTarget, setMoveTarget] = useState<{ type: 'folder' | 'sheet'; id: number } | null>(null);
   const [moveDest, setMoveDest] = useState<number | null>(null);
 
-  // Welcome modal
-  const [showWelcome, setShowWelcome] = useState(false);
+  // Welcome modal removed — demo project is auto-created on registration
 
   // Trash
   const [showTrash, setShowTrash] = useState(false);
@@ -182,7 +181,7 @@ function ProjectsPageInner() {
     try {
       const { data } = await foldersApi.getTree('projects');
       setTree(data);
-      if (data.children.length === 0 && data.items.length === 0) setShowWelcome(true);
+      // Welcome modal removed — demo project is now auto-created on registration
       if (firstLoad.current && expanded.size === 0) {
         // Auto-expand root folders only if no saved state
         setExpanded(new Set(data.children.map((f: FolderNode) => f.id)));
@@ -652,31 +651,6 @@ function ProjectsPageInner() {
 
       <div className="projects-screen" onClick={() => setCtx(null)}>
         <div className="projects-content">
-
-          {/* Welcome modal */}
-          {showWelcome && (
-            <div className="modal-overlay">
-              <div className="welcome-modal">
-                <h2>Добро пожаловать в INDEXALL</h2>
-                <p>Создавайте папки, собирайте спецификации, подбирайте оборудование из каталогов.</p>
-                <label>Название первой папки</label>
-                <input
-                  value={newFolderName}
-                  onChange={e => setNewFolderName(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && (() => { createFolder(null); setShowWelcome(false); })()}
-                  placeholder="Проект 1"
-                  autoFocus
-                />
-                <button
-                  className="btn-primary"
-                  style={{ width: '100%', padding: 12, justifyContent: 'center', fontSize: 15 }}
-                  onClick={() => { createFolder(null); setShowWelcome(false); }}
-                >
-                  Создать папку
-                </button>
-              </div>
-            </div>
-          )}
 
           <div className="projects-title">Все проекты</div>
 

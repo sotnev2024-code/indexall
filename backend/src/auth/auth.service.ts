@@ -77,14 +77,19 @@ export class AuthService {
 
     // Auto-activate the welcome tariff (same logic as confirmEmail)
     const freeTariff = await this.getRegistrationTariff();
+    let activatedTariffName = '';
+    let activatedTariffDays = 0;
     if (freeTariff && !user.trialUsed && user.plan !== UserPlan.ADMIN) {
       const now = new Date();
       const expiresAt = new Date(now);
       if (freeTariff.duration_unit === 'month') {
         expiresAt.setMonth(expiresAt.getMonth() + Number(freeTariff.duration_value));
+        activatedTariffDays = Number(freeTariff.duration_value) * 30;
       } else {
         expiresAt.setDate(expiresAt.getDate() + Number(freeTariff.duration_value));
+        activatedTariffDays = Number(freeTariff.duration_value);
       }
+      activatedTariffName = freeTariff.name;
       await this.usersRepo.update(user.id, {
         plan: UserPlan.PRO,
         trialUsed: true,
@@ -111,7 +116,7 @@ export class AuthService {
     // Create demo project from default template
     const demoSheetId = await this.createDemoProject(user.id);
 
-    return { ...jwt, demoSheetId };
+    return { ...jwt, demoSheetId, activatedTariffName, activatedTariffDays };
   }
 
   /** Creates "Проект для ознакомления" folder + sheet filled from the default template */
