@@ -4,6 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import ImportModal from '@/components/ImportModal';
+import WelcomeModal from '@/components/WelcomeModal';
 import { sheetsApi, projectsApi, foldersApi, catalogApi, exportApi, storesApi, templatesApi, activityApi } from '@/lib/api';
 import { usePageTracker } from '@/hooks/usePageTracker';
 import { useAppStore } from '@/store/app.store';
@@ -2080,6 +2081,7 @@ export default function SpecPageClient() {
 
   return (
     <div className="page-fade-in">
+      <WelcomeModal />
       <Header
         breadcrumb={`Проект: ${project?.name || '…'}`}
         projectCost={project ? `Стоимость: ${fmtNum(project.total || 0)} ₽` : ''}

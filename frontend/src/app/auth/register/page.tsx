@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
-import toast from 'react-hot-toast';
 import { useAppStore } from '@/store/app.store';
 import SocialLoginButtons from '@/components/SocialLoginButtons';
 
@@ -37,12 +36,14 @@ export default function RegisterPage() {
           });
           setAuth(me, token);
         } catch { /* AuthHydrator will hydrate on next render */ }
-        // Show tariff activation message
+        // Store tariff info for WelcomeModal (same as confirm page)
         if (data.activatedTariffName) {
-          toast.success(
-            `Вам подключён тариф «${data.activatedTariffName}»${data.activatedTariffDays ? ` на ${data.activatedTariffDays} дней` : ''}`,
-            { duration: 5000 },
-          );
+          try {
+            localStorage.setItem('welcomeModal', JSON.stringify({
+              name: data.activatedTariffName,
+              days: data.activatedTariffDays || 7,
+            }));
+          } catch {}
         }
         // Redirect to demo spec if created, otherwise to projects
         router.push(data.demoSheetId ? `/spec/${data.demoSheetId}` : '/projects');
