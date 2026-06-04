@@ -121,9 +121,13 @@ export class AuthService {
 
   /** Creates "Проект для ознакомления" folder + sheet filled from the default template */
   private async createDemoProject(userId: number): Promise<number | null> {
+    this.logger.log(`createDemoProject: starting for user ${userId}`);
     try {
+      this.logger.log(`createDemoProject: looking for default template`);
       const template = await this.templatesRepo.findOne({ where: { is_default: true } as any });
+      this.logger.log(`createDemoProject: template=${template ? template.id : 'none'}`);
 
+      this.logger.log(`createDemoProject: saving folder`);
       const folder = await this.foldersRepo.save({
         name: 'Проект для ознакомления',
         owner_id: userId,
@@ -131,13 +135,16 @@ export class AuthService {
         parent_id: null,
         sort_order: 0,
       });
+      this.logger.log(`createDemoProject: folder saved id=${folder.id}`);
 
+      this.logger.log(`createDemoProject: saving sheet`);
       const sheet = await this.sheetsRepo.save({
         name: 'Спецификация для ознакомления',
         folder_id: folder.id,
         owner_id: userId,
         sort_order: 0,
       });
+      this.logger.log(`createDemoProject: sheet saved id=${sheet.id}`);
 
       let templateRows: any[] = [];
       if (template?.meta) {
@@ -164,10 +171,12 @@ export class AuthService {
             qty: '0', unit: 'шт', price: '0', store: '', coef: '1', total: '0',
           }));
 
+      this.logger.log(`createDemoProject: saving ${rowsToSave.length} rows`);
       await this.rowsRepo.save(rowsToSave);
+      this.logger.log(`createDemoProject: done, sheetId=${sheet.id}`);
       return sheet.id;
     } catch (err) {
-      this.logger.error(`Failed to create demo project for user ${userId}: ${err.message}`);
+      this.logger.error(`createDemoProject FAILED for user ${userId}: ${err.message}`, err.stack);
       return null;
     }
   }
