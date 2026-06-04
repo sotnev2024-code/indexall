@@ -1028,7 +1028,7 @@ export class AdminController implements OnModuleInit {
   async setDemoTemplate(@Param('id', ParseIntPipe) id: number) {
     const target = await this.templatesRepo.findOne({ where: { id } });
     if (!target) throw new BadRequestException('Шаблон не найден');
-    await this.templatesRepo.update({}, { is_default: false } as any);
+    await this.templatesRepo.update({ is_default: true } as any, { is_default: false } as any);
     await this.templatesRepo.update(id, { is_default: true } as any);
     let rows: any[] = [];
     try { const p = JSON.parse(target.meta); if (Array.isArray(p)) rows = p; } catch {}

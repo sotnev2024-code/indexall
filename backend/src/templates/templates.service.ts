@@ -104,7 +104,7 @@ export class TemplatesService {
   }
 
   async setDefault(id: number): Promise<any> {
-    await this.templatesRepository.update({}, { is_default: false });
+    await this.templatesRepository.update({ is_default: true }, { is_default: false });
     await this.templatesRepository.update(id, { is_default: true });
     return this.getDefault();
   }

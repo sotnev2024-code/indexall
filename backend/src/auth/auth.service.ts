@@ -65,12 +65,14 @@ export class AuthService {
 
   /** Register: create user, auto-verify, activate welcome tariff, create demo project, return JWT */
   async register(registerDto: RegisterDto): Promise<any> {
+    this.logger.log(`register: start email=${registerDto.email}`);
     const existing = await this.usersService.findByEmail(registerDto.email).catch(() => null);
     if (existing) {
       throw new BadRequestException('Пользователь с таким email уже существует');
     }
 
     const user = await this.usersService.create(registerDto);
+    this.logger.log(`register: user created id=${user.id}`);
 
     // Auto-verify email (no confirmation step)
     await this.usersRepo.update(user.id, { emailVerified: true });
@@ -114,7 +116,9 @@ export class AuthService {
     const jwt = await this.login(safe);
 
     // Create demo project from default template
+    this.logger.log(`register: about to call createDemoProject for user ${user.id}`);
     const demoSheetId = await this.createDemoProject(user.id);
+    this.logger.log(`register: createDemoProject returned demoSheetId=${demoSheetId}`);
 
     return { ...jwt, demoSheetId, activatedTariffName, activatedTariffDays };
   }
