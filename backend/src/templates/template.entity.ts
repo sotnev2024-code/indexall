@@ -36,6 +36,9 @@ export class Template {
   @Column({ default: true })
   is_active: boolean;
 
+  @Column({ default: false })
+  is_default: boolean;
+
   @Column({ nullable: true })
   userId: number;
 

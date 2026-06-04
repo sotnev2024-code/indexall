@@ -98,6 +98,17 @@ export class TemplatesService {
     return this.withRows(saved);
   }
 
+  async getDefault(): Promise<any | null> {
+    const t = await this.templatesRepository.findOne({ where: { is_default: true } });
+    return t ? this.withRows(t) : null;
+  }
+
+  async setDefault(id: number): Promise<any> {
+    await this.templatesRepository.update({}, { is_default: false });
+    await this.templatesRepository.update(id, { is_default: true });
+    return this.getDefault();
+  }
+
   async addFile(id: number): Promise<Template> {
     const template = await this.findOne(id);
     template.files += 1;

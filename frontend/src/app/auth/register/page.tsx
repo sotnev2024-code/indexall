@@ -36,8 +36,8 @@ export default function RegisterPage() {
           });
           setAuth(me, token);
         } catch { /* AuthHydrator will hydrate on next render */ }
-        // New user has no active subscription — go straight to pricing/paywall
-        router.push('/pricing');
+        // Redirect to demo spec if created, otherwise to projects
+        router.push(data.demoSheetId ? `/spec/${data.demoSheetId}` : '/projects');
       } else {
         setSent(true);
       }

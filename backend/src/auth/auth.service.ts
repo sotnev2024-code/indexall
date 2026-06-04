@@ -9,6 +9,10 @@ import { EmailService } from './email.service';
 import { TariffConfig } from '../admin/tariff-config.entity';
 import { TariffOperation } from '../admin/tariff-operation.entity';
 import { AppSetting } from '../admin/app-setting.entity';
+import { Folder } from '../folders/folder.entity';
+import { Sheet } from '../sheets/sheet.entity';
+import { EquipmentRow } from '../equipment/equipment-row.entity';
+import { Template } from '../templates/template.entity';
 import * as bcrypt from 'bcrypt';
 import { randomBytes, randomUUID } from 'crypto';
 
@@ -24,6 +28,10 @@ export class AuthService {
     @InjectRepository(TariffConfig) private tariffConfigRepo: Repository<TariffConfig>,
     @InjectRepository(TariffOperation) private tariffOpsRepo: Repository<TariffOperation>,
     @InjectRepository(AppSetting) private settingsRepo: Repository<AppSetting>,
+    @InjectRepository(Folder) private foldersRepo: Repository<Folder>,
+    @InjectRepository(Sheet) private sheetsRepo: Repository<Sheet>,
+    @InjectRepository(EquipmentRow) private rowsRepo: Repository<EquipmentRow>,
+    @InjectRepository(Template) private templatesRepo: Repository<Template>,
   ) {}
 
   async validateUser(email: string, password: string): Promise<any> {
@@ -55,7 +63,7 @@ export class AuthService {
     };
   }
 
-  /** Register: create user, send confirmation email, do NOT return JWT yet */
+  /** Register: create user, auto-verify, activate welcome tariff, create demo project, return JWT */
   async register(registerDto: RegisterDto): Promise<any> {
     const existing = await this.usersService.findByEmail(registerDto.email).catch(() => null);
     if (existing) {
@@ -64,25 +72,99 @@ export class AuthService {
 
     const user = await this.usersService.create(registerDto);
 
-    const token = randomBytes(32).toString('hex');
-    const expires = new Date();
-    expires.setHours(expires.getHours() + 24);
+    // Auto-verify email (no confirmation step)
+    await this.usersRepo.update(user.id, { emailVerified: true });
 
-    await this.usersRepo.update(user.id, {
-      emailVerificationToken: token,
-      emailVerificationExpires: expires,
-      emailVerified: false,
-    });
-
-    // Send confirmation email — required for account activation
-    try {
-      await this.emailService.sendConfirmation(registerDto.email, token);
-    } catch (emailErr) {
-      this.logger.error(`SMTP error during registration for ${registerDto.email}: ${emailErr.message}`);
+    // Auto-activate the welcome tariff (same logic as confirmEmail)
+    const freeTariff = await this.getRegistrationTariff();
+    if (freeTariff && !user.trialUsed && user.plan !== UserPlan.ADMIN) {
+      const now = new Date();
+      const expiresAt = new Date(now);
+      if (freeTariff.duration_unit === 'month') {
+        expiresAt.setMonth(expiresAt.getMonth() + Number(freeTariff.duration_value));
+      } else {
+        expiresAt.setDate(expiresAt.getDate() + Number(freeTariff.duration_value));
+      }
+      await this.usersRepo.update(user.id, {
+        plan: UserPlan.PRO,
+        trialUsed: true,
+        subscriptionExpiresAt: expiresAt,
+      });
+      try {
+        await this.tariffOpsRepo.save({
+          userId: user.id,
+          operator: 'auto',
+          plan: freeTariff.plan_key,
+          amount: 0,
+          status: 'active',
+          expiresAt,
+          comment: `Автоматическая активация при регистрации: ${freeTariff.name}`,
+          payment_id: `auto_${randomUUID()}`,
+        });
+      } catch {}
     }
 
-    // Do NOT verify immediately — user must click the email link
-    return { message: 'Письмо с подтверждением отправлено на ' + registerDto.email };
+    const updated = await this.usersRepo.findOne({ where: { id: user.id } });
+    const { password: _, ...safe } = updated;
+    const jwt = await this.login(safe);
+
+    // Create demo project from default template
+    const demoSheetId = await this.createDemoProject(user.id);
+
+    return { ...jwt, demoSheetId };
+  }
+
+  /** Creates "Проект для ознакомления" folder + sheet filled from the default template */
+  private async createDemoProject(userId: number): Promise<number | null> {
+    try {
+      const template = await this.templatesRepo.findOne({ where: { is_default: true } as any });
+
+      const folder = await this.foldersRepo.save({
+        name: 'Проект для ознакомления',
+        owner_id: userId,
+        type: 'projects',
+        parent_id: null,
+        sort_order: 0,
+      });
+
+      const sheet = await this.sheetsRepo.save({
+        name: 'Спецификация для ознакомления',
+        folder_id: folder.id,
+        owner_id: userId,
+        sort_order: 0,
+      });
+
+      let templateRows: any[] = [];
+      if (template?.meta) {
+        try { const p = JSON.parse(template.meta); if (Array.isArray(p)) templateRows = p; } catch {}
+      }
+
+      const rowsToSave = templateRows.length > 0
+        ? templateRows.map((r: any, i: number) => ({
+            sheetId: sheet.id,
+            sort_order: i,
+            name: r.name || '',
+            brand: r.brand || '',
+            article: r.article || '',
+            qty: r.qty != null ? String(r.qty) : '1',
+            unit: r.unit || 'шт',
+            price: r.price != null ? String(r.price) : '0',
+            store: r.store || '',
+            coef: r.coef != null ? String(r.coef) : '1',
+            total: r.total != null ? String(r.total) : '0',
+          }))
+        : Array.from({ length: 25 }, (_, i) => ({
+            sheetId: sheet.id, sort_order: i,
+            name: '', brand: '', article: '',
+            qty: '0', unit: 'шт', price: '0', store: '', coef: '1', total: '0',
+          }));
+
+      await this.rowsRepo.save(rowsToSave);
+      return sheet.id;
+    } catch (err) {
+      this.logger.error(`Failed to create demo project for user ${userId}: ${err.message}`);
+      return null;
+    }
   }
 
   /** Confirm email by token → auto-activate free welcome tariff → return JWT */

@@ -111,6 +111,10 @@ export default function AdminPage() {
   const [tmplPreview, setTmplPreview] = useState<any | null>(null);
   const [expandedUsers, setExpandedUsers] = useState<Set<number>>(new Set());
   const [expandedFolders, setExpandedFolders] = useState<Set<number>>(new Set());
+  // Demo template (default for new users)
+  const [demoTemplate, setDemoTemplate] = useState<any | null>(null);
+  const [showDemoSelect, setShowDemoSelect] = useState(false);
+  const [selectedDemoId, setSelectedDemoId] = useState<number | ''>('');
 
   // Tiles (Каталог: База)
   const [tiles, setTiles] = useState<any[]>([]);
@@ -507,13 +511,28 @@ export default function AdminPage() {
   }
   async function loadAdminTemplates() {
     try {
-      const [{ data: list }, { data: tree }] = await Promise.all([
+      const [{ data: list }, { data: tree }, demoRes] = await Promise.all([
         adminApi.getAdminTemplates(),
         adminApi.getAdminTemplatesTree(),
+        adminApi.getDemoTemplate().catch(() => ({ data: null })),
       ]);
       setAdminTemplates(list);
       setTmplTree(tree);
+      setDemoTemplate(demoRes.data);
+      if (demoRes.data?.id) setSelectedDemoId(demoRes.data.id);
     } catch { toast.error('Ошибка загрузки шаблонов'); }
+  }
+
+  async function handleSetDemoTemplate() {
+    if (!selectedDemoId) { toast.error('Выберите шаблон'); return; }
+    const target = adminTemplates.find(t => t.id === Number(selectedDemoId));
+    if (!confirm(`Назначить «${target?.name || selectedDemoId}» шаблоном по умолчанию?\nВсе новые пользователи будут получать этот проект при регистрации.`)) return;
+    try {
+      const { data } = await adminApi.setDemoTemplate(Number(selectedDemoId));
+      setDemoTemplate(data);
+      setShowDemoSelect(false);
+      toast.success(`Шаблон «${data?.name}» назначен по умолчанию`);
+    } catch { toast.error('Ошибка сохранения'); }
   }
   async function loadTiles() {
     try { const { data } = await catalogApi.getTilesAll(); setTiles(data); }
@@ -1907,6 +1926,50 @@ export default function AdminPage() {
 
             return (
               <>
+                {/* ── Шаблон по умолчанию для новых пользователей ── */}
+                <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: '18px 22px', marginBottom: 24 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>Шаблон для новых пользователей</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: 13, color: '#444' }}>
+                      Текущий:{' '}
+                      <strong>{demoTemplate?.name || <span style={{ color: '#999', fontWeight: 400 }}>Не задан</span>}</strong>
+                    </div>
+                    {!showDemoSelect ? (
+                      <button
+                        className="btn-outline"
+                        style={{ fontSize: 12, padding: '5px 12px' }}
+                        onClick={() => setShowDemoSelect(true)}
+                      >
+                        Изменить
+                      </button>
+                    ) : (
+                      <>
+                        <select
+                          value={selectedDemoId}
+                          onChange={e => setSelectedDemoId(Number(e.target.value))}
+                          style={{ fontSize: 13, padding: '5px 10px', border: '1px solid #d0d0d0', borderRadius: 6, minWidth: 220 }}
+                        >
+                          <option value="">— Выберите шаблон —</option>
+                          {adminTemplates.filter(t => t.scope === 'common').map(t => (
+                            <option key={t.id} value={t.id}>{t.name}</option>
+                          ))}
+                        </select>
+                        <button className="btn-primary" style={{ fontSize: 12, padding: '5px 14px' }} onClick={handleSetDemoTemplate}>
+                          Применить
+                        </button>
+                        <button className="btn-outline" style={{ fontSize: 12, padding: '5px 12px' }} onClick={() => { setShowDemoSelect(false); setSelectedDemoId(demoTemplate?.id || ''); }}>
+                          Отмена
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  {demoTemplate && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: '#888' }}>
+                      Этот шаблон будет автоматически вставлен в «Спецификацию для ознакомления» при регистрации нового пользователя.
+                    </div>
+                  )}
+                </div>
+
                 <div className="admin-section-title">Шаблоны пользователей</div>
 
                 <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>

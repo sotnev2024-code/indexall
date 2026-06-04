@@ -1012,4 +1012,26 @@ export class AdminController implements OnModuleInit {
 
     return { byAction: map, totalUsers, newUsers30 };
   }
+
+  // ── Demo template (shown to every new user after registration) ────────────
+
+  @Get('demo-template')
+  async getDemoTemplate() {
+    const t = await this.templatesRepo.findOne({ where: { is_default: true } as any });
+    if (!t) return null;
+    let rows: any[] = [];
+    try { const p = JSON.parse(t.meta); if (Array.isArray(p)) rows = p; } catch {}
+    return { ...t, rows };
+  }
+
+  @Patch('demo-template/:id')
+  async setDemoTemplate(@Param('id', ParseIntPipe) id: number) {
+    const target = await this.templatesRepo.findOne({ where: { id } });
+    if (!target) throw new BadRequestException('Шаблон не найден');
+    await this.templatesRepo.update({}, { is_default: false } as any);
+    await this.templatesRepo.update(id, { is_default: true } as any);
+    let rows: any[] = [];
+    try { const p = JSON.parse(target.meta); if (Array.isArray(p)) rows = p; } catch {}
+    return { ...target, is_default: true, rows };
+  }
 }

@@ -14,13 +14,17 @@ import { User } from '../users/user.entity';
 import { TariffConfig } from '../admin/tariff-config.entity';
 import { TariffOperation } from '../admin/tariff-operation.entity';
 import { AppSetting } from '../admin/app-setting.entity';
+import { Folder } from '../folders/folder.entity';
+import { Sheet } from '../sheets/sheet.entity';
+import { EquipmentRow } from '../equipment/equipment-row.entity';
+import { Template } from '../templates/template.entity';
 
 @Module({
   imports: [
     UsersModule,
     PassportModule,
     ConfigModule,
-    TypeOrmModule.forFeature([User, TariffConfig, TariffOperation, AppSetting]),
+    TypeOrmModule.forFeature([User, TariffConfig, TariffOperation, AppSetting, Folder, Sheet, EquipmentRow, Template]),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
