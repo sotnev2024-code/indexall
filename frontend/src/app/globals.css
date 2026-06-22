@@ -148,7 +148,7 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
   z-index: 100;
   gap: 12px;
 }
-.logo-btn { display: flex; align-items: center; gap: 8px; cursor: pointer; flex-shrink: 0; }
+.logo-btn { display: flex; align-items: center; gap: 8px; cursor: default; flex-shrink: 0; }
 .logo-icon {
   width: 34px; height: 34px;
   background: var(--yellow);
@@ -548,16 +548,6 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .spec-summary-value { font-weight: 600; }
 .spec-summary-sep { color: var(--border); }
 
-/* Brand filter bar */
-.spec-brand-bar {
-  display: flex; align-items: center; gap: 6px;
-  padding: 6px 16px;
-  background: var(--white);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  flex-wrap: wrap;
-}
-
 /* Global search bar */
 .spec-search-bar {
   padding: 6px 16px;
@@ -891,17 +881,6 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .col-add-custom { width: 28px; min-width: 28px; padding: 0 2px; border-right: none !important; }
 .spec-table th.col-custom,
 .spec-table th.col-add-custom { position: sticky; top: 0; z-index: 10; background: var(--white); }
-.brand-chip {
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 12px;
-  cursor: pointer;
-  border: 1px solid var(--border);
-  background: var(--white);
-  transition: all .1s;
-}
-.brand-chip.active { background: var(--black); color: var(--white); border-color: var(--black); }
-.brand-chip:hover:not(.active) { border-color: #888; }
 
 /* ===== AUTOCOMPLETE ===== */
 .ac-dropdown {

@@ -5,12 +5,12 @@ import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import ImportModal from '@/components/ImportModal';
 import WelcomeModal from '@/components/WelcomeModal';
-import { sheetsApi, projectsApi, foldersApi, catalogApi, exportApi, storesApi, templatesApi, activityApi } from '@/lib/api';
+import OnboardingVideoModal from '@/components/OnboardingVideoModal';
+import { sheetsApi, projectsApi, foldersApi, catalogApi, exportApi, storesApi, templatesApi, activityApi, paymentsApi } from '@/lib/api';
 import { usePageTracker } from '@/hooks/usePageTracker';
 import { useAppStore } from '@/store/app.store';
 
 const MAX_UNDO = 30;
-const STATIC_BRANDS = ['IEK', 'EKF', 'Chint', 'КЗАЗ', 'DEKraft', 'DKC', 'TDM'];
 
 // Column order for the editable cells (col indices 0-8)
 const EDITABLE_COLS = ['name', 'brand', 'article', 'qty', 'unit', 'price', 'store', 'coef', 'deadline'] as const;
@@ -331,11 +331,12 @@ export default function SpecPageClient() {
   const [acFocus, setAcFocus] = useState(-1);
   const [storeDropdown, setStoreDropdown] = useState<{ rowIdx: number; rect: DOMRect; offers: any[] } | null>(null);
 
-  const [brandFilter, setBrandFilter] = useState<string>('all');
-  const [brands, setBrands] = useState<string[]>(STATIC_BRANDS);
   const [globalSearch, setGlobalSearch] = useState('');
   const [globalResults, setGlobalResults] = useState<any[]>([]);
   const globalSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // One-time onboarding video shown to new users ~2s after the spec opens.
+  const [onboardingVideo, setOnboardingVideo] = useState<string | null>(null);
 
   const [renamingSheetId, setRenamingSheetId] = useState<number | null>(null);
   const [renameVal, setRenameVal] = useState('');
@@ -531,7 +532,6 @@ export default function SpecPageClient() {
   // ── Load data on sheet change ─────────────────────────────────
   useEffect(() => {
     loadData();
-    if (currentId === Number(_routeId)) { loadBrands(); }
     const close = (e: Event) => {
       setAcDrops(null); setStoreDropdown(null); setGlobalResults([]);
       const t = e.target as HTMLElement;
@@ -546,15 +546,35 @@ export default function SpecPageClient() {
     return () => document.removeEventListener('click', close);
   }, [currentId]);
 
-  async function loadBrands() {
+  // ── One-time onboarding video for new users ───────────────────
+  // Triggered by the `onboardingPending` flag set at registration. Shows the
+  // admin-configured video ~2s after the spec page opens; skippable. Marks
+  // `onboardingShown` so it never repeats on this device.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
     try {
-      const { data } = await catalogApi.getManufacturers();
-      const names: string[] = (data as any[])
-        .filter((m: any) => m.is_active)
-        .map((m: any) => m.name)
-        .slice(0, 12);
-      if (names.length > 0) setBrands(names);
-    } catch { /* keep static list */ }
+      const pending = localStorage.getItem('onboardingPending');
+      const shown = localStorage.getItem('onboardingShown');
+      if (pending && !shown) {
+        paymentsApi.getPublicSettings()
+          .then(({ data }) => {
+            const url = data?.onboardingVideoUrl;
+            if (cancelled || !url) return;
+            timer = setTimeout(() => setOnboardingVideo(url), 2000);
+          })
+          .catch(() => {});
+      }
+    } catch {}
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, []);
+
+  function closeOnboarding() {
+    setOnboardingVideo(null);
+    try {
+      localStorage.removeItem('onboardingPending');
+      localStorage.setItem('onboardingShown', '1');
+    } catch {}
   }
 
   async function loadData() {
@@ -933,12 +953,7 @@ export default function SpecPageClient() {
     globalSearchTimer.current = setTimeout(async () => {
       try {
         const { data } = await catalogApi.search(q);
-        let results = data as any[];
-        if (brandFilter !== 'all') {
-          results = results.filter((p: any) =>
-            (p.manufacturer?.name || p.brand || '').toLowerCase() === brandFilter.toLowerCase()
-          );
-        }
+        const results = data as any[];
         setGlobalResults(results.slice(0, 10));
       } catch { setGlobalResults([]); }
     }, 300);
@@ -2046,11 +2061,6 @@ export default function SpecPageClient() {
         <div style={{ flex: 1 }} />
         <div className="skeleton" style={{ width: 260, height: 20, borderRadius: 4 }} />
       </div>
-      <div className="spec-brand-bar">
-        {[70, 50, 55, 70, 65, 55, 65, 50].map((w, i) => (
-          <div key={i} className="skeleton" style={{ width: w, height: 26, borderRadius: 13 }} />
-        ))}
-      </div>
       <div className="sheet-tabs">
         {[90, 80, 100].map((w, i) => (
           <div key={i} style={{ padding: '8px 14px', display: 'flex', alignItems: 'center' }}>
@@ -2082,6 +2092,7 @@ export default function SpecPageClient() {
   return (
     <div className="page-fade-in">
       <WelcomeModal />
+      {onboardingVideo && <OnboardingVideoModal src={onboardingVideo} onClose={closeOnboarding} />}
       <Header
         breadcrumb={`Проект: ${project?.name || '…'}`}
         projectCost={project ? `Стоимость: ${fmtNum(project.total || 0)} ₽` : ''}
@@ -2142,23 +2153,6 @@ export default function SpecPageClient() {
                 : '↻ Сроки'}
             </button>
           </div>
-        </div>
-
-        {/* ── Brand filter chips ── */}
-        <div className="spec-brand-bar">
-          <button className={`brand-chip${brandFilter === 'all' ? ' active' : ''}`} onClick={() => setBrandFilter('all')}>
-            Все бренды
-          </button>
-          {brands.map(b => (
-            <button
-              key={b}
-              className={`brand-chip${brandFilter === b ? ' active' : ''}`}
-              onClick={() => setBrandFilter(brandFilter === b ? 'all' : b)}
-            >
-              {b}
-            </button>
-          ))}
-          <button className="brand-chip" style={{ color: 'var(--muted)' }}>+ добавить фильтр</button>
         </div>
 
         {/* ── Global catalog search ── */}

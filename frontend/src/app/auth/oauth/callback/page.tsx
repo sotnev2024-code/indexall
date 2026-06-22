@@ -46,6 +46,8 @@ export default function OAuthCallbackPage() {
 
         if (trialActivated) {
           localStorage.setItem('welcomeModal', JSON.stringify({ name: trialName, days: trialDays }));
+          // Flag a one-time onboarding video to be shown on the spec page
+          try { localStorage.setItem('onboardingPending', '1'); } catch {}
         }
 
         router.replace(demoSheetId ? `/spec/${demoSheetId}` : '/projects');

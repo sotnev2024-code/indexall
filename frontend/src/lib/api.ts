@@ -250,6 +250,8 @@ export const adminApi = {
     api.put('/admin/tariff-configs/reorder', { items }),
   getSettings: () => api.get<Record<string, string>>('/admin/settings'),
   setSetting: (key: string, value: string) => api.put(`/admin/settings/${key}`, { value }),
+  uploadOnboardingVideo: (fd: FormData) =>
+    api.post<{ path: string; filename: string }>('/admin/onboarding-video', fd, { headers: { 'Content-Type': 'multipart/form-data' } }),
 };
 
 // ── Activity log ──────────────────────────────────────────────
@@ -270,8 +272,9 @@ export const profileApi = {
 // ── Payments / Subscriptions ──────────────────────────────────
 export const paymentsApi = {
   getPlans: () => api.get('/payments/plans'),
-  /** Public flags driving the pricing UI (e.g. tile mode toggle). */
-  getPublicSettings: () => api.get<{ pricingTilesEnabled: boolean }>('/payments/settings'),
+  /** Public flags driving the pricing UI (e.g. tile mode toggle) and the
+   *  onboarding video URL shown to new users on the spec page. */
+  getPublicSettings: () => api.get<{ pricingTilesEnabled: boolean; onboardingVideoUrl?: string }>('/payments/settings'),
   /** `planType` accepts a tariff_configs.plan_key (preferred) — backend
    *  also still translates the legacy 'monthly' / 'annual' shortcuts. */
   createPayment: (planType: string, returnUrl?: string) =>

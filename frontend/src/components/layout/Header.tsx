@@ -30,7 +30,7 @@ export default function Header({ breadcrumb = 'Проекты', projectCost, sho
     router.push('/auth/login');
   }
 
-  function handleLogoClick() {
+  function handleNavToProjects() {
     if (hasUnsaved) {
       if (confirm('Есть несохранённые изменения. Сохранить перед уходом?')) {
         onSave?.();
@@ -43,8 +43,8 @@ export default function Header({ breadcrumb = 'Проекты', projectCost, sho
 
   return (
     <header className="app-header">
-      {/* Logo */}
-      <div className="logo-btn" onClick={handleLogoClick}>
+      {/* Logo (non-clickable) */}
+      <div className="logo-btn">
         <img
           src="/logo.png"
           alt="INDEXALL"
@@ -67,8 +67,8 @@ export default function Header({ breadcrumb = 'Проекты', projectCost, sho
         </button>
       </div>
 
-      {/* Breadcrumb */}
-      <div className="breadcrumb">
+      {/* Breadcrumb (clickable → projects) */}
+      <div className="breadcrumb" onClick={handleNavToProjects} style={{ cursor: 'pointer' }} title="К проектам">
         <span className="breadcrumb-icon">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f5c800" strokeWidth="2">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>

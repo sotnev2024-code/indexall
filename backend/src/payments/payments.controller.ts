@@ -33,8 +33,10 @@ export class PaymentsController {
   @Get('settings')
   async getPublicSettings() {
     const tilesRow = await this.settingsRepo.findOne({ where: { key: 'pricing_tiles_enabled' } });
+    const onboardingRow = await this.settingsRepo.findOne({ where: { key: 'onboarding_video_url' } });
     return {
       pricingTilesEnabled: tilesRow?.value === 'true',
+      onboardingVideoUrl: onboardingRow?.value || '',
     };
   }
 

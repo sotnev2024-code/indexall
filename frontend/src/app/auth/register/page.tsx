@@ -45,6 +45,8 @@ export default function RegisterPage() {
             }));
           } catch {}
         }
+        // Flag a one-time onboarding video to be shown on the spec page
+        try { localStorage.setItem('onboardingPending', '1'); } catch {}
         // Redirect to demo spec if created, otherwise to projects
         router.push(data.demoSheetId ? `/spec/${data.demoSheetId}` : '/projects');
       } else {

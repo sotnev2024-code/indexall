@@ -99,6 +99,8 @@ export default function AdminPage() {
   const [managedTariffs, setManagedTariffs] = useState<TariffTile[]>([]);
   const [pricingTilesEnabled, setPricingTilesEnabled] = useState(false);
   const [registrationTariff, setRegistrationTariff] = useState<string>('');
+  const [onboardingVideoUrl, setOnboardingVideoUrl] = useState<string>('');
+  const [onboardingUploading, setOnboardingUploading] = useState(false);
 
   // Stats
   const [stats, setStats] = useState<any>(null);
@@ -249,6 +251,7 @@ export default function AdminPage() {
       setTariffConfigs(cfgs);
       setPricingTilesEnabled(settings?.pricing_tiles_enabled === 'true');
       setRegistrationTariff(settings?.registration_tariff || '');
+      setOnboardingVideoUrl(settings?.onboarding_video_url || '');
       const initial: Record<number, any> = {};
       cfgs.forEach((c: any) => {
         initial[c.id] = {
@@ -1631,6 +1634,81 @@ export default function AdminPage() {
                     Сохранить
                   </button>
                 </div>
+              </div>
+
+              {/* ── Onboarding video setting ── */}
+              <div className="admin-form" style={{ marginBottom: 16 }}>
+                <div className="admin-form-title">Онбординг-видео</div>
+                <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.5 }}>
+                  Короткий ролик, который всплывает новому пользователю через 2 секунды после
+                  открытия листа спецификации (с возможностью пропустить). Можно вставить ссылку
+                  на видео или загрузить файл на сервер. Если поле пустое — онбординг не показывается.
+                </p>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+                  <input
+                    type="text"
+                    value={onboardingVideoUrl}
+                    onChange={e => setOnboardingVideoUrl(e.target.value)}
+                    placeholder="https://… ссылка на видео (mp4)"
+                    style={{ padding: '7px 12px', borderRadius: 7, border: '1px solid var(--border)', fontSize: 13, minWidth: 320, flex: 1 }}
+                  />
+                  <button
+                    className="btn-primary"
+                    style={{ padding: '7px 18px', fontSize: 13 }}
+                    onClick={async () => {
+                      try {
+                        await adminApi.setSetting('onboarding_video_url', onboardingVideoUrl.trim());
+                        toast.success('Настройка сохранена');
+                      } catch { toast.error('Ошибка сохранения'); }
+                    }}
+                  >
+                    Сохранить
+                  </button>
+                  <label
+                    style={{
+                      padding: '7px 18px', fontSize: 13,
+                      cursor: onboardingUploading ? 'wait' : 'pointer',
+                      display: 'inline-flex', alignItems: 'center',
+                      border: '1px solid var(--border)', borderRadius: 7, background: 'var(--white)',
+                    }}
+                  >
+                    {onboardingUploading ? 'Загрузка…' : 'Загрузить видео'}
+                    <input
+                      type="file"
+                      accept="video/*"
+                      style={{ display: 'none' }}
+                      disabled={onboardingUploading}
+                      onChange={async e => {
+                        const file = e.target.files?.[0];
+                        e.target.value = '';
+                        if (!file) return;
+                        setOnboardingUploading(true);
+                        try {
+                          const fd = new FormData();
+                          fd.append('file', file);
+                          const { data } = await adminApi.uploadOnboardingVideo(fd);
+                          const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+                          const url = `${apiUrl}/uploads/${data.filename}`;
+                          setOnboardingVideoUrl(url);
+                          await adminApi.setSetting('onboarding_video_url', url);
+                          toast.success('Видео загружено и сохранено');
+                        } catch (err: any) {
+                          toast.error(err?.response?.data?.message || 'Ошибка загрузки видео');
+                        } finally {
+                          setOnboardingUploading(false);
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+                {onboardingVideoUrl && (
+                  <video
+                    key={onboardingVideoUrl}
+                    src={onboardingVideoUrl}
+                    controls
+                    style={{ maxWidth: 360, width: '100%', borderRadius: 8, border: '1px solid var(--border)', background: '#000' }}
+                  />
+                )}
               </div>
 
               {/* ── Tariff plan editor (tile manager) ── */}

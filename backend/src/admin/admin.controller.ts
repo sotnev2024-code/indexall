@@ -15,6 +15,11 @@ const tariffImageStorage = diskStorage({
   filename: (_, file, cb) => cb(null, `tariff-${Date.now()}${extname(file.originalname)}`),
 });
 
+const onboardingVideoStorage = diskStorage({
+  destination: process.env.UPLOAD_DIR || './uploads',
+  filename: (_, file, cb) => cb(null, `onboarding-${Date.now()}${extname(file.originalname)}`),
+});
+
 /** Cyrillic → Latin transliteration for auto-generating plan_keys when the
  *  admin doesn't supply one. Matches the public ГОСТ-7.79 system A subset. */
 const CYR_TO_LAT: Record<string, string> = {
@@ -450,6 +455,25 @@ export class AdminController implements OnModuleInit {
       await this.settingsRepo.save(this.settingsRepo.create({ key, value }));
     }
     return { key, value };
+  }
+
+  /** Upload an onboarding video file. Returns the stored filename; the admin
+   *  UI builds the public /uploads/<file> URL and saves it into the
+   *  `onboarding_video_url` setting (so the public endpoint serves it as-is). */
+  @Post('onboarding-video')
+  @UseInterceptors(FileInterceptor('file', {
+    storage: onboardingVideoStorage,
+    limits: { fileSize: 100 * 1024 * 1024 },
+    fileFilter: (_, file, cb) => {
+      if (!/^video\//.test(file.mimetype)) {
+        return cb(new BadRequestException('Допустимы только видеофайлы'), false);
+      }
+      cb(null, true);
+    },
+  }))
+  async uploadOnboardingVideo(@UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('Файл не загружен');
+    return { path: file.path, filename: file.filename };
   }
 
   // ── Tariff configs (plan editor) ─────────────────────────────
