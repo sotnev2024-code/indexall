@@ -33,10 +33,22 @@ export class PaymentsController {
   @Get('settings')
   async getPublicSettings() {
     const tilesRow = await this.settingsRepo.findOne({ where: { key: 'pricing_tiles_enabled' } });
-    const onboardingRow = await this.settingsRepo.findOne({ where: { key: 'onboarding_video_url' } });
+    const slidesRow = await this.settingsRepo.findOne({ where: { key: 'onboarding_slides' } });
+    // Show the user only slides that actually carry content (media/title/text).
+    let onboardingSlides: any[] = [];
+    if (slidesRow?.value) {
+      try {
+        const parsed = JSON.parse(slidesRow.value);
+        if (Array.isArray(parsed)) {
+          onboardingSlides = parsed.filter(
+            (s) => s && (s.mediaUrl || s.title || s.description),
+          );
+        }
+      } catch { /* ignore malformed JSON */ }
+    }
     return {
       pricingTilesEnabled: tilesRow?.value === 'true',
-      onboardingVideoUrl: onboardingRow?.value || '',
+      onboardingSlides,
     };
   }
 

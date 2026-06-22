@@ -5,8 +5,9 @@ import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import ImportModal from '@/components/ImportModal';
 import WelcomeModal from '@/components/WelcomeModal';
-import OnboardingVideoModal from '@/components/OnboardingVideoModal';
+import OnboardingSlidesModal from '@/components/OnboardingSlidesModal';
 import { sheetsApi, projectsApi, foldersApi, catalogApi, exportApi, storesApi, templatesApi, activityApi, paymentsApi } from '@/lib/api';
+import type { OnboardingSlide } from '@/lib/api';
 import { usePageTracker } from '@/hooks/usePageTracker';
 import { useAppStore } from '@/store/app.store';
 
@@ -335,8 +336,8 @@ export default function SpecPageClient() {
   const [globalResults, setGlobalResults] = useState<any[]>([]);
   const globalSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // One-time onboarding video shown to new users ~2s after the spec opens.
-  const [onboardingVideo, setOnboardingVideo] = useState<string | null>(null);
+  // One-time onboarding slides shown to new users ~2s after the spec opens.
+  const [onboardingSlides, setOnboardingSlides] = useState<OnboardingSlide[] | null>(null);
 
   const [renamingSheetId, setRenamingSheetId] = useState<number | null>(null);
   const [renameVal, setRenameVal] = useState('');
@@ -559,9 +560,9 @@ export default function SpecPageClient() {
       if (pending && !shown) {
         paymentsApi.getPublicSettings()
           .then(({ data }) => {
-            const url = data?.onboardingVideoUrl;
-            if (cancelled || !url) return;
-            timer = setTimeout(() => setOnboardingVideo(url), 2000);
+            const slides = data?.onboardingSlides;
+            if (cancelled || !slides || slides.length === 0) return;
+            timer = setTimeout(() => setOnboardingSlides(slides), 2000);
           })
           .catch(() => {});
       }
@@ -570,7 +571,7 @@ export default function SpecPageClient() {
   }, []);
 
   function closeOnboarding() {
-    setOnboardingVideo(null);
+    setOnboardingSlides(null);
     try {
       localStorage.removeItem('onboardingPending');
       localStorage.setItem('onboardingShown', '1');
@@ -2092,7 +2093,7 @@ export default function SpecPageClient() {
   return (
     <div className="page-fade-in">
       <WelcomeModal />
-      {onboardingVideo && <OnboardingVideoModal src={onboardingVideo} onClose={closeOnboarding} />}
+      {onboardingSlides && <OnboardingSlidesModal slides={onboardingSlides} onClose={closeOnboarding} />}
       <Header
         breadcrumb={`Проект: ${project?.name || '…'}`}
         projectCost={project ? `Стоимость: ${fmtNum(project.total || 0)} ₽` : ''}

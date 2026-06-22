@@ -1,5 +1,14 @@
 import axios from 'axios';
 
+/** One step of the new-user onboarding shown on the spec page. Stored as a
+ *  JSON array in the `onboarding_slides` admin setting. */
+export interface OnboardingSlide {
+  mediaUrl?: string;
+  mediaType?: 'image' | 'video';
+  title?: string;
+  description?: string;
+}
+
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api',
   withCredentials: true,
@@ -250,8 +259,8 @@ export const adminApi = {
     api.put('/admin/tariff-configs/reorder', { items }),
   getSettings: () => api.get<Record<string, string>>('/admin/settings'),
   setSetting: (key: string, value: string) => api.put(`/admin/settings/${key}`, { value }),
-  uploadOnboardingVideo: (fd: FormData) =>
-    api.post<{ path: string; filename: string }>('/admin/onboarding-video', fd, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  uploadOnboardingMedia: (fd: FormData) =>
+    api.post<{ path: string; filename: string; mimetype: string }>('/admin/onboarding-media', fd, { headers: { 'Content-Type': 'multipart/form-data' } }),
 };
 
 // ── Activity log ──────────────────────────────────────────────
@@ -273,8 +282,8 @@ export const profileApi = {
 export const paymentsApi = {
   getPlans: () => api.get('/payments/plans'),
   /** Public flags driving the pricing UI (e.g. tile mode toggle) and the
-   *  onboarding video URL shown to new users on the spec page. */
-  getPublicSettings: () => api.get<{ pricingTilesEnabled: boolean; onboardingVideoUrl?: string }>('/payments/settings'),
+   *  onboarding slides shown to new users on the spec page. */
+  getPublicSettings: () => api.get<{ pricingTilesEnabled: boolean; onboardingSlides?: OnboardingSlide[] }>('/payments/settings'),
   /** `planType` accepts a tariff_configs.plan_key (preferred) — backend
    *  also still translates the legacy 'monthly' / 'annual' shortcuts. */
   createPayment: (planType: string, returnUrl?: string) =>

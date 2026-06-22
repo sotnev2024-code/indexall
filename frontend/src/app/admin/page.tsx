@@ -4,12 +4,14 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 import { catalogApi, adminApi, templatesApi, paymentsApi } from '@/lib/api';
+import type { OnboardingSlide } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 import TilesManagerModal from '@/components/TilesManagerModal';
 import TariffsManagerModal, { TariffTile } from '@/components/TariffsManagerModal';
 import AdminEtmLookup from '@/components/AdminEtmLookup';
+import OnboardingSlidesModal from '@/components/OnboardingSlidesModal';
 
-type Tab = 'pricelists' | 'base' | 'templates' | 'users' | 'conversions' | 'tariffs' | 'stats' | 'tiles' | 'accessories' | 'activity';
+type Tab = 'pricelists' | 'base' | 'templates' | 'users' | 'conversions' | 'tariffs' | 'stats' | 'tiles' | 'accessories' | 'activity' | 'onboarding';
 
 function getBackendOrigin(): string {
   try {
@@ -99,8 +101,12 @@ export default function AdminPage() {
   const [managedTariffs, setManagedTariffs] = useState<TariffTile[]>([]);
   const [pricingTilesEnabled, setPricingTilesEnabled] = useState(false);
   const [registrationTariff, setRegistrationTariff] = useState<string>('');
-  const [onboardingVideoUrl, setOnboardingVideoUrl] = useState<string>('');
-  const [onboardingUploading, setOnboardingUploading] = useState(false);
+
+  // Onboarding slides editor (separate admin tab)
+  const [onboardingSlides, setOnboardingSlides] = useState<OnboardingSlide[]>([]);
+  const [onboardingUploadingIdx, setOnboardingUploadingIdx] = useState<number | null>(null);
+  const [onboardingPreviewOpen, setOnboardingPreviewOpen] = useState(false);
+  const [onboardingSaving, setOnboardingSaving] = useState(false);
 
   // Stats
   const [stats, setStats] = useState<any>(null);
@@ -213,6 +219,7 @@ export default function AdminPage() {
     else if (tab === 'base') loadTiles();
     else if (tab === 'tiles') loadTiles();
     else if (tab === 'accessories') loadAccessories();
+    else if (tab === 'onboarding') loadOnboarding();
     else if (tab === 'activity') { loadActivity(); if (users.length === 0) loadUsers(); }
   }, [tab]);
 
@@ -251,7 +258,6 @@ export default function AdminPage() {
       setTariffConfigs(cfgs);
       setPricingTilesEnabled(settings?.pricing_tiles_enabled === 'true');
       setRegistrationTariff(settings?.registration_tariff || '');
-      setOnboardingVideoUrl(settings?.onboarding_video_url || '');
       const initial: Record<number, any> = {};
       cfgs.forEach((c: any) => {
         initial[c.id] = {
@@ -266,6 +272,68 @@ export default function AdminPage() {
       setEditingConfig(initial);
     } catch { toast.error('Ошибка загрузки тарифных операций'); }
   }
+
+  // ── Onboarding slides ────────────────────────────────────────
+  async function loadOnboarding() {
+    try {
+      const { data: settings } = await adminApi.getSettings();
+      let slides: OnboardingSlide[] = [];
+      const raw = settings?.onboarding_slides;
+      if (raw) {
+        try { const parsed = JSON.parse(raw); if (Array.isArray(parsed)) slides = parsed; } catch {}
+      }
+      // One-time migration from the old single-video setting.
+      if (slides.length === 0 && settings?.onboarding_video_url) {
+        slides = [{ mediaUrl: settings.onboarding_video_url, mediaType: 'video' }];
+      }
+      setOnboardingSlides(slides);
+    } catch { toast.error('Ошибка загрузки онбординга'); }
+  }
+
+  function updateSlide(idx: number, patch: Partial<OnboardingSlide>) {
+    setOnboardingSlides(prev => prev.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
+  }
+  function addSlide() {
+    setOnboardingSlides(prev => [...prev, { title: '', description: '', mediaType: 'image' }]);
+  }
+  function removeSlide(idx: number) {
+    setOnboardingSlides(prev => prev.filter((_, i) => i !== idx));
+  }
+  function moveSlide(idx: number, dir: -1 | 1) {
+    setOnboardingSlides(prev => {
+      const next = [...prev];
+      const j = idx + dir;
+      if (j < 0 || j >= next.length) return prev;
+      [next[idx], next[j]] = [next[j], next[idx]];
+      return next;
+    });
+  }
+  async function uploadSlideMedia(idx: number, file: File) {
+    setOnboardingUploadingIdx(idx);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const { data } = await adminApi.uploadOnboardingMedia(fd);
+      const url = `${process.env.NEXT_PUBLIC_API_URL}/uploads/${data.filename}`;
+      const mediaType: 'image' | 'video' = data.mimetype.startsWith('video/') ? 'video' : 'image';
+      updateSlide(idx, { mediaUrl: url, mediaType });
+      toast.success('Файл загружен');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Ошибка загрузки файла');
+    } finally {
+      setOnboardingUploadingIdx(null);
+    }
+  }
+  async function saveOnboarding() {
+    setOnboardingSaving(true);
+    try {
+      await adminApi.setSetting('onboarding_slides', JSON.stringify(onboardingSlides));
+      toast.success('Онбординг сохранён');
+    } catch { toast.error('Ошибка сохранения'); }
+    finally { setOnboardingSaving(false); }
+  }
+  /** Slides actually shown to the user — those carrying any content. */
+  const filledSlides = onboardingSlides.filter(s => s.mediaUrl || s.title || s.description);
 
   async function saveTariffConfig(id: number) {
     const data = editingConfig[id];
@@ -1123,6 +1191,7 @@ export default function AdminPage() {
     { key: 'activity',  label: 'Журнал действий' },
     { key: 'conversions', label: 'Конверсии' },
     { key: 'tariffs',   label: 'Тарифы и их операции' },
+    { key: 'onboarding', label: 'Онбординг' },
     { key: 'templates', label: 'Шаблоны' },
     { key: 'pricelists',  label: 'Каталог: Прайс-листы' },
     { key: 'accessories', label: 'Каталог: Аксессуары' },
@@ -1159,6 +1228,7 @@ export default function AdminPage() {
         </button>
       </header>
       {etmLookupOpen && <AdminEtmLookup onClose={() => setEtmLookupOpen(false)} />}
+      {onboardingPreviewOpen && <OnboardingSlidesModal slides={filledSlides} onClose={() => setOnboardingPreviewOpen(false)} />}
 
       <div className="admin-layout">
         <div className="admin-sidebar">
@@ -1636,81 +1706,6 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* ── Onboarding video setting ── */}
-              <div className="admin-form" style={{ marginBottom: 16 }}>
-                <div className="admin-form-title">Онбординг-видео</div>
-                <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.5 }}>
-                  Короткий ролик, который всплывает новому пользователю через 2 секунды после
-                  открытия листа спецификации (с возможностью пропустить). Можно вставить ссылку
-                  на видео или загрузить файл на сервер. Если поле пустое — онбординг не показывается.
-                </p>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
-                  <input
-                    type="text"
-                    value={onboardingVideoUrl}
-                    onChange={e => setOnboardingVideoUrl(e.target.value)}
-                    placeholder="https://… ссылка на видео (mp4)"
-                    style={{ padding: '7px 12px', borderRadius: 7, border: '1px solid var(--border)', fontSize: 13, minWidth: 320, flex: 1 }}
-                  />
-                  <button
-                    className="btn-primary"
-                    style={{ padding: '7px 18px', fontSize: 13 }}
-                    onClick={async () => {
-                      try {
-                        await adminApi.setSetting('onboarding_video_url', onboardingVideoUrl.trim());
-                        toast.success('Настройка сохранена');
-                      } catch { toast.error('Ошибка сохранения'); }
-                    }}
-                  >
-                    Сохранить
-                  </button>
-                  <label
-                    style={{
-                      padding: '7px 18px', fontSize: 13,
-                      cursor: onboardingUploading ? 'wait' : 'pointer',
-                      display: 'inline-flex', alignItems: 'center',
-                      border: '1px solid var(--border)', borderRadius: 7, background: 'var(--white)',
-                    }}
-                  >
-                    {onboardingUploading ? 'Загрузка…' : 'Загрузить видео'}
-                    <input
-                      type="file"
-                      accept="video/*"
-                      style={{ display: 'none' }}
-                      disabled={onboardingUploading}
-                      onChange={async e => {
-                        const file = e.target.files?.[0];
-                        e.target.value = '';
-                        if (!file) return;
-                        setOnboardingUploading(true);
-                        try {
-                          const fd = new FormData();
-                          fd.append('file', file);
-                          const { data } = await adminApi.uploadOnboardingVideo(fd);
-                          const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-                          const url = `${apiUrl}/uploads/${data.filename}`;
-                          setOnboardingVideoUrl(url);
-                          await adminApi.setSetting('onboarding_video_url', url);
-                          toast.success('Видео загружено и сохранено');
-                        } catch (err: any) {
-                          toast.error(err?.response?.data?.message || 'Ошибка загрузки видео');
-                        } finally {
-                          setOnboardingUploading(false);
-                        }
-                      }}
-                    />
-                  </label>
-                </div>
-                {onboardingVideoUrl && (
-                  <video
-                    key={onboardingVideoUrl}
-                    src={onboardingVideoUrl}
-                    controls
-                    style={{ maxWidth: 360, width: '100%', borderRadius: 8, border: '1px solid var(--border)', background: '#000' }}
-                  />
-                )}
-              </div>
-
               {/* ── Tariff plan editor (tile manager) ── */}
               <div className="admin-form" style={{ marginBottom: 24 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
@@ -1906,6 +1901,163 @@ export default function AdminPage() {
                     )}
                   </tbody>
                 </table>
+              </div>
+            </>
+          )}
+
+          {/* ── Онбординг ── */}
+          {tab === 'onboarding' && (
+            <>
+              <div className="admin-section-title">Онбординг новых пользователей</div>
+              <div className="admin-form" style={{ marginBottom: 16 }}>
+                <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 4, lineHeight: 1.6 }}>
+                  Пошаговое окно, которое всплывает новому пользователю через 2 секунды после
+                  открытия листа спецификации (можно пропустить, показывается один раз).
+                  На каждый слайд можно добавить картинку <b>или</b> видео, заголовок и описание.
+                </p>
+                <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0, lineHeight: 1.6 }}>
+                  Пользователю показываются только заполненные слайды (с медиа, заголовком или
+                  описанием). Если ни одного — онбординг не показывается.
+                </p>
+
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '16px 0' }}>
+                  <button className="btn-primary" style={{ padding: '8px 18px', fontSize: 13 }} onClick={addSlide}>
+                    + Добавить слайд
+                  </button>
+                  <button
+                    style={{
+                      padding: '8px 18px', fontSize: 13, cursor: filledSlides.length ? 'pointer' : 'not-allowed',
+                      border: '1px solid var(--border)', borderRadius: 7, background: 'var(--white)',
+                      opacity: filledSlides.length ? 1 : 0.5,
+                    }}
+                    disabled={!filledSlides.length}
+                    onClick={() => setOnboardingPreviewOpen(true)}
+                    title="Показать так, как увидит пользователь"
+                  >
+                    👁 Предпросмотр ({filledSlides.length})
+                  </button>
+                  <button
+                    className="btn-primary"
+                    style={{ padding: '8px 22px', fontSize: 13, marginLeft: 'auto' }}
+                    onClick={saveOnboarding}
+                    disabled={onboardingSaving}
+                  >
+                    {onboardingSaving ? 'Сохранение…' : 'Сохранить'}
+                  </button>
+                </div>
+
+                {onboardingSlides.length === 0 && (
+                  <div style={{ fontSize: 13, color: 'var(--muted)', padding: '20px 0', textAlign: 'center' }}>
+                    Слайдов пока нет. Нажмите «Добавить слайд».
+                  </div>
+                )}
+
+                {onboardingSlides.map((slide, idx) => {
+                  const uploading = onboardingUploadingIdx === idx;
+                  return (
+                    <div
+                      key={idx}
+                      style={{
+                        border: '1px solid var(--border)', borderRadius: 10, padding: 16,
+                        marginBottom: 12, display: 'flex', gap: 16, flexWrap: 'wrap',
+                      }}
+                    >
+                      {/* Media column */}
+                      <div style={{ width: 220, flexShrink: 0 }}>
+                        <div style={{
+                          width: '100%', aspectRatio: '16 / 9', borderRadius: 8, overflow: 'hidden',
+                          background: '#f4f4f4', border: '1px solid var(--border)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          {slide.mediaUrl ? (
+                            slide.mediaType === 'video' ? (
+                              <video src={slide.mediaUrl} controls style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }} />
+                            ) : (
+                              <img src={slide.mediaUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                            )
+                          ) : (
+                            <span style={{ fontSize: 12, color: 'var(--muted)' }}>нет медиа</span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                          <label style={{
+                            flex: 1, textAlign: 'center', padding: '6px 8px', fontSize: 12,
+                            cursor: uploading ? 'wait' : 'pointer', border: '1px solid var(--border)',
+                            borderRadius: 6, background: 'var(--white)',
+                          }}>
+                            {uploading ? 'Загрузка…' : (slide.mediaUrl ? 'Заменить' : 'Загрузить')}
+                            <input
+                              type="file"
+                              accept="image/*,video/*"
+                              style={{ display: 'none' }}
+                              disabled={uploading}
+                              onChange={e => {
+                                const file = e.target.files?.[0];
+                                e.target.value = '';
+                                if (file) uploadSlideMedia(idx, file);
+                              }}
+                            />
+                          </label>
+                          {slide.mediaUrl && (
+                            <button
+                              onClick={() => updateSlide(idx, { mediaUrl: '' })}
+                              title="Убрать медиа"
+                              style={{ padding: '6px 10px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--white)', cursor: 'pointer' }}
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          value={slide.mediaUrl || ''}
+                          onChange={e => updateSlide(idx, { mediaUrl: e.target.value })}
+                          placeholder="или вставьте ссылку (mp4 / YouTube / картинка)"
+                          style={{ width: '100%', marginTop: 6, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 11 }}
+                        />
+                        {slide.mediaUrl && (
+                          <select
+                            value={slide.mediaType || 'image'}
+                            onChange={e => updateSlide(idx, { mediaType: e.target.value as 'image' | 'video' })}
+                            style={{ width: '100%', marginTop: 6, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12 }}
+                          >
+                            <option value="image">Картинка</option>
+                            <option value="video">Видео</option>
+                          </select>
+                        )}
+                      </div>
+
+                      {/* Text column */}
+                      <div style={{ flex: 1, minWidth: 240, display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700 }}>Слайд {idx + 1}</span>
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            <button onClick={() => moveSlide(idx, -1)} disabled={idx === 0} title="Вверх"
+                              style={{ padding: '3px 9px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--white)', cursor: idx === 0 ? 'default' : 'pointer', opacity: idx === 0 ? 0.4 : 1 }}>↑</button>
+                            <button onClick={() => moveSlide(idx, 1)} disabled={idx === onboardingSlides.length - 1} title="Вниз"
+                              style={{ padding: '3px 9px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--white)', cursor: idx === onboardingSlides.length - 1 ? 'default' : 'pointer', opacity: idx === onboardingSlides.length - 1 ? 0.4 : 1 }}>↓</button>
+                            <button onClick={() => removeSlide(idx)} title="Удалить слайд"
+                              style={{ padding: '3px 10px', border: '1px solid #e0a0a0', color: '#c0392b', borderRadius: 6, background: 'var(--white)', cursor: 'pointer' }}>Удалить</button>
+                          </div>
+                        </div>
+                        <input
+                          type="text"
+                          value={slide.title || ''}
+                          onChange={e => updateSlide(idx, { title: e.target.value })}
+                          placeholder="Название слайда"
+                          style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid var(--border)', fontSize: 14, fontWeight: 600, marginBottom: 8 }}
+                        />
+                        <textarea
+                          value={slide.description || ''}
+                          onChange={e => updateSlide(idx, { description: e.target.value })}
+                          placeholder="Описание слайда"
+                          rows={4}
+                          style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid var(--border)', fontSize: 13, resize: 'vertical', flex: 1 }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </>
           )}

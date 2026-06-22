@@ -15,7 +15,7 @@ const tariffImageStorage = diskStorage({
   filename: (_, file, cb) => cb(null, `tariff-${Date.now()}${extname(file.originalname)}`),
 });
 
-const onboardingVideoStorage = diskStorage({
+const onboardingMediaStorage = diskStorage({
   destination: process.env.UPLOAD_DIR || './uploads',
   filename: (_, file, cb) => cb(null, `onboarding-${Date.now()}${extname(file.originalname)}`),
 });
@@ -457,23 +457,23 @@ export class AdminController implements OnModuleInit {
     return { key, value };
   }
 
-  /** Upload an onboarding video file. Returns the stored filename; the admin
-   *  UI builds the public /uploads/<file> URL and saves it into the
-   *  `onboarding_video_url` setting (so the public endpoint serves it as-is). */
-  @Post('onboarding-video')
+  /** Upload an onboarding slide image or video. Returns the stored filename
+   *  and mimetype; the admin UI builds the public /uploads/<file> URL and
+   *  stores it inside the `onboarding_slides` JSON setting. */
+  @Post('onboarding-media')
   @UseInterceptors(FileInterceptor('file', {
-    storage: onboardingVideoStorage,
+    storage: onboardingMediaStorage,
     limits: { fileSize: 100 * 1024 * 1024 },
     fileFilter: (_, file, cb) => {
-      if (!/^video\//.test(file.mimetype)) {
-        return cb(new BadRequestException('Допустимы только видеофайлы'), false);
+      if (!/^(image|video)\//.test(file.mimetype)) {
+        return cb(new BadRequestException('Допустимы только изображения или видео'), false);
       }
       cb(null, true);
     },
   }))
-  async uploadOnboardingVideo(@UploadedFile() file: Express.Multer.File) {
+  async uploadOnboardingMedia(@UploadedFile() file: Express.Multer.File) {
     if (!file) throw new BadRequestException('Файл не загружен');
-    return { path: file.path, filename: file.filename };
+    return { path: file.path, filename: file.filename, mimetype: file.mimetype };
   }
 
   // ── Tariff configs (plan editor) ─────────────────────────────
