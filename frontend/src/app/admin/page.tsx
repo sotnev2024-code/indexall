@@ -319,7 +319,11 @@ export default function AdminPage() {
       updateSlide(idx, { mediaUrl: url, mediaType });
       toast.success('Файл загружен');
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Ошибка загрузки файла');
+      const status = err?.response?.status;
+      const msg = status === 413
+        ? 'Файл слишком большой (максимум 200 МБ)'
+        : (err?.response?.data?.message || 'Ошибка загрузки файла');
+      toast.error(msg);
     } finally {
       setOnboardingUploadingIdx(null);
     }

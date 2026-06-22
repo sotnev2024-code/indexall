@@ -463,7 +463,7 @@ export class AdminController implements OnModuleInit {
   @Post('onboarding-media')
   @UseInterceptors(FileInterceptor('file', {
     storage: onboardingMediaStorage,
-    limits: { fileSize: 100 * 1024 * 1024 },
+    limits: { fileSize: 200 * 1024 * 1024 },
     fileFilter: (_, file, cb) => {
       if (!/^(image|video)\//.test(file.mimetype)) {
         return cb(new BadRequestException('Допустимы только изображения или видео'), false);
