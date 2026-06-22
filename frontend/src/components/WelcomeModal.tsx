@@ -9,9 +9,24 @@ interface WelcomeInfo {
 /**
  * Shows once after a new user confirms their email and a free tariff is
  * auto-activated. Info is stored in localStorage by the /auth/confirm page.
+ *
+ * On dismiss («Супер!»), if an onboarding is pending, marks `onboardingReady`
+ * so the spec page knows the user has acknowledged the welcome — only then is
+ * the step-by-step onboarding allowed to appear. `onDismiss` lets the spec
+ * page react immediately when the modal lives on the same page.
  */
-export default function WelcomeModal() {
+export default function WelcomeModal({ onDismiss }: { onDismiss?: () => void } = {}) {
   const [info, setInfo] = useState<WelcomeInfo | null>(null);
+
+  function dismiss() {
+    setInfo(null);
+    try {
+      if (localStorage.getItem('onboardingPending')) {
+        localStorage.setItem('onboardingReady', '1');
+      }
+    } catch {}
+    onDismiss?.();
+  }
 
   useEffect(() => {
     try {
@@ -65,7 +80,7 @@ export default function WelcomeModal() {
         </p>
 
         <button
-          onClick={() => setInfo(null)}
+          onClick={dismiss}
           style={{
             width: '100%', padding: '14px',
             background: '#f5c800', color: '#1a1a1a',

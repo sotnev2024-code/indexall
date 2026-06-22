@@ -336,8 +336,12 @@ export default function SpecPageClient() {
   const [globalResults, setGlobalResults] = useState<any[]>([]);
   const globalSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // One-time onboarding slides shown to new users ~2s after the spec opens.
+  // One-time onboarding slides shown to new users — but only AFTER they
+  // dismiss the «Супер!» welcome modal (trial activated). `pending` holds the
+  // preloaded slides; `welcomeAcknowledged` gates the actual display.
   const [onboardingSlides, setOnboardingSlides] = useState<OnboardingSlide[] | null>(null);
+  const [pendingOnboarding, setPendingOnboarding] = useState<OnboardingSlide[] | null>(null);
+  const [welcomeAcknowledged, setWelcomeAcknowledged] = useState(false);
 
   const [renamingSheetId, setRenamingSheetId] = useState<number | null>(null);
   const [renameVal, setRenameVal] = useState('');
@@ -547,33 +551,57 @@ export default function SpecPageClient() {
     return () => document.removeEventListener('click', close);
   }, [currentId]);
 
-  // ── One-time onboarding video for new users ───────────────────
-  // Triggered by the `onboardingPending` flag set at registration. Shows the
-  // admin-configured video ~2s after the spec page opens; skippable. Marks
-  // `onboardingShown` so it never repeats on this device.
+  // ── One-time onboarding for new users ─────────────────────────
+  // Set at registration (`onboardingPending`). The slides are preloaded here,
+  // but only DISPLAYED after the user clicks «Супер!» in the welcome modal —
+  // that sets `onboardingReady` (cross-page) and/or fires onWelcomeDismissed
+  // (same page). Marks `onboardingShown` so it never repeats on this device.
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
     try {
       const pending = localStorage.getItem('onboardingPending');
+      const ready = localStorage.getItem('onboardingReady');
       const shown = localStorage.getItem('onboardingShown');
-      if (pending && !shown) {
+      if ((pending || ready) && !shown) {
+        if (ready) setWelcomeAcknowledged(true);
         paymentsApi.getPublicSettings()
           .then(({ data }) => {
             const slides = data?.onboardingSlides;
             if (cancelled || !slides || slides.length === 0) return;
-            timer = setTimeout(() => setOnboardingSlides(slides), 2000);
+            setPendingOnboarding(slides);
           })
           .catch(() => {});
       }
     } catch {}
-    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+    return () => { cancelled = true; };
   }, []);
+
+  // Reveal the onboarding shortly after the welcome modal is acknowledged.
+  useEffect(() => {
+    if (!welcomeAcknowledged || !pendingOnboarding) return;
+    const timer = setTimeout(() => setOnboardingSlides(pendingOnboarding), 600);
+    return () => clearTimeout(timer);
+  }, [welcomeAcknowledged, pendingOnboarding]);
+
+  function onWelcomeDismissed() {
+    setWelcomeAcknowledged(true);
+    // If the welcome modal lived on this page, slides may not be preloaded yet.
+    if (!pendingOnboarding) {
+      paymentsApi.getPublicSettings()
+        .then(({ data }) => {
+          const slides = data?.onboardingSlides;
+          if (slides && slides.length > 0) setPendingOnboarding(slides);
+        })
+        .catch(() => {});
+    }
+  }
 
   function closeOnboarding() {
     setOnboardingSlides(null);
+    setPendingOnboarding(null);
     try {
       localStorage.removeItem('onboardingPending');
+      localStorage.removeItem('onboardingReady');
       localStorage.setItem('onboardingShown', '1');
     } catch {}
   }
@@ -2092,7 +2120,7 @@ export default function SpecPageClient() {
 
   return (
     <div className="page-fade-in">
-      <WelcomeModal />
+      <WelcomeModal onDismiss={onWelcomeDismissed} />
       {onboardingSlides && <OnboardingSlidesModal slides={onboardingSlides} onClose={closeOnboarding} />}
       <Header
         breadcrumb={`Проект: ${project?.name || '…'}`}
