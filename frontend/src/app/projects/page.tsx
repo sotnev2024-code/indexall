@@ -7,6 +7,7 @@ import { foldersApi, sheetsApi, trashApi, templatesApi, activityApi } from '@/li
 import { useAppStore } from '@/store/app.store';
 import RequireSubscription from '@/components/RequireSubscription';
 import WelcomeModal from '@/components/WelcomeModal';
+import SectionOnboarding from '@/components/SectionOnboarding';
 import { usePageTracker } from '@/hooks/usePageTracker';
 
 type TplFolderNode = {
@@ -647,6 +648,7 @@ function ProjectsPageInner() {
   return (
     <>
       <WelcomeModal />
+      <SectionOnboarding section="projects" />
       <Header breadcrumb="Проекты" />
 
       <div className="projects-screen" onClick={() => setCtx(null)}>

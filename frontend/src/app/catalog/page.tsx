@@ -23,6 +23,7 @@ import { catalogApi, sheetsApi, storesApi, activityApi } from '@/lib/api';
 import { usePageTracker } from '@/hooks/usePageTracker';
 import { useAppStore } from '@/store/app.store';
 import RequireSubscription from '@/components/RequireSubscription';
+import SectionOnboarding from '@/components/SectionOnboarding';
 
 export default function CatalogPage() {
   return <RequireSubscription><CatalogPageInner /></RequireSubscription>;
@@ -986,6 +987,7 @@ function CatalogPageInner() {
   return (
     <>
       <Header breadcrumb="Каталог" />
+      <SectionOnboarding section="catalog" />
       <div className={`catalog-screen${mode === 'filter' && !selectedSlug ? ' catalog-screen--tiles' : ''}`}>
 
         {/* ── Toolbar ── */}

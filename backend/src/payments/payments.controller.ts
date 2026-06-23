@@ -34,21 +34,25 @@ export class PaymentsController {
   async getPublicSettings() {
     const tilesRow = await this.settingsRepo.findOne({ where: { key: 'pricing_tiles_enabled' } });
     const slidesRow = await this.settingsRepo.findOne({ where: { key: 'onboarding_slides' } });
-    // Show the user only slides that actually carry content (media/title/text).
-    let onboardingSlides: any[] = [];
+    // Per-section onboarding: { spec: [...], catalog: [...], ... }. Old format
+    // was a bare array → treat it as the `spec` section. Only slides that
+    // actually carry content (media/title/text) are returned.
+    const filled = (arr: any) =>
+      Array.isArray(arr) ? arr.filter((s) => s && (s.mediaUrl || s.title || s.description)) : [];
+    const onboarding: Record<string, any[]> = {};
     if (slidesRow?.value) {
       try {
         const parsed = JSON.parse(slidesRow.value);
         if (Array.isArray(parsed)) {
-          onboardingSlides = parsed.filter(
-            (s) => s && (s.mediaUrl || s.title || s.description),
-          );
+          onboarding.spec = filled(parsed);
+        } else if (parsed && typeof parsed === 'object') {
+          for (const key of Object.keys(parsed)) onboarding[key] = filled(parsed[key]);
         }
       } catch { /* ignore malformed JSON */ }
     }
     return {
       pricingTilesEnabled: tilesRow?.value === 'true',
-      onboardingSlides,
+      onboarding,
     };
   }
 

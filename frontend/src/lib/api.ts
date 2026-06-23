@@ -282,8 +282,8 @@ export const profileApi = {
 export const paymentsApi = {
   getPlans: () => api.get('/payments/plans'),
   /** Public flags driving the pricing UI (e.g. tile mode toggle) and the
-   *  onboarding slides shown to new users on the spec page. */
-  getPublicSettings: () => api.get<{ pricingTilesEnabled: boolean; onboardingSlides?: OnboardingSlide[] }>('/payments/settings'),
+   *  per-section onboarding slides shown to users (spec / catalog / …). */
+  getPublicSettings: () => api.get<{ pricingTilesEnabled: boolean; onboarding?: Record<string, OnboardingSlide[]> }>('/payments/settings'),
   /** `planType` accepts a tariff_configs.plan_key (preferred) — backend
    *  also still translates the legacy 'monthly' / 'annual' shortcuts. */
   createPayment: (planType: string, returnUrl?: string) =>

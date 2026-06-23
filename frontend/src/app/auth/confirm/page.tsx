@@ -34,8 +34,6 @@ function ConfirmContent() {
               name: res.data.trialName || 'Пробный',
               days: res.data.trialDays || 14,
             }));
-            // Flag a one-time onboarding video to be shown on the spec page
-            try { localStorage.setItem('onboardingPending', '1'); } catch {}
           }
           try {
             const { data: me } = await axios.get(`${API_URL}/auth/me`, {

@@ -5,9 +5,8 @@ import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import ImportModal from '@/components/ImportModal';
 import WelcomeModal from '@/components/WelcomeModal';
-import OnboardingSlidesModal from '@/components/OnboardingSlidesModal';
-import { sheetsApi, projectsApi, foldersApi, catalogApi, exportApi, storesApi, templatesApi, activityApi, paymentsApi } from '@/lib/api';
-import type { OnboardingSlide } from '@/lib/api';
+import SectionOnboarding from '@/components/SectionOnboarding';
+import { sheetsApi, projectsApi, foldersApi, catalogApi, exportApi, storesApi, templatesApi, activityApi } from '@/lib/api';
 import { usePageTracker } from '@/hooks/usePageTracker';
 import { useAppStore } from '@/store/app.store';
 
@@ -336,12 +335,6 @@ export default function SpecPageClient() {
   const [globalResults, setGlobalResults] = useState<any[]>([]);
   const globalSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // One-time onboarding slides shown to new users — but only AFTER they
-  // dismiss the «Супер!» welcome modal (trial activated). `pending` holds the
-  // preloaded slides; `welcomeAcknowledged` gates the actual display.
-  const [onboardingSlides, setOnboardingSlides] = useState<OnboardingSlide[] | null>(null);
-  const [pendingOnboarding, setPendingOnboarding] = useState<OnboardingSlide[] | null>(null);
-  const [welcomeAcknowledged, setWelcomeAcknowledged] = useState(false);
 
   const [renamingSheetId, setRenamingSheetId] = useState<number | null>(null);
   const [renameVal, setRenameVal] = useState('');
@@ -550,61 +543,6 @@ export default function SpecPageClient() {
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
   }, [currentId]);
-
-  // ── One-time onboarding for new users ─────────────────────────
-  // Set at registration (`onboardingPending`). The slides are preloaded here,
-  // but only DISPLAYED after the user clicks «Супер!» in the welcome modal —
-  // that sets `onboardingReady` (cross-page) and/or fires onWelcomeDismissed
-  // (same page). Marks `onboardingShown` so it never repeats on this device.
-  useEffect(() => {
-    let cancelled = false;
-    try {
-      const pending = localStorage.getItem('onboardingPending');
-      const ready = localStorage.getItem('onboardingReady');
-      const shown = localStorage.getItem('onboardingShown');
-      if ((pending || ready) && !shown) {
-        if (ready) setWelcomeAcknowledged(true);
-        paymentsApi.getPublicSettings()
-          .then(({ data }) => {
-            const slides = data?.onboardingSlides;
-            if (cancelled || !slides || slides.length === 0) return;
-            setPendingOnboarding(slides);
-          })
-          .catch(() => {});
-      }
-    } catch {}
-    return () => { cancelled = true; };
-  }, []);
-
-  // Reveal the onboarding shortly after the welcome modal is acknowledged.
-  useEffect(() => {
-    if (!welcomeAcknowledged || !pendingOnboarding) return;
-    const timer = setTimeout(() => setOnboardingSlides(pendingOnboarding), 600);
-    return () => clearTimeout(timer);
-  }, [welcomeAcknowledged, pendingOnboarding]);
-
-  function onWelcomeDismissed() {
-    setWelcomeAcknowledged(true);
-    // If the welcome modal lived on this page, slides may not be preloaded yet.
-    if (!pendingOnboarding) {
-      paymentsApi.getPublicSettings()
-        .then(({ data }) => {
-          const slides = data?.onboardingSlides;
-          if (slides && slides.length > 0) setPendingOnboarding(slides);
-        })
-        .catch(() => {});
-    }
-  }
-
-  function closeOnboarding() {
-    setOnboardingSlides(null);
-    setPendingOnboarding(null);
-    try {
-      localStorage.removeItem('onboardingPending');
-      localStorage.removeItem('onboardingReady');
-      localStorage.setItem('onboardingShown', '1');
-    } catch {}
-  }
 
   async function loadData() {
     try {
@@ -2120,8 +2058,8 @@ export default function SpecPageClient() {
 
   return (
     <div className="page-fade-in">
-      <WelcomeModal onDismiss={onWelcomeDismissed} />
-      {onboardingSlides && <OnboardingSlidesModal slides={onboardingSlides} onClose={closeOnboarding} />}
+      <WelcomeModal />
+      <SectionOnboarding section="spec" />
       <Header
         breadcrumb={`Проект: ${project?.name || '…'}`}
         projectCost={project ? `Стоимость: ${fmtNum(project.total || 0)} ₽` : ''}

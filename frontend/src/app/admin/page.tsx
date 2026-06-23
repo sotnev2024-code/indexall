@@ -13,6 +13,14 @@ import OnboardingSlidesModal from '@/components/OnboardingSlidesModal';
 
 type Tab = 'pricelists' | 'base' | 'templates' | 'users' | 'conversions' | 'tariffs' | 'stats' | 'tiles' | 'accessories' | 'activity' | 'onboarding';
 
+/** App sections that can have their own onboarding (key → user-facing label). */
+const ONBOARDING_SECTIONS: { key: string; label: string }[] = [
+  { key: 'spec', label: 'Лист спецификации' },
+  { key: 'templates', label: 'Шаблоны' },
+  { key: 'projects', label: 'Проекты' },
+  { key: 'catalog', label: 'Каталог' },
+];
+
 function getBackendOrigin(): string {
   try {
     return new URL(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api').origin;
@@ -102,8 +110,9 @@ export default function AdminPage() {
   const [pricingTilesEnabled, setPricingTilesEnabled] = useState(false);
   const [registrationTariff, setRegistrationTariff] = useState<string>('');
 
-  // Onboarding slides editor (separate admin tab)
-  const [onboardingSlides, setOnboardingSlides] = useState<OnboardingSlide[]>([]);
+  // Onboarding slides editor (separate admin tab) — per app section.
+  const [onboardingBySection, setOnboardingBySection] = useState<Record<string, OnboardingSlide[]>>({});
+  const [onboardingSection, setOnboardingSection] = useState<string>('spec');
   const [onboardingUploadingIdx, setOnboardingUploadingIdx] = useState<number | null>(null);
   const [onboardingPreviewOpen, setOnboardingPreviewOpen] = useState(false);
   const [onboardingSaving, setOnboardingSaving] = useState(false);
@@ -273,34 +282,53 @@ export default function AdminPage() {
     } catch { toast.error('Ошибка загрузки тарифных операций'); }
   }
 
-  // ── Onboarding slides ────────────────────────────────────────
+  // ── Onboarding slides (per section) ──────────────────────────
   async function loadOnboarding() {
     try {
       const { data: settings } = await adminApi.getSettings();
-      let slides: OnboardingSlide[] = [];
+      const bySection: Record<string, OnboardingSlide[]> = {};
       const raw = settings?.onboarding_slides;
       if (raw) {
-        try { const parsed = JSON.parse(raw); if (Array.isArray(parsed)) slides = parsed; } catch {}
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            bySection.spec = parsed; // old format → spec section
+          } else if (parsed && typeof parsed === 'object') {
+            for (const key of Object.keys(parsed)) {
+              if (Array.isArray(parsed[key])) bySection[key] = parsed[key];
+            }
+          }
+        } catch {}
       }
       // One-time migration from the old single-video setting.
-      if (slides.length === 0 && settings?.onboarding_video_url) {
-        slides = [{ mediaUrl: settings.onboarding_video_url, mediaType: 'video' }];
+      if (!bySection.spec?.length && settings?.onboarding_video_url) {
+        bySection.spec = [{ mediaUrl: settings.onboarding_video_url, mediaType: 'video' }];
       }
-      setOnboardingSlides(slides);
+      // Ensure every known section has an array.
+      for (const s of ONBOARDING_SECTIONS) if (!bySection[s.key]) bySection[s.key] = [];
+      setOnboardingBySection(bySection);
     } catch { toast.error('Ошибка загрузки онбординга'); }
   }
 
+  // Helpers operate on the currently selected section.
+  const onboardingSlides = onboardingBySection[onboardingSection] || [];
+  function setSectionSlides(updater: (prev: OnboardingSlide[]) => OnboardingSlide[]) {
+    setOnboardingBySection(prev => ({
+      ...prev,
+      [onboardingSection]: updater(prev[onboardingSection] || []),
+    }));
+  }
   function updateSlide(idx: number, patch: Partial<OnboardingSlide>) {
-    setOnboardingSlides(prev => prev.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
+    setSectionSlides(prev => prev.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
   }
   function addSlide() {
-    setOnboardingSlides(prev => [...prev, { title: '', description: '', mediaType: 'image' }]);
+    setSectionSlides(prev => [...prev, { title: '', description: '', mediaType: 'image' }]);
   }
   function removeSlide(idx: number) {
-    setOnboardingSlides(prev => prev.filter((_, i) => i !== idx));
+    setSectionSlides(prev => prev.filter((_, i) => i !== idx));
   }
   function moveSlide(idx: number, dir: -1 | 1) {
-    setOnboardingSlides(prev => {
+    setSectionSlides(prev => {
       const next = [...prev];
       const j = idx + dir;
       if (j < 0 || j >= next.length) return prev;
@@ -331,12 +359,13 @@ export default function AdminPage() {
   async function saveOnboarding() {
     setOnboardingSaving(true);
     try {
-      await adminApi.setSetting('onboarding_slides', JSON.stringify(onboardingSlides));
+      // Persist all sections at once as a single JSON object.
+      await adminApi.setSetting('onboarding_slides', JSON.stringify(onboardingBySection));
       toast.success('Онбординг сохранён');
     } catch { toast.error('Ошибка сохранения'); }
     finally { setOnboardingSaving(false); }
   }
-  /** Slides actually shown to the user — those carrying any content. */
+  /** Slides of the current section actually shown to the user. */
   const filledSlides = onboardingSlides.filter(s => s.mediaUrl || s.title || s.description);
 
   async function saveTariffConfig(id: number) {
@@ -1912,17 +1941,39 @@ export default function AdminPage() {
           {/* ── Онбординг ── */}
           {tab === 'onboarding' && (
             <>
-              <div className="admin-section-title">Онбординг новых пользователей</div>
+              <div className="admin-section-title">Онбординг по разделам</div>
               <div className="admin-form" style={{ marginBottom: 16 }}>
                 <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 4, lineHeight: 1.6 }}>
-                  Пошаговое окно, которое всплывает новому пользователю через 2 секунды после
-                  открытия листа спецификации (можно пропустить, показывается один раз).
-                  На каждый слайд можно добавить картинку <b>или</b> видео, заголовок и описание.
+                  Для каждого раздела — свой пошаговый онбординг. Он всплывает пользователю
+                  один раз при первом входе в раздел (можно пропустить). На каждый слайд можно
+                  добавить картинку <b>или</b> видео, заголовок и описание.
                 </p>
                 <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0, lineHeight: 1.6 }}>
-                  Пользователю показываются только заполненные слайды (с медиа, заголовком или
-                  описанием). Если ни одного — онбординг не показывается.
+                  Показываются только заполненные слайды (с медиа, заголовком или описанием).
+                  Если у раздела ничего не заполнено — онбординг в нём не показывается.
                 </p>
+
+                {/* Section selector */}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '16px 0 4px' }}>
+                  {ONBOARDING_SECTIONS.map(s => {
+                    const count = (onboardingBySection[s.key] || []).filter(x => x.mediaUrl || x.title || x.description).length;
+                    const active = onboardingSection === s.key;
+                    return (
+                      <button
+                        key={s.key}
+                        onClick={() => setOnboardingSection(s.key)}
+                        style={{
+                          padding: '7px 14px', fontSize: 13, borderRadius: 8, cursor: 'pointer',
+                          border: active ? '1px solid #1a1a1a' : '1px solid var(--border)',
+                          background: active ? '#1a1a1a' : 'var(--white)',
+                          color: active ? '#fff' : 'inherit', fontWeight: active ? 700 : 400,
+                        }}
+                      >
+                        {s.label}{count > 0 ? ` · ${count}` : ''}
+                      </button>
+                    );
+                  })}
+                </div>
 
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '16px 0' }}>
                   <button className="btn-primary" style={{ padding: '8px 18px', fontSize: 13 }} onClick={addSlide}>

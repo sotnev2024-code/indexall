@@ -6,6 +6,7 @@ import Header from '@/components/layout/Header';
 import { foldersApi, templatesApi, sheetsApi } from '@/lib/api';
 import { useAppStore } from '@/store/app.store';
 import RequireSubscription from '@/components/RequireSubscription';
+import SectionOnboarding from '@/components/SectionOnboarding';
 import { usePageTracker } from '@/hooks/usePageTracker';
 
 const SHIELD_TYPES = ['ГРЩ', 'ВРУ', 'ВП', 'РП', 'ПЭСПЗ', 'ЩО', 'ЩС'];
@@ -262,6 +263,7 @@ function TemplatesPageInner() {
   return (
     <>
       <Header breadcrumb="Шаблоны" />
+      <SectionOnboarding section="templates" />
       <div className="templates-screen" onClick={() => setCtx(null)}>
         {/* Top toolbar */}
         <div className="templates-toolbar">
