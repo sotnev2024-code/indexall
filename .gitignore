@@ -53,3 +53,7 @@ api etm
 node
 backend/.env.production
 frontend/.env.production
+# Staging env files contain real secrets — keep them out of git (use the .example templates)
+backend/.env.staging
+frontend/.env.staging
+*.env.staging
