@@ -6,11 +6,12 @@ import { StoresController } from './stores.controller';
 import { EtmService } from './etm.service';
 import { EtmCredential } from './etm-credential.entity';
 import { EtmCache } from './etm-cache.entity';
+import { AppSetting } from '../admin/app-setting.entity';
 import { User } from '../users/user.entity';
 import { ProGuard } from '../auth/guards/pro.guard';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Store, StoreOffer, EtmCredential, EtmCache, User])],
+  imports: [TypeOrmModule.forFeature([Store, StoreOffer, EtmCredential, EtmCache, AppSetting, User])],
   controllers: [StoresController],
   providers: [StoresService, EtmService, ProGuard],
   exports: [StoresService, EtmService],

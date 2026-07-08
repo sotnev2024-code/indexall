@@ -11,7 +11,7 @@ import TariffsManagerModal, { TariffTile } from '@/components/TariffsManagerModa
 import AdminEtmLookup from '@/components/AdminEtmLookup';
 import OnboardingSlidesModal from '@/components/OnboardingSlidesModal';
 
-type Tab = 'pricelists' | 'base' | 'templates' | 'users' | 'conversions' | 'tariffs' | 'stats' | 'tiles' | 'accessories' | 'activity' | 'onboarding';
+type Tab = 'pricelists' | 'base' | 'templates' | 'users' | 'conversions' | 'tariffs' | 'stats' | 'tiles' | 'accessories' | 'activity' | 'onboarding' | 'proxy';
 
 /** App sections that can have their own onboarding (key → user-facing label). */
 const ONBOARDING_SECTIONS: { key: string; label: string }[] = [
@@ -116,6 +116,14 @@ export default function AdminPage() {
   const [onboardingUploadingIdx, setOnboardingUploadingIdx] = useState<number | null>(null);
   const [onboardingPreviewOpen, setOnboardingPreviewOpen] = useState(false);
   const [onboardingSaving, setOnboardingSaving] = useState(false);
+
+  // ETM proxy (single)
+  const [proxyInfo, setProxyInfo] = useState<{ configured: boolean; host?: string; port?: string; user?: string; passwordMask?: string } | null>(null);
+  const [proxyInput, setProxyInput] = useState('');
+  const [proxyEditing, setProxyEditing] = useState(false);
+  const [proxySaving, setProxySaving] = useState(false);
+  const [proxyTesting, setProxyTesting] = useState(false);
+  const [proxyTest, setProxyTest] = useState<{ ok: boolean; ip?: string; latencyMs: number; message: string } | null>(null);
 
   // Stats
   const [stats, setStats] = useState<any>(null);
@@ -229,6 +237,7 @@ export default function AdminPage() {
     else if (tab === 'tiles') loadTiles();
     else if (tab === 'accessories') loadAccessories();
     else if (tab === 'onboarding') loadOnboarding();
+    else if (tab === 'proxy') loadProxy();
     else if (tab === 'activity') { loadActivity(); if (users.length === 0) loadUsers(); }
   }, [tab]);
 
@@ -367,6 +376,46 @@ export default function AdminPage() {
   }
   /** Slides of the current section actually shown to the user. */
   const filledSlides = onboardingSlides.filter(s => s.mediaUrl || s.title || s.description);
+
+  // ── ETM proxy ────────────────────────────────────────────────
+  async function runProxyTest(value?: string) {
+    setProxyTesting(true); setProxyTest(null);
+    try {
+      const { data } = await adminApi.testProxy(value);
+      setProxyTest(data);
+    } catch (e: any) {
+      setProxyTest({ ok: false, latencyMs: 0, message: e?.response?.data?.message || 'Ошибка проверки' });
+    } finally { setProxyTesting(false); }
+  }
+  async function loadProxy() {
+    try {
+      const { data } = await adminApi.getProxy();
+      setProxyInfo(data);
+      setProxyEditing(!data.configured);
+      setProxyInput('');
+      setProxyTest(null);
+      if (data.configured) runProxyTest();   // auto status check
+    } catch { toast.error('Ошибка загрузки прокси'); }
+  }
+  async function saveProxy() {
+    const v = proxyInput.trim();
+    if (!v) { toast.error('Введите прокси'); return; }
+    setProxySaving(true);
+    try {
+      await adminApi.setProxy(v);
+      toast.success('Прокси сохранён');
+      await loadProxy();
+    } catch (e: any) { toast.error(e?.response?.data?.message || 'Ошибка сохранения'); }
+    finally { setProxySaving(false); }
+  }
+  async function removeProxy() {
+    if (!confirm('Удалить прокси? Запросы к ЭТМ пойдут напрямую.')) return;
+    try {
+      await adminApi.deleteProxy();
+      toast.success('Прокси удалён');
+      await loadProxy();
+    } catch { toast.error('Ошибка удаления'); }
+  }
 
   async function saveTariffConfig(id: number) {
     const data = editingConfig[id];
@@ -1225,6 +1274,7 @@ export default function AdminPage() {
     { key: 'conversions', label: 'Конверсии' },
     { key: 'tariffs',   label: 'Тарифы и их операции' },
     { key: 'onboarding', label: 'Онбординг' },
+    { key: 'proxy',     label: 'Прокси' },
     { key: 'templates', label: 'Шаблоны' },
     { key: 'pricelists',  label: 'Каталог: Прайс-листы' },
     { key: 'accessories', label: 'Каталог: Аксессуары' },
@@ -2113,6 +2163,84 @@ export default function AdminPage() {
                     </div>
                   );
                 })}
+              </div>
+            </>
+          )}
+
+          {/* ── Прокси ── */}
+          {tab === 'proxy' && (
+            <>
+              <div className="admin-section-title">Прокси для ЭТМ</div>
+              <div className="admin-form" style={{ marginBottom: 16, maxWidth: 640 }}>
+                <p style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.6, marginBottom: 14 }}>
+                  Через этот прокси идут запросы к ЭТМ (получение цен и наличия по артикулам).
+                  Формат — <b>IP:порт:логин:пароль</b>, например <span style={{ fontFamily: 'monospace', background: 'var(--bg-soft, #f2f0e9)', padding: '1px 6px', borderRadius: 5 }}>147.45.93.160:8000:login:pass</span>.
+                  Можно задать только один прокси.
+                </p>
+
+                {/* Статус + действия (когда задан и не редактируем) */}
+                {proxyInfo?.configured && !proxyEditing && (
+                  <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+                      <span style={{ fontFamily: 'monospace', fontSize: 15, fontWeight: 700 }}>{proxyInfo.host}:{proxyInfo.port}</span>
+                      <span style={{ fontSize: 12, color: 'var(--muted)' }}>логин: {proxyInfo.user} · пароль: {proxyInfo.passwordMask}</span>
+                    </div>
+                    <div style={{ fontSize: 13, marginBottom: 12, minHeight: 20 }}>
+                      {proxyTesting ? (
+                        <span style={{ color: 'var(--muted)' }}>⏳ Проверяю соединение…</span>
+                      ) : proxyTest ? (
+                        <span style={{ color: proxyTest.ok ? '#1e9e57' : '#c0392b', fontWeight: 600 }}>
+                          {proxyTest.ok ? '● ' : '○ '}{proxyTest.message}{proxyTest.ok ? ` · ${proxyTest.latencyMs} мс` : ''}
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--muted)' }}>Статус не проверен</span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button className="btn-primary" style={{ padding: '7px 16px', fontSize: 13 }} disabled={proxyTesting} onClick={() => runProxyTest()}>Проверить</button>
+                      <button style={{ padding: '7px 16px', fontSize: 13, border: '1px solid var(--border)', borderRadius: 7, background: 'var(--white)', cursor: 'pointer' }} onClick={() => { setProxyEditing(true); setProxyInput(''); setProxyTest(null); }}>Заменить</button>
+                      <button style={{ padding: '7px 16px', fontSize: 13, border: '1px solid #e4b7b0', color: '#c0392b', borderRadius: 7, background: 'var(--white)', cursor: 'pointer' }} onClick={removeProxy}>Удалить</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Не задан */}
+                {proxyInfo && !proxyInfo.configured && !proxyEditing && (
+                  <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 10 }}>
+                    Прокси не задан — запросы к ЭТМ идут напрямую.
+                  </div>
+                )}
+
+                {/* Редактор: добавить / заменить */}
+                {proxyEditing && (
+                  <div>
+                    <input
+                      type="text"
+                      value={proxyInput}
+                      onChange={e => setProxyInput(e.target.value)}
+                      placeholder="147.45.93.160:8000:логин:пароль"
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 14, fontFamily: 'monospace', marginBottom: 10 }}
+                    />
+                    {(proxyTesting || proxyTest) && (
+                      <div style={{ fontSize: 13, marginBottom: 10, color: proxyTesting ? 'var(--muted)' : (proxyTest?.ok ? '#1e9e57' : '#c0392b'), fontWeight: 600 }}>
+                        {proxyTesting ? '⏳ Проверяю соединение…' : (proxyTest?.ok ? `● ${proxyTest.message} · ${proxyTest.latencyMs} мс` : `○ ${proxyTest?.message}`)}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button
+                        style={{ padding: '8px 16px', fontSize: 13, border: '1px solid var(--border)', borderRadius: 7, background: 'var(--white)', cursor: 'pointer', opacity: (proxyTesting || !proxyInput.trim()) ? 0.5 : 1 }}
+                        disabled={proxyTesting || !proxyInput.trim()}
+                        onClick={() => runProxyTest(proxyInput.trim())}
+                      >Проверить</button>
+                      <button className="btn-primary" style={{ padding: '8px 20px', fontSize: 13 }} disabled={proxySaving || !proxyInput.trim()} onClick={saveProxy}>
+                        {proxySaving ? 'Сохранение…' : (proxyInfo?.configured ? 'Заменить' : 'Добавить')}
+                      </button>
+                      {proxyInfo?.configured && (
+                        <button style={{ padding: '8px 16px', fontSize: 13, border: '1px solid var(--border)', borderRadius: 7, background: 'var(--white)', cursor: 'pointer' }} onClick={() => { setProxyEditing(false); setProxyTest(null); setProxyInput(''); if (proxyInfo?.configured) runProxyTest(); }}>Отмена</button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}

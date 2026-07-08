@@ -40,6 +40,7 @@ function slugifyForPlanKey(name: string): string {
 }
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
+import { EtmService } from '../stores/etm.service';
 import { User, UserPlan, UserStatus } from '../users/user.entity';
 import { Project } from '../projects/project.entity';
 import { Sheet } from '../sheets/sheet.entity';
@@ -110,6 +111,7 @@ export class AdminController implements OnModuleInit {
     @InjectRepository(AppSetting) private settingsRepo: Repository<AppSetting>,
     @InjectRepository(UserActivityLog) private activityRepo: Repository<UserActivityLog>,
     @InjectRepository(EquipmentRow) private equipmentRowsRepo: Repository<EquipmentRow>,
+    private readonly etmService: EtmService,
   ) {}
 
   async onModuleInit() {
@@ -455,6 +457,59 @@ export class AdminController implements OnModuleInit {
       await this.settingsRepo.save(this.settingsRepo.create({ key, value }));
     }
     return { key, value };
+  }
+
+  // ── ETM outbound proxy (single, IP:port:login:password) ──────
+
+  /** Current proxy (password masked). Used by the ETM price fetcher. */
+  @Get('proxy')
+  async getProxy() {
+    const row = await this.settingsRepo.findOne({ where: { key: 'etm_proxy' } });
+    const p = EtmService.parseProxy(row?.value);
+    if (!p) return { configured: false };
+    return {
+      configured: true,
+      host: p.host,
+      port: p.port,
+      user: p.user,
+      passwordMask: '•'.repeat(Math.min(Math.max(p.pass.length, 4), 8)),
+      updatedAt: (row as any)?.updated_at ?? null,
+    };
+  }
+
+  /** Add or replace the proxy. Accepts only IP:port:login:password. */
+  @Put('proxy')
+  async setProxy(@Body() body: { value: string }) {
+    const p = EtmService.parseProxy(body?.value);
+    if (!p) {
+      throw new BadRequestException(
+        'Неверный формат. Нужно IP:порт:логин:пароль, например 147.45.93.160:8000:login:pass',
+      );
+    }
+    const value = `${p.host}:${p.port}:${p.user}:${p.pass}`;
+    const existing = await this.settingsRepo.findOne({ where: { key: 'etm_proxy' } });
+    if (existing) {
+      await this.settingsRepo.update({ key: 'etm_proxy' }, { value });
+    } else {
+      await this.settingsRepo.save(this.settingsRepo.create({ key: 'etm_proxy', value }));
+    }
+    this.etmService.invalidateProxyCache();
+    return { ok: true, host: p.host, port: p.port, user: p.user };
+  }
+
+  /** Remove the proxy — ETM requests then go out directly. */
+  @Delete('proxy')
+  async deleteProxy() {
+    await this.settingsRepo.delete({ key: 'etm_proxy' });
+    this.etmService.invalidateProxyCache();
+    return { ok: true };
+  }
+
+  /** Check connectivity through a proxy: the saved one, or a candidate string
+   *  passed in `value` (so the admin can test before saving). */
+  @Post('proxy/test')
+  async testProxy(@Body() body: { value?: string }) {
+    return this.etmService.testProxy(body?.value);
   }
 
   /** Upload an onboarding slide image or video. Returns the stored filename

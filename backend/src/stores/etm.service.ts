@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { EtmCredential } from './etm-credential.entity';
 import { EtmCache } from './etm-cache.entity';
+import { AppSetting } from '../admin/app-setting.entity';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as crypto from 'crypto';
@@ -46,17 +47,105 @@ export class EtmService {
   private lastRequestAt = 0;
   private readonly MIN_INTERVAL_MS = 1100;
 
+  /** Outbound proxy for ETM requests (curl -x). Admin-editable via the
+   *  `etm_proxy` app setting; cached briefly to avoid a DB read per request. */
+  private proxyCache: { url: string | null; at: number } | null = null;
+  private static readonly PROXY_CACHE_MS = 10_000;
+
   constructor(
     @InjectRepository(EtmCredential)
     private readonly credRepo: Repository<EtmCredential>,
     @InjectRepository(EtmCache)
     private readonly cacheRepo: Repository<EtmCache>,
+    @InjectRepository(AppSetting)
+    private readonly settingsRepo: Repository<AppSetting>,
   ) {
     const rawKey = (process.env.ETM_ENCRYPTION_KEY || 'default-secret-key-indexall-2024').padEnd(32, '!').slice(0, 32);
     try {
       this.ENCRYPTION_KEY = crypto.scryptSync(rawKey, 'salt', 32);
     } catch {
       this.ENCRYPTION_KEY = Buffer.from(rawKey.padEnd(32, '0').slice(0, 32));
+    }
+  }
+
+  // ── Outbound proxy ───────────────────────────────────────────
+
+  /** Parse the `IP:port:login:password` format into parts. The password may
+   *  itself contain ':' (everything after the 3rd colon). Returns null if the
+   *  string is not a valid 4-part proxy. */
+  static parseProxy(raw?: string | null): { host: string; port: string; user: string; pass: string } | null {
+    const s = (raw || '').trim();
+    if (!s) return null;
+    const parts = s.split(':');
+    if (parts.length < 4) return null;
+    const host = parts[0], port = parts[1], user = parts[2], pass = parts.slice(3).join(':');
+    const portNum = Number(port);
+    if (!host || !/^\d{1,5}$/.test(port) || portNum < 1 || portNum > 65535 || !user || !pass) return null;
+    return { host, port, user, pass };
+  }
+
+  /** Build a curl `-x` proxy URL from the `IP:port:login:password` form. */
+  static toProxyUrl(raw?: string | null): string | null {
+    const p = EtmService.parseProxy(raw);
+    if (!p) return null;
+    return `http://${encodeURIComponent(p.user)}:${encodeURIComponent(p.pass)}@${p.host}:${p.port}`;
+  }
+
+  /** Current proxy URL for curl: `etm_proxy` app setting (cached), falling
+   *  back to the legacy ETM_HTTPS_PROXY env var. */
+  private async getProxyUrl(): Promise<string | null> {
+    const now = Date.now();
+    if (!this.proxyCache || now - this.proxyCache.at > EtmService.PROXY_CACHE_MS) {
+      let raw: string | null = null;
+      try {
+        const row = await this.settingsRepo.findOne({ where: { key: 'etm_proxy' } });
+        raw = row?.value?.trim() || null;
+      } catch { /* ignore, fall back to env */ }
+      let url = EtmService.toProxyUrl(raw);
+      if (!url) {
+        const env = process.env.ETM_HTTPS_PROXY?.trim();
+        // env may be a full URL already, or the same IP:port:login:password form
+        if (env) url = EtmService.toProxyUrl(env) || (/^\w+:\/\//.test(env) ? env : null);
+      }
+      this.proxyCache = { url, at: now };
+    }
+    return this.proxyCache.url;
+  }
+
+  /** Drop the cached proxy so the next request re-reads the setting. Called by
+   *  the admin controller after the proxy is changed or removed. */
+  invalidateProxyCache(): void {
+    this.proxyCache = null;
+  }
+
+  /** Test a proxy (a given `IP:port:login:password` string, or the saved one)
+   *  by fetching the external IP through it. */
+  async testProxy(rawValue?: string): Promise<{ ok: boolean; ip?: string; latencyMs: number; message: string }> {
+    let raw = (rawValue || '').trim();
+    if (!raw) {
+      const row = await this.settingsRepo.findOne({ where: { key: 'etm_proxy' } });
+      raw = row?.value?.trim() || '';
+    }
+    const url = EtmService.toProxyUrl(raw);
+    if (!url) return { ok: false, latencyMs: 0, message: 'Прокси не задан или неверный формат (нужно IP:порт:логин:пароль)' };
+    const started = Date.now();
+    try {
+      const { stdout } = await execFileAsync(
+        'curl',
+        ['-s', '--show-error', '--max-time', '15', '-x', url, 'https://api.ipify.org?format=json'],
+        { timeout: 18_000 },
+      );
+      const latencyMs = Date.now() - started;
+      let ip: string | undefined;
+      try { ip = JSON.parse(stdout)?.ip; } catch { /* not JSON */ }
+      if (ip) return { ok: true, ip, latencyMs, message: `Прокси работает. Внешний IP: ${ip}` };
+      return { ok: false, latencyMs, message: `Неожиданный ответ через прокси: ${(stdout || 'пусто').slice(0, 120)}` };
+    } catch (e: any) {
+      return {
+        ok: false,
+        latencyMs: Date.now() - started,
+        message: String(e?.stderr || e?.message || 'ошибка соединения').slice(0, 200),
+      };
     }
   }
 
@@ -289,8 +378,9 @@ export class EtmService {
       args.push('-c', this.cookieJar);
     }
 
-    if (process.env.ETM_HTTPS_PROXY?.trim()) {
-      args.push('-x', process.env.ETM_HTTPS_PROXY.trim());
+    const proxyUrl = await this.getProxyUrl();
+    if (proxyUrl) {
+      args.push('-x', proxyUrl);
     }
 
     if (method === 'POST') {

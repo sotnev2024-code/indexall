@@ -259,6 +259,11 @@ export const adminApi = {
     api.put('/admin/tariff-configs/reorder', { items }),
   getSettings: () => api.get<Record<string, string>>('/admin/settings'),
   setSetting: (key: string, value: string) => api.put(`/admin/settings/${key}`, { value }),
+  // ETM outbound proxy (single, IP:port:login:password)
+  getProxy: () => api.get<{ configured: boolean; host?: string; port?: string; user?: string; passwordMask?: string; updatedAt?: string | null }>('/admin/proxy'),
+  setProxy: (value: string) => api.put('/admin/proxy', { value }),
+  deleteProxy: () => api.delete('/admin/proxy'),
+  testProxy: (value?: string) => api.post<{ ok: boolean; ip?: string; latencyMs: number; message: string }>('/admin/proxy/test', value ? { value } : {}),
   uploadOnboardingMedia: (fd: FormData) =>
     api.post<{ path: string; filename: string; mimetype: string }>('/admin/onboarding-media', fd, { headers: { 'Content-Type': 'multipart/form-data' } }),
 };

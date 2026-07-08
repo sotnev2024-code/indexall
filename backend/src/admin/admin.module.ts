@@ -12,6 +12,7 @@ import { Folder } from '../folders/folder.entity';
 import { PriceList, Manufacturer, CatalogProduct, CatalogTile, CatalogCategory } from '../catalog/entities/catalog.entities';
 import { UserActivityLog } from './user-activity-log.entity';
 import { EquipmentRow } from '../equipment/equipment-row.entity';
+import { StoresModule } from '../stores/stores.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { EquipmentRow } from '../equipment/equipment-row.entity';
       PriceList, Manufacturer, CatalogProduct, CatalogTile, CatalogCategory,
       TariffOperation, TariffConfig, AppSetting, UserActivityLog, EquipmentRow,
     ]),
+    StoresModule,
   ],
   controllers: [AdminController],
 })
