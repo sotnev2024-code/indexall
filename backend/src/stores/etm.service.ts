@@ -574,6 +574,33 @@ export class EtmService {
     return p > 0 ? p : null;
   }
 
+  /** Fetch price by ETM's internal item code («Код ЭТМ») via type=etm. This is
+   *  the reliable identifier — unlike manufacturer articles, which collide
+   *  across brands (e.g. one busbar article sold by 5 makers). */
+  private async fetchPriceByEtmCode(etmCode: string, session: string, useRetail = false): Promise<number | null> {
+    const url =
+      `https://${this.host}/api/v1/goods/${encodeURIComponent(etmCode)}/price` +
+      `?type=etm&sessionid=${encodeURIComponent(session)}`;
+    let json: any;
+    try {
+      json = await this.enqueue(() => this.curlRequest(url, 'GET'));
+    } catch {
+      return null;
+    }
+    const respCode = json?.status?.code;
+    const msg = String(json?.status?.message || '').toLowerCase();
+    if (respCode === 401 || respCode === 403 || msg.includes('session') || msg.includes('auth') || msg.includes('unauthor')) {
+      throw new Error('SESSION_EXPIRED');
+    }
+    if (respCode !== 200 || !json.data) {
+      this.logger.warn(`ETM etm=${etmCode}: respCode=${respCode} msg=${json?.status?.message || ''}`);
+      return null;
+    }
+    const row = Array.isArray(json.data.rows) ? json.data.rows[0] : json.data;
+    const p = this.pickPrice(row, useRetail);
+    return p > 0 ? p : null;
+  }
+
   /** Pick the most reasonable price from an ETM /price response row.
    *  - useRetail=true (юзер без интеграции): берём price_retail (цена для всех).
    *  - useRetail=false (есть интеграция): pricewnds (личная цена с НДС),
@@ -599,36 +626,47 @@ export class EtmService {
    * Returns map: article → price | null. Throws 'SESSION_EXPIRED' on auth.
    */
   private async fetchPricesBatch(
-    items: { article: string; mnf?: string }[],
+    items: { article?: string; etmCode?: string }[],
     session: string,
     useRetail = false,
   ): Promise<Record<string, number | null>> {
     const result: Record<string, number | null> = {};
     if (items.length === 0) return result;
 
-    const withMnf = items.filter(it => it.mnf && it.mnf.trim());
-    const noMnf = items.filter(it => !it.mnf || !it.mnf.trim());
+    const keyOf = (it: { article?: string; etmCode?: string }) =>
+      (it.article || '').trim() || (it.etmCode || '').trim();
+    const withEtm = items.filter(it => (it.etmCode || '').trim());
+    const articleOnly = items.filter(it => !(it.etmCode || '').trim() && (it.article || '').trim());
 
-    // Items with manufacturer disambiguator: one fetch per article.
-    for (const it of withMnf) {
+    // Items with an ETM item code («Код ЭТМ») → look up by type=etm (the
+    // reliable key). Fall back to the manufacturer article (type=mnf, with the
+    // code as the `mnf` disambiguator) only if the type=etm lookup misses —
+    // that preserves the legacy behaviour where the code was a brand id.
+    for (const it of withEtm) {
+      const k = keyOf(it);
+      const etmCode = (it.etmCode || '').trim();
+      const article = (it.article || '').trim();
       try {
-        result[it.article] = await this.fetchSinglePrice(it.article, session, it.mnf, useRetail);
+        let p = await this.fetchPriceByEtmCode(etmCode, session, useRetail);
+        if (p == null && article) p = await this.fetchSinglePrice(article, session, etmCode, useRetail);
+        result[k] = p;
       } catch (ex: any) {
         if (ex?.message === 'SESSION_EXPIRED') throw ex;
-        result[it.article] = null;
+        result[k] = null;
       }
     }
 
-    if (noMnf.length === 0) return result;
+    if (articleOnly.length === 0) return result;
 
-    // Single-article shortcut for the no-mnf bucket.
-    if (noMnf.length === 1) {
-      result[noMnf[0].article] = await this.fetchSinglePrice(noMnf[0].article, session, undefined, useRetail);
+    // Single-article shortcut for the plain-article bucket.
+    if (articleOnly.length === 1) {
+      const only = (articleOnly[0].article || '').trim();
+      result[only] = await this.fetchSinglePrice(only, session, undefined, useRetail);
       return result;
     }
 
-    // Comma-joined batch for mnf-less articles.
-    const articles = noMnf.map(it => it.article);
+    // Comma-joined batch for plain articles (type=mnf).
+    const articles = articleOnly.map(it => (it.article || '').trim());
     const ids = articles.map(a => encodeURIComponent(a)).join('%2C');
     const url =
       `https://${this.host}/api/v1/goods/${ids}/price` +
@@ -798,6 +836,27 @@ export class EtmService {
     return this.parseRemainsRow(json.data);
   }
 
+  /** Delivery term by ETM's internal item code («Код ЭТМ») via type=etm. */
+  private async fetchRemainsByEtmCode(etmCode: string, session: string): Promise<string | null> {
+    const url =
+      `https://${this.host}/api/v1/goods/${encodeURIComponent(etmCode)}/remains` +
+      `?type=etm&sessionid=${encodeURIComponent(session)}`;
+    let json: any;
+    try {
+      json = await this.enqueue(() => this.curlRequest(url, 'GET'));
+    } catch (e: any) {
+      this.logger.warn(`ETM remains error for etm=${etmCode}: ${e?.message}`);
+      return null;
+    }
+    const respCode = json?.status?.code;
+    const msg = String(json?.status?.message || '').toLowerCase();
+    if (respCode === 401 || respCode === 403 || msg.includes('session') || msg.includes('auth') || msg.includes('unauthor')) {
+      throw new Error('SESSION_EXPIRED');
+    }
+    if (respCode !== 200 || !json.data) return null;
+    return this.parseRemainsRow(json.data);
+  }
+
   /**
    * Public: get price + delivery term for a list of articles for a specific user.
    * Uses cache (7 days) to avoid hitting ETM API repeatedly.
@@ -830,39 +889,40 @@ export class EtmService {
       } catch (e: any) {
         this.logger.warn(`ETM: no per-user creds and shared session unavailable: ${e?.message}`);
         for (const it of items) {
-          const key = (it.article || '').trim();
+          const key = (it.article || '').trim() || (it.etmCode || '').trim();
           if (key) result[key] = null;
         }
         return result;
       }
     }
 
-    // Per ETM API spec: lookup is always by article (type=mnf). The stored
-    // `etmCode` is the manufacturer's directory code in ETM's catalog and
-    // belongs in the optional `mnf` query param as a disambiguator. Items
-    // without an article cannot be priced via this endpoint at all — skip them.
-    const byArticle = new Map<string, { article: string; mnf?: string }>();
+    // Prefer the ETM item code («Код ЭТМ») via type=etm; fall back to the
+    // manufacturer article (type=mnf) when no code is present. Keyed by
+    // article when available, otherwise by the ETM code.
+    const byKey = new Map<string, { article?: string; etmCode?: string }>();
     for (const it of items) {
       const article = (it.article || '').trim();
-      if (!article) continue;
-      if (byArticle.has(article)) continue;
-      const mnf = (it.etmCode || '').trim() || undefined;
-      byArticle.set(article, { article, mnf });
+      const etmCode = (it.etmCode || '').trim();
+      const key = article || etmCode;
+      if (!key || byKey.has(key)) continue;
+      byKey.set(key, { article: article || undefined, etmCode: etmCode || undefined });
     }
 
-    const allItems = Array.from(byArticle.values());
+    const allItems = Array.from(byKey.values());
+    const keyOf = (g: { article?: string; etmCode?: string }) =>
+      (g.article || '').trim() || (g.etmCode || '').trim();
     let sessionRefreshed = false;
     for (let i = 0; i < allItems.length; i += 50) {
       const slice = allItems.slice(i, i + 50);
       try {
         const prices = await this.fetchPricesBatch(slice, session, useRetail);
-        for (const g of slice) result[g.article] = prices[g.article] ?? null;
+        for (const g of slice) result[keyOf(g)] = prices[keyOf(g)] ?? null;
       } catch (e: any) {
         if (e?.message === 'SESSION_EXPIRED' && !sessionRefreshed) {
           const ns = useRetail ? await this.authenticate() : await this.getUserSession(userId, true);
           if (ns) { session = ns; sessionRefreshed = true; i -= 50; continue; }
         }
-        for (const g of slice) result[g.article] = null;
+        for (const g of slice) result[keyOf(g)] = null;
       }
     }
 
@@ -884,8 +944,8 @@ export class EtmService {
    */
   async getTermForItem(item: { article?: string; etmCode?: string }, userId: number): Promise<string | null> {
     const article = (item.article || '').trim();
-    if (!article) return null;
-    const mnf = (item.etmCode || '').trim() || undefined;
+    const etmCode = (item.etmCode || '').trim();
+    if (!article && !etmCode) return null;
 
     // Only fetch delivery term for users with their own ETM credentials.
     // The shared system account is used for prices only — fetching terms for
@@ -893,13 +953,24 @@ export class EtmService {
     const session = await this.getUserSession(userId, false);
     if (!session) return null;
 
+    // Prefer type=etm by «Код ЭТМ»; fall back to the article (type=mnf, code
+    // as the mnf disambiguator) if the code lookup misses.
+    const run = async (s: string): Promise<string | null> => {
+      if (etmCode) {
+        const t = await this.fetchRemainsByEtmCode(etmCode, s);
+        if (t != null) return t;
+        return article ? await this.fetchRemains(article, s, etmCode) : null;
+      }
+      return await this.fetchRemains(article, s);
+    };
+
     try {
-      return await this.fetchRemains(article, session, mnf);
+      return await run(session);
     } catch (e: any) {
       if (e?.message === 'SESSION_EXPIRED') {
         const newSession = await this.getUserSession(userId, true);
         if (newSession) {
-          try { return await this.fetchRemains(article, newSession, mnf); } catch { return null; }
+          try { return await run(newSession); } catch { return null; }
         }
       }
       return null;
