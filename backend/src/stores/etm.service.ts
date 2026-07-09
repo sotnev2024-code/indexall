@@ -601,6 +601,20 @@ export class EtmService {
     return p > 0 ? p : null;
   }
 
+  /** Price for one item: prefer «Код ЭТМ» (type=etm), fall back to the
+   *  manufacturer article (type=mnf, code as the mnf disambiguator). */
+  private async fetchEtmItemPrice(
+    it: { article?: string; etmCode?: string },
+    session: string,
+    useRetail = false,
+  ): Promise<number | null> {
+    const etmCode = (it.etmCode || '').trim();
+    const article = (it.article || '').trim();
+    let p = await this.fetchPriceByEtmCode(etmCode, session, useRetail);
+    if (p == null && article) p = await this.fetchSinglePrice(article, session, etmCode, useRetail);
+    return p;
+  }
+
   /** Pick the most reasonable price from an ETM /price response row.
    *  - useRetail=true (юзер без интеграции): берём price_retail (цена для всех).
    *  - useRetail=false (есть интеграция): pricewnds (личная цена с НДС),
@@ -639,20 +653,46 @@ export class EtmService {
     const articleOnly = items.filter(it => !(it.etmCode || '').trim() && (it.article || '').trim());
 
     // Items with an ETM item code («Код ЭТМ») → look up by type=etm (the
-    // reliable key). Fall back to the manufacturer article (type=mnf, with the
-    // code as the `mnf` disambiguator) only if the type=etm lookup misses —
-    // that preserves the legacy behaviour where the code was a brand id.
-    for (const it of withEtm) {
-      const k = keyOf(it);
-      const etmCode = (it.etmCode || '').trim();
-      const article = (it.article || '').trim();
+    // reliable key). The /price endpoint accepts up to 50 ids comma-joined
+    // (ETM API), so batch them in one request — otherwise a 50-row list would
+    // take ~55s at the 1-req/sec limit. On any mismatch, fall back per-item
+    // (which also tries the manufacturer article as a last resort).
+    if (withEtm.length === 1) {
+      const it = withEtm[0];
+      try { result[keyOf(it)] = await this.fetchEtmItemPrice(it, session, useRetail); }
+      catch (ex: any) { if (ex?.message === 'SESSION_EXPIRED') throw ex; result[keyOf(it)] = null; }
+    } else if (withEtm.length > 1) {
+      const codes = withEtm.map(it => (it.etmCode || '').trim());
+      const ids = codes.map(c => encodeURIComponent(c)).join('%2C');
+      const url = `https://${this.host}/api/v1/goods/${ids}/price?type=etm&sessionid=${encodeURIComponent(session)}`;
+      let batched = false;
       try {
-        let p = await this.fetchPriceByEtmCode(etmCode, session, useRetail);
-        if (p == null && article) p = await this.fetchSinglePrice(article, session, etmCode, useRetail);
-        result[k] = p;
-      } catch (ex: any) {
-        if (ex?.message === 'SESSION_EXPIRED') throw ex;
-        result[k] = null;
+        const json: any = await this.enqueue(() => this.curlRequest(url, 'GET'));
+        const code = json?.status?.code;
+        const msg = String(json?.status?.message || '').toLowerCase();
+        if (code === 401 || code === 403 || msg.includes('session') || msg.includes('auth') || msg.includes('unauthor')) {
+          throw new Error('SESSION_EXPIRED');
+        }
+        if (code === 200 && json.data) {
+          const rows = Array.isArray(json.data.rows) ? json.data.rows : (json.data ? [json.data] : []);
+          if (rows.length === withEtm.length) {
+            for (let i = 0; i < withEtm.length; i++) {
+              const p = this.pickPrice(rows[i], useRetail);
+              result[keyOf(withEtm[i])] = p > 0 ? p : null;
+            }
+            batched = true;
+          }
+        }
+      } catch (e: any) {
+        if (e?.message === 'SESSION_EXPIRED') throw e;
+        this.logger.warn(`ETM type=etm batch error: ${e?.message}`);
+      }
+      if (!batched) {
+        this.logger.warn(`ETM type=etm batch fell back to per-item (${withEtm.length} items)`);
+        for (const it of withEtm) {
+          try { result[keyOf(it)] = await this.fetchEtmItemPrice(it, session, useRetail); }
+          catch (ex: any) { if (ex?.message === 'SESSION_EXPIRED') throw ex; result[keyOf(it)] = null; }
+        }
       }
     }
 
