@@ -392,22 +392,22 @@ function CatalogPageInner() {
       filterProducts;
     if (!rows || rows.length === 0) return;
 
-    // ETM lookup is keyed strictly on the manufacturer article. The stored
-    // etm_code is the manufacturer-directory code in ETM and goes only as
-    // a disambiguator (mnf= query param) — never as a standalone identifier.
-    // Items without an article are skipped: ETM has no way to return a
-    // product price for "manufacturer only".
+    // ETM lookup: prefer the ETM item code («Код ЭТМ» → type=etm), else the
+    // manufacturer article (type=mnf). Items with neither can't be priced.
+    // Cache/display key = article when present, otherwise the ETM code.
+    const itemKey = (it: { article?: string; etmCode?: string }) =>
+      (it.article || '').trim() || (it.etmCode || '').trim();
     const allItems = rows
       .slice(0, 50)
       .map(r => ({ article: r.article, etmCode: r.etm_code }))
-      .filter(it => it.article && it.article.trim());
+      .filter(it => itemKey(it));
     if (allItems.length === 0) return;
 
     const t = setTimeout(async () => {
-      // At fire time, filter out items already fetched (cache key = article).
+      // At fire time, filter out items already fetched (cache key = article||etmCode).
       const current = rowEtmDataRef.current;
       const items = allItems.filter(it => {
-        const key = (it.article || '').trim();
+        const key = itemKey(it);
         return key && current[key] === undefined;
       });
       if (items.length === 0) return;
@@ -479,18 +479,19 @@ function CatalogPageInner() {
     // article number.
     const article = (p.article || '').trim();
     const etmCode = (p.etm_code || '').trim() || undefined;
-    if (!isToggleOff && article) {
-      const cached = rowEtmDataRef.current[article];
+    const key = article || (etmCode || '');
+    if (!isToggleOff && key) {
+      const cached = rowEtmDataRef.current[key];
       // Price already known from batch load — only fetch the delivery term
       if (cached?.price != null && cached.price > 0) {
         setEtmData({ price: cached.price, term: cached.term || '' });
         if (!cached.term) {
           setEtmLoading(true);
-          storesApi.getEtmTerm(article, etmCode)
+          storesApi.getEtmTerm(article || '', etmCode)
             .then(({ data }) => {
               const term = data?.term || '';
               setEtmData(prev => prev ? { ...prev, term } : prev);
-              setRowEtmData(prev => ({ ...prev, [article]: { price: cached.price, term } }));
+              setRowEtmData(prev => ({ ...prev, [key]: { price: cached.price, term } }));
             })
             .catch(() => {})
             .finally(() => setEtmLoading(false));
@@ -499,18 +500,18 @@ function CatalogPageInner() {
         // No cached price — fetch both price and term via the structured items
         // endpoint so it goes through the same code path as the list batch.
         setEtmLoading(true);
-        storesApi.getEtmPricesByItems([{ article, etmCode }])
+        storesApi.getEtmPricesByItems([{ article: article || undefined, etmCode }])
           .then(async ({ data }) => {
-            const price = data[article];
+            const price = data[key];
             if (price != null && price > 0) {
-              const termRes = await storesApi.getEtmTerm(article, etmCode).catch(() => null);
+              const termRes = await storesApi.getEtmTerm(article || '', etmCode).catch(() => null);
               const term = termRes?.data?.term || '';
               setEtmData({ price, term });
-              setRowEtmData(prev => ({ ...prev, [article]: { price, term: term || null } }));
+              setRowEtmData(prev => ({ ...prev, [key]: { price, term: term || null } }));
             } else {
-              // ETM doesn't have this article — leave catalog price alone, no ghost prices.
+              // ETM doesn't have this item — leave catalog price alone, no ghost prices.
               setEtmData(null);
-              setRowEtmData(prev => ({ ...prev, [article]: { price: null, term: null } }));
+              setRowEtmData(prev => ({ ...prev, [key]: { price: null, term: null } }));
             }
           })
           .catch(() => {})
@@ -540,32 +541,29 @@ function CatalogPageInner() {
         return;
       }
 
-      // Price priority: ETM > catalog > empty.
-      // ETM is queried ONLY when the product has an mnf article. Without an
-      // article we never go to ETM (the etm_code alone causes false matches).
+      // Price priority: ETM > catalog > empty. ETM is queried when the product
+      // has an «Код ЭТМ» (type=etm) or a manufacturer article (type=mnf).
       // Source column ("ЭТМ" / "—") reflects where the price actually came
       // from — never hardcoded to ЭТМ when the value is from the price-list.
       let etmPrice: number | null = null;
       let etmTerm = 'нет';
-      if (article) {
-        const cached = rowEtmDataRef.current[article];
+      const etmCode = (product.etm_code || '').trim() || undefined;
+      const etmKey = article || (etmCode || '');
+      if (etmKey) {
+        const cached = rowEtmDataRef.current[etmKey];
         if (cached?.price != null && cached.price > 0) {
           etmPrice = cached.price;
           etmTerm = cached.term || 'нет';
         } else if (cached === undefined) {
-          // Pass the manufacturer's ETM directory code as the mnf disambiguator
-          // when present, so ETM can resolve the right brand if multiple share
-          // this article number.
-          const etmCode = (product.etm_code || '').trim() || undefined;
           try {
-            const { data: prices } = await storesApi.getEtmPricesByItems([{ article, etmCode }]);
-            const p = prices[article];
+            const { data: prices } = await storesApi.getEtmPricesByItems([{ article: article || undefined, etmCode }]);
+            const p = prices[etmKey];
             if (p != null && p > 0) {
               etmPrice = p;
-              const termRes = await storesApi.getEtmTerm(article, etmCode).catch(() => null);
+              const termRes = await storesApi.getEtmTerm(article || '', etmCode).catch(() => null);
               etmTerm = termRes?.data?.term || 'нет';
             }
-            setRowEtmData(prev => ({ ...prev, [article]: { price: p ?? null, term: etmTerm === 'нет' ? null : etmTerm } }));
+            setRowEtmData(prev => ({ ...prev, [etmKey]: { price: p ?? null, term: etmTerm === 'нет' ? null : etmTerm } }));
           } catch { /* silent — leave defaults */ }
         }
       }

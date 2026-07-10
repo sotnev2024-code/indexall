@@ -675,7 +675,29 @@ export class EtmService {
         }
         if (code === 200 && json.data) {
           const rows = Array.isArray(json.data.rows) ? json.data.rows : (json.data ? [json.data] : []);
-          if (rows.length === withEtm.length) {
+          // Map returned rows back by their ETM code (`gdscode`) — robust to
+          // duplicate codes, missing (not-found) codes and any row ordering.
+          const byCode: Record<string, any> = {};
+          for (const row of rows) {
+            const gc = String(row?.gdscode ?? '').trim();
+            if (gc) byCode[gc] = row;
+          }
+          if (Object.keys(byCode).length > 0) {
+            const missing: { article?: string; etmCode?: string }[] = [];
+            for (const it of withEtm) {
+              const row = byCode[(it.etmCode || '').trim()];
+              if (row) { const p = this.pickPrice(row, useRetail); result[keyOf(it)] = p > 0 ? p : null; }
+              else missing.push(it);
+            }
+            batched = true;
+            // Codes ETM didn't return → last-resort lookup by manufacturer article.
+            for (const it of missing) {
+              const article = (it.article || '').trim();
+              try { result[keyOf(it)] = article ? await this.fetchSinglePrice(article, session, (it.etmCode || '').trim(), useRetail) : null; }
+              catch (ex: any) { if (ex?.message === 'SESSION_EXPIRED') throw ex; result[keyOf(it)] = null; }
+            }
+          } else if (rows.length === withEtm.length) {
+            // Response had no gdscode field — fall back to positional mapping.
             for (let i = 0; i < withEtm.length; i++) {
               const p = this.pickPrice(rows[i], useRetail);
               result[keyOf(withEtm[i])] = p > 0 ? p : null;
