@@ -577,34 +577,8 @@ function CatalogPageInner() {
       toast.success(res?.deduped
         ? `«${product.name.slice(0, 40)}» — количество увеличено`
         : `«${product.name.slice(0, 40)}» добавлен в лист`);
-
-      // ── Background: fetch ETM price and patch the row (off the button) ──
-      if (!res?.deduped && cachedPrice == null && etmKey) {
-        (async () => {
-          try {
-            const { data: prices } = await storesApi.getEtmPricesByItems([{ article: article || undefined, etmCode }]);
-            const p = prices[etmKey];
-            if (p == null || !(p > 0)) return; // ЭТМ has no price — leave catalog price
-            const termRes = await storesApi.getEtmTerm(article || '', etmCode).catch(() => null);
-            const term = termRes?.data?.term || 'нет';
-            setRowEtmData(prev => ({ ...prev, [etmKey]: { price: p, term: term === 'нет' ? null : term } }));
-            await enqueueSheetOp(async () => {
-              const { data: sh2 } = await sheetsApi.getOne(targetSheetId);
-              const rows2 = (sh2.rows || []).map((r: any) => ({ ...r }));
-              const idx = rows2.findIndex((r: any) => {
-                const idMatch = article ? (r.article || '') === article : ((r.etm_code || '') === (etmCode || ''));
-                // Only fill rows that aren't a deliberate manual price.
-                const fillable = !r.store || r.store === 'ЭТМ' || (r.store || '').toUpperCase() === 'ETM';
-                return idMatch && fillable;
-              });
-              if (idx >= 0) {
-                rows2[idx] = { ...rows2[idx], price: String(p), store: 'ЭТМ', deadline: term };
-                await sheetsApi.saveRows(targetSheetId, rows2.filter((r: any) => r.name || r.article));
-              }
-            });
-          } catch { /* silent — price just won't fill */ }
-        })();
-      }
+      // The ETM price (when not already cached) is filled reliably by the
+      // spec sheet itself when it loads — see autoFillMissingPrices there.
     } catch { toast.error('Ошибка добавления в лист'); }
     finally { addingRef.current = false; }
   }

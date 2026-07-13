@@ -398,6 +398,9 @@ export default function SpecPageClient() {
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowsRef = useRef<any[]>([]);
+  // ETM keys (article/etm_code) already auto-priced this session — so we don't
+  // re-hit ETM for the same items on every sheet load.
+  const checkedEtmKeysRef = useRef<Set<string>>(new Set());
   const hasUnsavedRef = useRef(false);
   // Active ETM refresh marker — handleRefreshPrices/Terms set it to the sheetId
   // they started on. Tab-click handler reads it to skip the «save?» confirm
@@ -605,6 +608,10 @@ export default function SpecPageClient() {
         setProject(p);
         setActive(projId, currentIdRef.current);
       }
+      // Quietly fill ETM prices for rows added without one (e.g. from the
+      // catalog). Delayed so the sheet paints first; skips already-priced rows.
+      const loadedId = currentIdRef.current;
+      setTimeout(() => { autoFillMissingPrices(loadedId).catch(() => {}); }, 1200);
     } catch { toast.error('Ошибка загрузки листа'); }
     finally { setLoading(false); }
   }
@@ -1814,6 +1821,62 @@ export default function SpecPageClient() {
     } else {
       toast.error(msg || 'Ошибка запроса к ЭТМ');
     }
+  }
+
+  // ── Auto-fill ETM prices for unpriced rows after the sheet loads ──
+  // Makes prices appear reliably for rows added from the catalog (which are
+  // added instantly, without waiting on ETM). Silent, once per item per
+  // session, and never touches rows that already have a price.
+  async function autoFillMissingPrices(sheetId: number) {
+    if (!allowStores) return;
+    const hasPrice = (r: any) => {
+      const n = parseFloat(String(r.price ?? '').replace(',', '.'));
+      return Number.isFinite(n) && n > 0;
+    };
+    const fillableStore = (r: any) => {
+      const s = (r.store || '').toString();
+      return s === '' || s === 'ЭТМ' || s.toUpperCase() === 'ETM';
+    };
+    const keyOf = (r: any) => (r.article || '').trim() || (r.etm_code || '').trim();
+    const targets = rowsRef.current.filter((r: any) =>
+      keyOf(r) && !hasPrice(r) && fillableStore(r) && !checkedEtmKeysRef.current.has(keyOf(r)),
+    );
+    if (targets.length === 0) return;
+
+    const itemMap = new Map<string, { article?: string; etmCode?: string }>();
+    for (const r of targets) {
+      const key = keyOf(r);
+      checkedEtmKeysRef.current.add(key); // mark checked (found or not) to avoid re-fetch
+      if (itemMap.has(key)) continue;
+      const article = (r.article || '').trim();
+      const etmCode = (r.etm_code || '').trim() || undefined;
+      itemMap.set(key, { article: article || undefined, etmCode });
+    }
+
+    let prices: Record<string, number | null> = {};
+    try {
+      const { data } = await storesApi.getEtmPricesByItems(Array.from(itemMap.values()));
+      prices = data;
+    } catch { return; }
+    if (!Object.values(prices).some(p => p != null && p > 0)) return;
+
+    const apply = (r: any) => {
+      if (hasPrice(r) || !fillableStore(r)) return r;
+      const key = keyOf(r);
+      const p = key ? prices[key] : null;
+      if (p == null || !(p > 0)) return r;
+      const priceStr = String(p);
+      return { ...r, price: priceStr, store: 'ЭТМ', total: calcTotal(priceStr, r.qty, r.coef) };
+    };
+    const applied = rowsRef.current.map(apply);
+    if (currentIdRef.current === sheetId) {
+      setRows(applied);
+      rowsRef.current = applied;
+    }
+    try {
+      const toSave = applied.filter((r: any) => r.name || r.article).map(normRowForSave);
+      await queueSaveRows(sheetId, toSave);
+    } catch { /* will retry on next load */ }
   }
 
   // ── Update PRICES only (fast batch) ──────────────────────────
