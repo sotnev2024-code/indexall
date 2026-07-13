@@ -556,14 +556,25 @@ function CatalogPageInner() {
           etmTerm = cached.term || 'нет';
         } else if (cached === undefined) {
           try {
-            const { data: prices } = await storesApi.getEtmPricesByItems([{ article: article || undefined, etmCode }]);
-            const p = prices[etmKey];
-            if (p != null && p > 0) {
-              etmPrice = p;
-              const termRes = await storesApi.getEtmTerm(article || '', etmCode).catch(() => null);
-              etmTerm = termRes?.data?.term || 'нет';
+            // Cap the live ETM lookup so the add button never freezes when the
+            // shared ETM queue is busy — after the timeout we just add with the
+            // catalog price; the row picks up the ETM price later from the list.
+            const resp: any = await Promise.race([
+              storesApi.getEtmPricesByItems([{ article: article || undefined, etmCode }]),
+              new Promise(res => setTimeout(() => res(null), 3500)),
+            ]);
+            if (resp?.data) {
+              const p = resp.data[etmKey];
+              if (p != null && p > 0) {
+                etmPrice = p;
+                const termRes: any = await Promise.race([
+                  storesApi.getEtmTerm(article || '', etmCode).catch(() => null),
+                  new Promise(res => setTimeout(() => res(null), 3500)),
+                ]);
+                etmTerm = termRes?.data?.term || 'нет';
+              }
+              setRowEtmData(prev => ({ ...prev, [etmKey]: { price: p ?? null, term: etmTerm === 'нет' ? null : etmTerm } }));
             }
-            setRowEtmData(prev => ({ ...prev, [etmKey]: { price: p ?? null, term: etmTerm === 'нет' ? null : etmTerm } }));
           } catch { /* silent — leave defaults */ }
         }
       }
