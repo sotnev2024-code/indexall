@@ -541,42 +541,18 @@ function CatalogPageInner() {
         return;
       }
 
-      // Price priority: ETM > catalog > empty. ETM is queried when the product
-      // has an «Код ЭТМ» (type=etm) or a manufacturer article (type=mnf).
-      // Source column ("ЭТМ" / "—") reflects where the price actually came
-      // from — never hardcoded to ЭТМ when the value is from the price-list.
+      // Instant add: use ONLY the ETM price the background list load already
+      // cached. The add button never makes a live ETM request, so adding and
+      // price-loading run independently and don't block each other. If the
+      // price hasn't loaded yet, the row is added with the catalog price.
       let etmPrice: number | null = null;
       let etmTerm = 'нет';
       const etmCode = (product.etm_code || '').trim() || undefined;
       const etmKey = article || (etmCode || '');
-      if (etmKey) {
-        const cached = rowEtmDataRef.current[etmKey];
-        if (cached?.price != null && cached.price > 0) {
-          etmPrice = cached.price;
-          etmTerm = cached.term || 'нет';
-        } else if (cached === undefined) {
-          try {
-            // Cap the live ETM lookup so the add button never freezes when the
-            // shared ETM queue is busy — after the timeout we just add with the
-            // catalog price; the row picks up the ETM price later from the list.
-            const resp: any = await Promise.race([
-              storesApi.getEtmPricesByItems([{ article: article || undefined, etmCode }]),
-              new Promise(res => setTimeout(() => res(null), 3500)),
-            ]);
-            if (resp?.data) {
-              const p = resp.data[etmKey];
-              if (p != null && p > 0) {
-                etmPrice = p;
-                const termRes: any = await Promise.race([
-                  storesApi.getEtmTerm(article || '', etmCode).catch(() => null),
-                  new Promise(res => setTimeout(() => res(null), 3500)),
-                ]);
-                etmTerm = termRes?.data?.term || 'нет';
-              }
-              setRowEtmData(prev => ({ ...prev, [etmKey]: { price: p ?? null, term: etmTerm === 'нет' ? null : etmTerm } }));
-            }
-          } catch { /* silent — leave defaults */ }
-        }
+      const cached = etmKey ? rowEtmDataRef.current[etmKey] : undefined;
+      if (cached?.price != null && cached.price > 0) {
+        etmPrice = cached.price;
+        etmTerm = cached.term || 'нет';
       }
 
       const catalogPrice = product.price && Number(product.price) > 0 ? Number(product.price) : null;
