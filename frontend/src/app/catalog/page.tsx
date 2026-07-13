@@ -98,6 +98,10 @@ function CatalogPageInner() {
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [showSelectSheet, setShowSelectSheet] = useState(false);
   const addingRef = useRef(false); // prevent double-click race
+  // Serializes every read-modify-write of the target sheet (row appends and
+  // background ETM-price patches) so they never clobber each other. Only fast
+  // DB ops go here — the slow ETM fetch runs outside the queue.
+  const sheetOpsRef = useRef<Promise<any>>(Promise.resolve());
   const detailRef = useRef<HTMLDivElement>(null);
   const [etmData, setEtmData] = useState<{ price: number | null; term: string } | null>(null);
   const [etmLoading, setEtmLoading] = useState(false);
@@ -521,80 +525,86 @@ function CatalogPageInner() {
     setTimeout(() => detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
   }
 
+  /** Enqueue a fast read-modify-write of the sheet. Serialized so parallel
+   *  appends and background price patches never overwrite each other. */
+  function enqueueSheetOp<T>(fn: () => Promise<T>): Promise<T> {
+    const run = sheetOpsRef.current.then(() => fn());
+    sheetOpsRef.current = run.catch(() => undefined);
+    return run;
+  }
+
   async function addToSheet(product: any) {
     if (!activeSheetId) { setShowSelectSheet(true); return; }
-    if (addingRef.current) return; // block concurrent calls
+    if (addingRef.current) return; // block double-click
     addingRef.current = true;
+    const targetSheetId = activeSheetId;
+    const article = product.article || '';
+    const etmCode = (product.etm_code || '').trim() || undefined;
+    const etmKey = article || (etmCode || '');
+    // Use a price the background list already cached — otherwise add now and
+    // fill the ETM price in the background (never make the button wait).
+    const cached = etmKey ? rowEtmDataRef.current[etmKey] : undefined;
+    const cachedPrice = (cached?.price != null && cached.price > 0) ? cached.price : null;
+    const catalogPrice = product.price && Number(product.price) > 0 ? Number(product.price) : null;
+
     try {
-      const { data: sh } = await sheetsApi.getOne(activeSheetId);
-      const existing = (sh.rows || []).filter((r: any) => r.name || r.article);
-      const article = product.article || '';
-
-      // Dedup: if same article already exists → +1 to qty
-      const dupIdx = existing.findIndex((r: any) => r.article === article && article);
-      if (dupIdx >= 0) {
-        const cur = existing[dupIdx];
-        const newQty = String((parseFloat(String(cur.qty || '0').replace(',', '.')) || 0) + 1);
-        existing[dupIdx] = { ...cur, qty: newQty };
-        await sheetsApi.saveRows(activeSheetId, existing);
-        toast.success(`«${product.name.slice(0, 40)}» — количество увеличено`);
-        return;
-      }
-
-      // Price priority: ETM > catalog. Use the ETM price the background list
-      // load already cached (instant). If it's not cached yet, fetch it live —
-      // a single type=etm request works even when the bulk list load didn't —
-      // capped by a timeout so the button never freezes.
-      let etmPrice: number | null = null;
-      let etmTerm = 'нет';
-      const etmCode = (product.etm_code || '').trim() || undefined;
-      const etmKey = article || (etmCode || '');
-      if (etmKey) {
-        const cached = rowEtmDataRef.current[etmKey];
-        if (cached?.price != null && cached.price > 0) {
-          etmPrice = cached.price;
-          etmTerm = cached.term || 'нет';
-        } else {
-          try {
-            const resp: any = await Promise.race([
-              storesApi.getEtmPricesByItems([{ article: article || undefined, etmCode }]),
-              new Promise(res => setTimeout(() => res(null), 4000)),
-            ]);
-            if (resp?.data) {
-              const p = resp.data[etmKey];
-              if (p != null && p > 0) {
-                etmPrice = p;
-                const termRes: any = await Promise.race([
-                  storesApi.getEtmTerm(article || '', etmCode).catch(() => null),
-                  new Promise(res => setTimeout(() => res(null), 4000)),
-                ]);
-                etmTerm = termRes?.data?.term || 'нет';
-              }
-              setRowEtmData(prev => ({ ...prev, [etmKey]: { price: p ?? null, term: etmTerm === 'нет' ? null : etmTerm } }));
-            }
-          } catch { /* silent — leave defaults */ }
+      // ── Instant append (fast DB op, serialized — no ETM wait) ──
+      const res = await enqueueSheetOp(async () => {
+        const { data: sh } = await sheetsApi.getOne(targetSheetId);
+        const existing = (sh.rows || []).filter((r: any) => r.name || r.article);
+        const dupIdx = existing.findIndex((r: any) => r.article === article && article);
+        if (dupIdx >= 0) {
+          const cur = existing[dupIdx];
+          const newQty = String((parseFloat(String(cur.qty || '0').replace(',', '.')) || 0) + 1);
+          existing[dupIdx] = { ...cur, qty: newQty };
+          await sheetsApi.saveRows(targetSheetId, existing);
+          return { deduped: true };
         }
-      }
+        const price = cachedPrice != null ? String(cachedPrice) : (catalogPrice != null ? String(catalogPrice) : '');
+        const store = cachedPrice != null ? 'ЭТМ' : '';
+        const deadline = cachedPrice != null ? (cached?.term || 'нет') : '';
+        await sheetsApi.saveRows(targetSheetId, [...existing, {
+          row_number: existing.length + 1,
+          name: product.name, brand: product.manufacturer?.name || '',
+          article, etm_code: product.etm_code || '',
+          unit: product.unit || 'шт',
+          price, store, qty: '1', coef: '1', deadline,
+        }]);
+        return { deduped: false };
+      });
 
-      const catalogPrice = product.price && Number(product.price) > 0 ? Number(product.price) : null;
-      const finalPrice = etmPrice != null
-        ? String(etmPrice)
-        : (catalogPrice != null ? String(catalogPrice) : '');
-      // Empty string maps to "—" in the spec table's store dropdown.
-      const finalStore = etmPrice != null ? 'ЭТМ' : '';
-      const finalDeadline = etmPrice != null ? etmTerm : '';
-
-      await sheetsApi.saveRows(activeSheetId, [...existing, {
-        row_number: existing.length + 1,
-        name: product.name, brand: product.manufacturer?.name || '',
-        article, etm_code: product.etm_code || '',
-        unit: product.unit || 'шт',
-        price: finalPrice,
-        store: finalStore, qty: '1', coef: '1',
-        deadline: finalDeadline,
-      }]);
       activityApi.logEvent('add_from_catalog', `${product.name?.slice(0, 60)}, article: ${article}`);
-      toast.success(`«${product.name.slice(0, 40)}» добавлен в лист`);
+      toast.success(res?.deduped
+        ? `«${product.name.slice(0, 40)}» — количество увеличено`
+        : `«${product.name.slice(0, 40)}» добавлен в лист`);
+
+      // ── Background: fetch ETM price and patch the row (off the button) ──
+      if (!res?.deduped && cachedPrice == null && etmKey) {
+        (async () => {
+          try {
+            const { data: prices } = await storesApi.getEtmPricesByItems([{ article: article || undefined, etmCode }]);
+            const p = prices[etmKey];
+            if (p == null || !(p > 0)) return; // ЭТМ has no price — leave catalog price
+            const termRes = await storesApi.getEtmTerm(article || '', etmCode).catch(() => null);
+            const term = termRes?.data?.term || 'нет';
+            setRowEtmData(prev => ({ ...prev, [etmKey]: { price: p, term: term === 'нет' ? null : term } }));
+            await enqueueSheetOp(async () => {
+              const { data: sh2 } = await sheetsApi.getOne(targetSheetId);
+              const rows2 = (sh2.rows || []).map((r: any) => ({ ...r }));
+              const idx = rows2.findIndex((r: any) => {
+                const idMatch = article ? (r.article || '') === article : ((r.etm_code || '') === (etmCode || ''));
+                // Only fill rows that aren't a deliberate manual price.
+                const fillable = !r.store || r.store === 'ЭТМ' || (r.store || '').toUpperCase() === 'ETM';
+                return idMatch && fillable;
+              });
+              if (idx >= 0) {
+                rows2[idx] = { ...rows2[idx], price: String(p), store: 'ЭТМ', deadline: term };
+                await sheetsApi.saveRows(targetSheetId, rows2.filter((r: any) => r.name || r.article));
+              }
+            });
+          } catch { /* silent — price just won't fill */ }
+        })();
+      }
     } catch { toast.error('Ошибка добавления в лист'); }
     finally { addingRef.current = false; }
   }
