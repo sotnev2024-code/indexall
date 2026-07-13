@@ -1779,8 +1779,19 @@ export default function SpecPageClient() {
   // Only rows with store='ЭТМ' are eligible. store='' («—») means the user
   // explicitly chose «keep my price, don't auto-update from ETM».
   function getEtmTargets() {
-    const targets = rowsRef.current
-      .filter((r) => r.article && r.article.trim() && (r.store === 'ЭТМ' || (r.store || '').toUpperCase() === 'ETM'));
+    const hasPrice = (r: any) => {
+      const n = parseFloat(String(r.price ?? '').replace(',', '.'));
+      return Number.isFinite(n) && n > 0;
+    };
+    const targets = rowsRef.current.filter((r) => {
+      if (!(r.article && r.article.trim())) return false;
+      const isEtm = r.store === 'ЭТМ' || (r.store || '').toUpperCase() === 'ETM';
+      // Also re-check rows with source «—» that have NO price yet — they became
+      // «—» because ETM had no price when added, not by a deliberate choice.
+      // «—» rows that already carry a (manual) price are left untouched.
+      const isUnpricedDash = !(r.store || '').trim() && !hasPrice(r);
+      return isEtm || isUnpricedDash;
+    });
     const itemMap = new Map<string, { article?: string; etmCode?: string }>();
     for (const r of targets) {
       const key = (r.article || '').trim();
@@ -1824,20 +1835,25 @@ export default function SpecPageClient() {
       const { data: prices } = await storesApi.getEtmPricesByItems(Array.from(itemMap.values()));
       const keysWithPrice = uniqueKeys.filter(k => prices[k] != null && prices[k]! > 0);
 
+      // Adopt the ETM price for rows sourced from ЭТМ, and for still-unpriced
+      // «—» rows (re-check). Rows with a manual price stay as the user set them.
+      const applyPrice = (r: any) => {
+        const key = (r.article || '').trim();
+        if (!key) return r;
+        const price = prices[key];
+        if (price == null || !(price > 0)) return r;
+        const isEtm = r.store === 'ЭТМ' || (r.store || '').toUpperCase() === 'ETM';
+        const manualPrice = Number.isFinite(parseFloat(String(r.price ?? '').replace(',', '.'))) && parseFloat(String(r.price).replace(',', '.')) > 0;
+        const isUnpricedDash = !(r.store || '').trim() && !manualPrice;
+        if (!isEtm && !isUnpricedDash) return r;
+        const priceStr = String(price);
+        return { ...r, price: priceStr, store: 'ЭТМ', total: calcTotal(priceStr, r.qty, r.coef) };
+      };
+
       // Build the updated row set off the start-time snapshot. This is the
       // version we'll persist to the start sheet — independent of the React
       // state, which may already belong to a different sheet.
-      const updated = startRows.map(r => {
-        const key = (r.article || '').trim();
-        if (!key) return r;
-        if (r.store !== 'ЭТМ' && (r.store || '').toUpperCase() !== 'ETM') return r;
-        const price = prices[key];
-        if (price != null && price > 0) {
-          const priceStr = String(price);
-          return { ...r, price: priceStr, store: 'ЭТМ', total: calcTotal(priceStr, r.qty, r.coef) };
-        }
-        return r;
-      });
+      const updated = startRows.map(applyPrice);
 
       // If the user is still on the same sheet, push the result to the live
       // React state so they see the change immediately.
@@ -1859,17 +1875,7 @@ export default function SpecPageClient() {
           // user navigated away and back during the refresh: their loadData
           // got the pre-save snapshot from DB, so we patch the price fields
           // surgically (other cells they may have edited stay intact).
-          setRows(prev => prev.map(r => {
-            const key = (r.article || '').trim();
-            if (!key) return r;
-            if (r.store !== 'ЭТМ' && (r.store || '').toUpperCase() !== 'ETM') return r;
-            const price = prices[key];
-            if (price != null && price > 0) {
-              const priceStr = String(price);
-              return { ...r, price: priceStr, store: 'ЭТМ', total: calcTotal(priceStr, r.qty, r.coef) };
-            }
-            return r;
-          }));
+          setRows(prev => prev.map(applyPrice));
         }
       } catch { /* keep updated array, user can hit refresh again */ }
 
