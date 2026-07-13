@@ -710,10 +710,20 @@ export class EtmService {
         this.logger.warn(`ETM type=etm batch error: ${e?.message}`);
       }
       if (!batched) {
-        this.logger.warn(`ETM type=etm batch fell back to per-item (${withEtm.length} items)`);
-        for (const it of withEtm) {
-          try { result[keyOf(it)] = await this.fetchEtmItemPrice(it, session, useRetail); }
-          catch (ex: any) { if (ex?.message === 'SESSION_EXPIRED') throw ex; result[keyOf(it)] = null; }
+        // Batch request failed. Fetching every item individually would occupy
+        // the shared 1-req/sec queue for ~1s each and freeze all other ETM
+        // actions (catalog «Добавить», product expand). Only do per-item for a
+        // small set; for a large one, null the prices to protect the queue.
+        const MAX_INDIVIDUAL = 8;
+        if (withEtm.length > MAX_INDIVIDUAL) {
+          this.logger.warn(`ETM type=etm batch unavailable for ${withEtm.length} items — skipping per-item fallback to protect the shared queue`);
+          for (const it of withEtm) if (result[keyOf(it)] == null) result[keyOf(it)] = null;
+        } else {
+          this.logger.warn(`ETM type=etm batch fell back to per-item (${withEtm.length} items)`);
+          for (const it of withEtm) {
+            try { result[keyOf(it)] = await this.fetchEtmItemPrice(it, session, useRetail); }
+            catch (ex: any) { if (ex?.message === 'SESSION_EXPIRED') throw ex; result[keyOf(it)] = null; }
+          }
         }
       }
     }
