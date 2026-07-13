@@ -541,18 +541,39 @@ function CatalogPageInner() {
         return;
       }
 
-      // Instant add: use ONLY the ETM price the background list load already
-      // cached. The add button never makes a live ETM request, so adding and
-      // price-loading run independently and don't block each other. If the
-      // price hasn't loaded yet, the row is added with the catalog price.
+      // Price priority: ETM > catalog. Use the ETM price the background list
+      // load already cached (instant). If it's not cached yet, fetch it live —
+      // a single type=etm request works even when the bulk list load didn't —
+      // capped by a timeout so the button never freezes.
       let etmPrice: number | null = null;
       let etmTerm = 'нет';
       const etmCode = (product.etm_code || '').trim() || undefined;
       const etmKey = article || (etmCode || '');
-      const cached = etmKey ? rowEtmDataRef.current[etmKey] : undefined;
-      if (cached?.price != null && cached.price > 0) {
-        etmPrice = cached.price;
-        etmTerm = cached.term || 'нет';
+      if (etmKey) {
+        const cached = rowEtmDataRef.current[etmKey];
+        if (cached?.price != null && cached.price > 0) {
+          etmPrice = cached.price;
+          etmTerm = cached.term || 'нет';
+        } else {
+          try {
+            const resp: any = await Promise.race([
+              storesApi.getEtmPricesByItems([{ article: article || undefined, etmCode }]),
+              new Promise(res => setTimeout(() => res(null), 4000)),
+            ]);
+            if (resp?.data) {
+              const p = resp.data[etmKey];
+              if (p != null && p > 0) {
+                etmPrice = p;
+                const termRes: any = await Promise.race([
+                  storesApi.getEtmTerm(article || '', etmCode).catch(() => null),
+                  new Promise(res => setTimeout(() => res(null), 4000)),
+                ]);
+                etmTerm = termRes?.data?.term || 'нет';
+              }
+              setRowEtmData(prev => ({ ...prev, [etmKey]: { price: p ?? null, term: etmTerm === 'нет' ? null : etmTerm } }));
+            }
+          } catch { /* silent — leave defaults */ }
+        }
       }
 
       const catalogPrice = product.price && Number(product.price) > 0 ? Number(product.price) : null;
