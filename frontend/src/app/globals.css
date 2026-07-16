@@ -1774,6 +1774,10 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-picker-cat { text-align: left; border: 1px solid transparent; background: none; border-radius: 6px; padding: 7px 9px; font-size: 12.5px; cursor: pointer; color: var(--text); }
 .recog-picker-cat:hover { background: var(--selected); }
 .recog-picker-cat.on { background: var(--yellow); font-weight: 700; }
+.recog-picker-backbtn { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--white);
+  border-radius: 6px; padding: 7px 9px; font-size: 12.5px; cursor: pointer; color: var(--text); }
+.recog-picker-backbtn:hover { border-color: var(--text); }
+.recog-picker-current { background: var(--yellow); border-radius: 6px; padding: 8px 10px; font-size: 12.5px; font-weight: 700; }
 .recog-picker-filter { border-top: 1px solid #eee; padding-top: 8px; margin-top: 6px; }
 .recog-picker-filter-t { font-size: 11px; font-weight: 700; margin-bottom: 4px; }
 .recog-picker-opts { display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; }

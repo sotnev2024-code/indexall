@@ -75,7 +75,13 @@ const pageTitle = (p: RecogPage) => p.title || `Схема ${p.page_index}`;
 
 type Zone = { x: number; y: number; w: number; h: number };
 type Mode = 'pan' | 'zone' | 'draw';
-type PickedProduct = { product_name: string; brand: string; article: string; etm_code: string; price: string };
+type PickedProduct = {
+  product_name: string; brand: string; article: string; etm_code: string; price: string;
+  /** параметры из атрибутов товара — заполняют поля инспектора */
+  fields?: Record<string, string>;
+  /** класс оборудования из базы (появится после доработок Максима) */
+  product_class?: string;
+};
 
 export default function RecognitionPage() {
   const router = useRouter();
@@ -423,14 +429,25 @@ export default function RecognitionPage() {
     } catch { toast.error('Не удалось удалить'); }
   }
 
-  /** товар каталога выбран в пикере (пункт 9) */
+  /** товар каталога выбран в пикере (пункт 9): привязка + автозаполнение параметров */
   async function applyProduct(elId: number, p: PickedProduct) {
     try {
-      const { data } = await recognitionApi.updateElement(elId, p as any);
+      const el = (doc?.elements || []).find((e) => e.id === elId);
+      // параметры товара дополняют/перезаписывают поля рамки
+      const merged = { ...(el?.fields || {}), ...(p.fields || {}) };
+      const { product_class, fields, ...productCols } = p;
+      const { data } = await recognitionApi.updateElement(elId, { ...productCols, fields: merged } as any);
       if (data) patchElementLocal(elId, data as any);
       setPickerElId(null);
-      toast.success('Товар привязан — данные подтянутся в лист спецификации');
-      const el = (doc?.elements || []).find((e) => e.id === elId);
+      if (p.product_name) {
+        // проверка совместимости классов — заработает, когда Максим добавит
+        // классы оборудования в таблицы каталога
+        if (product_class && el && product_class !== el.klass) {
+          toast(`Внимание: класс товара (${product_class}) не совпадает с классом рамки (${el.klass})`, { duration: 6000 });
+        } else {
+          toast.success('Товар привязан — параметры заполнены');
+        }
+      }
       if (el && el.status !== 'auto') silentSheetSync(el);
     } catch { toast.error('Не удалось привязать товар'); }
   }
@@ -838,7 +855,7 @@ export default function RecognitionPage() {
               </div>
             ) : (
               <InspectorPanel
-                key={`${selEl.id}-${selEl.id === editingId ? 'edit' : 'view'}`}
+                key={`${selEl.id}-${selEl.id === editingId ? 'edit' : 'view'}-${selEl.product_name || ''}-${selEl.article || ''}`}
                 el={selEl}
                 cfg={clsCfg}
                 editing={selEl.status === 'auto' || selEl.id === editingId}
@@ -1117,6 +1134,50 @@ const filterOpts = (f: any): string[] => {
 };
 const filterLabel = (f: any): string => sv(f?.label) || sv(f?.name);
 
+/** Атрибуты товара из Excel Максима → поля инспектора. Ключи в файлах могут
+ *  называться по-разному — маппим по нормализованному имени, остальные
+ *  атрибуты переносим как есть. */
+const ATTR_MAP: Record<string, string> = {
+  'номинальныйток': 'Номинал, А',
+  'номинальныйтока': 'Номинал, А',
+  'номинал': 'Номинал, А',
+  'количествополюсов': 'Полюса',
+  'числополюсов': 'Полюса',
+  'полюса': 'Полюса',
+  'криваяотключения': 'Хар-ка',
+  'характеристика': 'Хар-ка',
+  'харка': 'Хар-ка',
+  'токутечки': 'Утечка, мА',
+  'токутечкима': 'Утечка, мА',
+  'серия': 'Тип',
+  'типрасцепителя': 'Тип расцепителя',
+  'отключающаяспособность': 'Откл. способность, кА',
+  'отключающаяспособностька': 'Откл. способность, кА',
+};
+const normKey = (k: string) => k.toLowerCase().replace(/[^а-яёa-z]/g, '');
+
+/** attributes товара (объект или JSON-строка) → {fields, product_class} */
+function productAttrs(p: any): { fields: Record<string, string>; product_class: string } {
+  let attrs: any = p?.attributes;
+  if (typeof attrs === 'string') { try { attrs = JSON.parse(attrs); } catch { attrs = null; } }
+  const fields: Record<string, string> = {};
+  let product_class = '';
+  if (attrs && typeof attrs === 'object') {
+    let extra = 0;
+    for (const [k, v] of Object.entries(attrs)) {
+      const val = sv(v);
+      if (!val) continue;
+      const nk = normKey(k);
+      if (nk === 'производитель' || nk === 'бренд') continue; // уходит в brand
+      if (nk === 'класс' || nk === 'классоборудования' || nk === 'equipmentclass') { product_class = val; continue; }
+      const mapped = ATTR_MAP[nk];
+      if (mapped) fields[mapped] = val;
+      else if (extra < 8) { fields[String(k).slice(0, 40)] = val.slice(0, 120); extra++; }
+    }
+  }
+  return { fields, product_class };
+}
+
 function CatalogPickerModal({ onClose, onPick }: {
   onClose: () => void;
   onPick: (p: PickedProduct) => void;
@@ -1189,12 +1250,15 @@ function CatalogPickerModal({ onClose, onPick }: {
   }
 
   function pick(p: any) {
+    const { fields, product_class } = productAttrs(p);
     onPick({
       product_name: sv(p?.name).slice(0, 300),
       brand: (sv(p?.brand) || sv(p?.manufacturer) || sv(p?.manufacturer?.name)).slice(0, 120),
       article: sv(p?.article).slice(0, 120),
       etm_code: (sv(p?.etm_code) || sv(p?.etmCode)).slice(0, 60),
       price: sv(p?.price) || '0',
+      fields,
+      product_class,
     });
   }
 
@@ -1215,14 +1279,29 @@ function CatalogPickerModal({ onClose, onPick }: {
 
         <div className="recog-picker-body">
           <aside className="recog-picker-side">
-            <div className="recog-picker-side-t">Категории</div>
-            {tiles.filter((t) => t?.slug).map((t) => (
-              <button key={t.slug}
-                className={`recog-picker-cat ${slug === t.slug ? 'on' : ''}`}
-                onClick={() => openCategory(t.slug)}>
-                {sv(t.name) || t.slug}
-              </button>
-            ))}
+            {!slug && (
+              <>
+                <div className="recog-picker-side-t">Категории</div>
+                {tiles.filter((t) => t?.slug).map((t) => (
+                  <button key={t.slug}
+                    className="recog-picker-cat"
+                    onClick={() => openCategory(t.slug)}>
+                    {sv(t.name) || t.slug}
+                  </button>
+                ))}
+              </>
+            )}
+            {slug && (
+              <>
+                <button className="recog-picker-backbtn"
+                  onClick={() => { setSlug(''); setFilters([]); setSel({}); setItems([]); }}>
+                  <Icon.back /> Категории
+                </button>
+                <div className="recog-picker-current">
+                  {sv(tiles.find((t) => t.slug === slug)?.name) || slug}
+                </div>
+              </>
+            )}
             {slug && filters.map((f, fi) => {
               const label = filterLabel(f);
               const opts = filterOpts(f);
