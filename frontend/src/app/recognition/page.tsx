@@ -410,6 +410,7 @@ export default function RecognitionPage() {
           )}
 
           <DatasetPanel cfg={clsCfg} onCfgSaved={setClsCfg} />
+          <ModelPanel />
         </div>
       ) : (
         /* ── рабочее пространство документа ── */
@@ -762,6 +763,37 @@ function DatasetPanel({ cfg, onCfgSaved }: {
     }
   }
 
+  async function downloadZip() {
+    setExporting(true);
+    try {
+      const { data } = await recognitionApi.exportDatasetZip(from || undefined, to || undefined);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(data);
+      a.download = `indexall-dataset-${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast.success('ZIP готов: images + labels (YOLO) + data.yaml + labelstudio.json');
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Не удалось собрать ZIP');
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function importFile(f: File) {
+    try {
+      const { data } = await recognitionApi.importDataset(f);
+      toast.success(
+        `Импорт: страниц ${data.pages}, обновлено ${data.updated}, создано ${data.created}, снято подтверждений ${data.demoted}` +
+        (data.pages_not_found ? `, не найдено страниц: ${data.pages_not_found}` : ''),
+        { duration: 7000 },
+      );
+      recognitionApi.datasetStats().then(({ data: d }) => setStats(d)).catch(() => {});
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Импорт не удался');
+    }
+  }
+
   async function saveCfg() {
     setSavingCfg(true);
     try {
@@ -807,9 +839,20 @@ function DatasetPanel({ cfg, onCfgSaved }: {
       <div className="recog-dataset-actions">
         <label>с <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
         <label>по <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
-        <button className="btn-primary" onClick={download} disabled={exporting}>
-          {exporting ? 'Выгружаем…' : '⬇ Скачать разметку (Label Studio JSON)'}
+        <button className="btn-primary" onClick={downloadZip} disabled={exporting}
+          title="Готовый датасет: картинки + YOLO-разметка + data.yaml + Label Studio JSON">
+          {exporting ? 'Выгружаем…' : '⬇ Скачать датасет (ZIP)'}
         </button>
+        <button className="btn-outline" onClick={download} disabled={exporting}
+          title="Только разметка, картинки ссылками на сервер">
+          JSON для Label Studio
+        </button>
+        <button className="btn-outline" onClick={() => document.getElementById('recog-import-input')?.click()}
+          title="JSON-экспорт из Label Studio: проверенная разметка станет эталоном (verified)">
+          ⬆ Импорт проверенной разметки
+        </button>
+        <input id="recog-import-input" type="file" accept=".json,application/json" hidden
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) importFile(f); (e.target as HTMLInputElement).value = ''; }} />
         <button className="btn-outline" onClick={() => setCfgOpen((v) => !v)}>
           {cfgOpen ? 'Скрыть конфиг' : 'Обновить классы (конфиг LS)'}
         </button>
@@ -833,7 +876,164 @@ function DatasetPanel({ cfg, onCfgSaved }: {
 
       <p className="recog-dataset-note">
         В выгрузку попадают подтверждённые и исправленные рамки классов Label Studio (служебные cable/load/panel
-        в датасет YOLO не входят). Картинки в JSON — ссылками на сервер: Label Studio подтянет их сам.
+        в датасет YOLO не входят). ZIP готов и для импорта в Label Studio, и для обучения ultralytics
+        (yolo train data=data.yaml). Импорт принимает JSON-экспорт Label Studio: рамки матчатся с нашими по IoU,
+        проверенные помечаются «verified» и не понижаются автоматикой.
+      </p>
+    </div>
+  );
+}
+
+/* ── Модель YOLO: версии, режим распознавания, теневые прогоны ── */
+const MODE_INFO: Record<string, { label: string; hint: string }> = {
+  llm: { label: 'LLM (Gemini)', hint: 'Рамки, классы и параметры читает языковая модель. Режим по умолчанию.' },
+  shadow: { label: 'Теневой (LLM + YOLO)', hint: 'Пользователь видит результат LLM, YOLO работает параллельно — сравнение копится ниже.' },
+  cascade: { label: 'Каскад (YOLO → LLM)', hint: 'YOLO находит рамки и классы, LLM дочитывает параметры. Целевая схема.' },
+  yolo: { label: 'Только YOLO', hint: 'Быстро и бесплатно, но без параметров (тип/номинал не читаются).' },
+};
+
+function ModelPanel() {
+  const [data, setData] = useState<any>(null);
+  const [note, setNote] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const reload = useCallback(() => {
+    recognitionApi.listModels().then(({ data: d }) => setData(d)).catch(() => {});
+  }, []);
+  useEffect(() => { reload(); }, [reload]);
+
+  async function upload(f: File) {
+    setUploading(true);
+    try {
+      await recognitionApi.uploadModel(f, note);
+      setNote('');
+      toast.success('Версия загружена — активируйте её, чтобы включить');
+      reload();
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Не удалось загрузить модель');
+    } finally {
+      setUploading(false);
+    }
+  }
+  async function activate(id: number) {
+    setBusy(true);
+    try {
+      const { data: d } = await recognitionApi.activateModel(id);
+      setData(d);
+      toast.success('Версия активирована');
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Не удалось активировать');
+    } finally { setBusy(false); }
+  }
+  async function removeVersion(id: number) {
+    if (!confirm('Удалить эту версию модели?')) return;
+    try {
+      await recognitionApi.deleteModel(id);
+      reload();
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Не удалось удалить');
+    }
+  }
+  async function changeMode(mode: string) {
+    try {
+      await recognitionApi.setMode(mode);
+      setData((d: any) => ({ ...d, mode }));
+      toast.success(`Режим: ${MODE_INFO[mode]?.label || mode}`);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Не удалось сменить режим');
+    }
+  }
+
+  const models: any[] = data?.models || [];
+  const hasActive = !!data?.activeId;
+  const mode: string = data?.mode || 'llm';
+  const runs: any[] = data?.shadowRuns || [];
+
+  return (
+    <div className="recog-dataset">
+      <div className="recog-dataset-head">
+        <b>Модель YOLO и режим распознавания</b>
+        <span className="recog-dataset-sub">
+          {models.length ? `версий: ${models.length}${hasActive ? '' : ' · нет активной'}` : 'модель ещё не загружалась — работает LLM'}
+        </span>
+      </div>
+
+      {/* режим */}
+      <div className="recog-mode">
+        {Object.entries(MODE_INFO).map(([m, info]) => (
+          <label key={m} className={`recog-mode-opt ${mode === m ? 'on' : ''} ${m !== 'llm' && !hasActive ? 'dis' : ''}`}
+            title={m !== 'llm' && !hasActive ? 'Сначала загрузите и активируйте модель' : info.hint}>
+            <input
+              type="radio" name="recog-mode" value={m}
+              checked={mode === m}
+              disabled={m !== 'llm' && !hasActive}
+              onChange={() => changeMode(m)}
+            />
+            <span><b>{info.label}</b><small>{info.hint}</small></span>
+          </label>
+        ))}
+      </div>
+
+      {/* загрузка версии */}
+      <div className="recog-dataset-actions">
+        <input
+          placeholder="Заметка к версии (напр. v1 — 48 схем)"
+          value={note} onChange={(e) => setNote(e.target.value)}
+          style={{ flex: 1, minWidth: 180, border: '1px solid var(--border)', borderRadius: 6, padding: '7px 9px', fontSize: 13 }}
+        />
+        <button className="btn-primary" disabled={uploading}
+          onClick={() => document.getElementById('recog-model-input')?.click()}>
+          {uploading ? 'Загружаем…' : '⬆ Загрузить модель (.onnx)'}
+        </button>
+        <input id="recog-model-input" type="file" accept=".onnx" hidden
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); (e.target as HTMLInputElement).value = ''; }} />
+      </div>
+
+      {/* версии */}
+      {models.length > 0 && (
+        <div className="recog-models">
+          {models.map((m) => (
+            <div key={m.id} className={`recog-model-row ${m.active ? 'on' : ''}`}>
+              <span className="recog-model-name">
+                {m.active ? '● ' : ''}{m.orig_name || m.filename}
+                {m.note && <small> — {m.note}</small>}
+              </span>
+              <span className="recog-model-date">{new Date(m.createdAt).toLocaleString('ru-RU')}</span>
+              {m.active
+                ? <span className="recog-pill st-confirmed">активна</span>
+                : (
+                  <>
+                    <button className="btn-outline" disabled={busy} onClick={() => activate(m.id)}>
+                      {hasActive ? 'Откатиться на эту' : 'Активировать'}
+                    </button>
+                    <button className="recog-docdel" title="Удалить версию" onClick={() => removeVersion(m.id)}>×</button>
+                  </>
+                )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* теневые прогоны */}
+      {runs.length > 0 && (
+        <div className="recog-shadow">
+          <div className="recog-dataset-sub" style={{ marginBottom: 6 }}>Теневые прогоны (последние {runs.length}) — сравнение LLM и YOLO:</div>
+          {runs.map((r) => (
+            <div key={r.id} className="recog-shadow-row">
+              <span>{new Date(r.createdAt).toLocaleString('ru-RU')}</span>
+              <span>LLM: <b>{r.llm_count}</b> рамок · {(r.llm_ms / 1000).toFixed(1)} c</span>
+              <span className={r.yolo_error ? 'err' : ''}>
+                YOLO: <b>{r.yolo_count}</b> рамок · {(r.yolo_ms / 1000).toFixed(1)} c{r.yolo_error ? ` · ${r.yolo_error}` : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="recog-dataset-note">
+        Обучение — у Максима (ultralytics): датасет из ZIP выше → `yolo train data=data.yaml` → `model.export(format="onnx")` →
+        загрузить файл сюда и активировать. Старые версии остаются для отката. Режимы кроме LLM доступны при активной модели.
       </p>
     </div>
   );

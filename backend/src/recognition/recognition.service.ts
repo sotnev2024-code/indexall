@@ -16,6 +16,8 @@ import * as os from 'os';
 import { RecognitionDocument } from './recognition-document.entity';
 import { RecognitionPage } from './recognition-page.entity';
 import { RecognitionElement } from './recognition-element.entity';
+import { RecognitionModelVersion } from './recognition-model.entity';
+import { RecognitionShadowRun } from './recognition-shadow.entity';
 import { Sheet } from '../sheets/sheet.entity';
 import { EquipmentRow } from '../equipment/equipment-row.entity';
 import { Folder } from '../folders/folder.entity';
@@ -28,6 +30,7 @@ import {
   parseLsConfig,
   RecognitionClass,
 } from './recognition-classes';
+import { yoloDetect, resetYoloSession, YoloBox } from './yolo';
 
 const execFileAsync = promisify(execFile);
 
@@ -59,6 +62,9 @@ const DETECT_MAX_EDGE = 2200;
 
 /** Ключ настройки с XML-конфигом Label Studio (см. recognition-classes.ts) */
 const LS_CONFIG_KEY = 'recognition_ls_config';
+/** Режим распознавания: llm | shadow | cascade | yolo */
+const MODE_KEY = 'recognition_mode';
+export const RECOGNITION_MODES = ['llm', 'shadow', 'cascade', 'yolo'] as const;
 
 type Bbox = { x: number; y: number; w: number; h: number };
 
@@ -78,6 +84,8 @@ export class RecognitionService {
     @InjectRepository(EquipmentRow) private rowsRepo: Repository<EquipmentRow>,
     @InjectRepository(Folder) private foldersRepo: Repository<Folder>,
     @InjectRepository(AppSetting) private settingsRepo: Repository<AppSetting>,
+    @InjectRepository(RecognitionModelVersion) private modelsRepo: Repository<RecognitionModelVersion>,
+    @InjectRepository(RecognitionShadowRun) private shadowRepo: Repository<RecognitionShadowRun>,
   ) {}
 
   isConfigured(): boolean {
@@ -315,7 +323,22 @@ export class RecognitionService {
     const buf: Buffer = await pipeline.jpeg({ quality: 85 }).toBuffer();
 
     const cfg = await this.getClassConfig();
-    const found = await this.callVisionModel(buf, cfg);
+    const mode = await this.getMode();
+
+    let found: Array<{
+      klass: string; designation?: string; fields?: Record<string, string>;
+      bbox: [number, number, number, number]; confidence?: number;
+    }>;
+
+    if (mode === 'yolo') {
+      found = await this.runYolo(buf, cfg);
+    } else if (mode === 'cascade') {
+      found = await this.runCascade(buf, cfg);
+    } else if (mode === 'shadow') {
+      found = await this.runShadow(buf, cfg, page.id, z);
+    } else {
+      found = await this.callVisionModel(buf, cfg);
+    }
 
     // bbox кропа → bbox страницы
     const toSave = found.map((el) => ({
@@ -334,6 +357,115 @@ export class RecognitionService {
     }));
     const saved = toSave.length ? await this.elementsRepo.save(toSave) : [];
     return { elements: saved };
+  }
+
+  // ── Режимы распознавания ──────────────────────────────────────
+
+  async getMode(): Promise<string> {
+    try {
+      const row = await this.settingsRepo.findOne({ where: { key: MODE_KEY } });
+      const m = row?.value?.trim();
+      return m && (RECOGNITION_MODES as readonly string[]).includes(m) ? m : 'llm';
+    } catch { return 'llm'; }
+  }
+
+  async setMode(mode: string) {
+    if (!(RECOGNITION_MODES as readonly string[]).includes(mode)) {
+      throw new BadRequestException('Неизвестный режим распознавания');
+    }
+    if (mode !== 'llm') {
+      const active = await this.modelsRepo.findOne({ where: { active: true } });
+      if (!active) throw new BadRequestException('Сначала загрузите и активируйте модель YOLO');
+    }
+    await this.settingsRepo.save({ key: MODE_KEY, value: mode });
+    return { mode };
+  }
+
+  private async activeModelPath(): Promise<string> {
+    const active = await this.modelsRepo.findOne({ where: { active: true } });
+    if (!active) throw new ServiceUnavailableException('Нет активной модели YOLO — загрузите её в панели «Модель»');
+    return join(UPLOAD_DIR, active.filename);
+  }
+
+  /** YOLO: рамки + классы (category → код класса из конфига), без параметров. */
+  private async runYolo(buf: Buffer, cfg: ClassConfig) {
+    const modelPath = await this.activeModelPath();
+    let boxes: YoloBox[];
+    try {
+      boxes = await yoloDetect(buf, modelPath);
+    } catch (e: any) {
+      this.logger.warn(`YOLO-инференс упал: ${e?.message || e}`);
+      throw new ServiceUnavailableException('Модель YOLO не смогла обработать зону (см. логи сервера)');
+    }
+    const byCategory = new Map(cfg.classes.filter((c) => c.category != null).map((c) => [c.category, c.code]));
+    return boxes.map((b) => ({
+      klass: byCategory.get(b.classId) || 'other',
+      designation: '',
+      fields: {},
+      bbox: [b.bbox.x, b.bbox.y, b.bbox.w, b.bbox.h] as [number, number, number, number],
+      confidence: b.conf,
+    }));
+  }
+
+  /** Каскад Максима: YOLO находит рамки и классы, LLM одним вызовом
+   *  дочитывает обозначения и параметры по индексам рамок. */
+  private async runCascade(buf: Buffer, cfg: ClassConfig) {
+    const boxes = await this.runYolo(buf, cfg);
+    if (!boxes.length) return boxes;
+    if (!this.isConfigured()) return boxes; // LLM не настроен — отдаём хотя бы рамки
+
+    const listing = boxes.map((b, i) =>
+      `{"i":${i},"klass":"${b.klass}","bbox":[${b.bbox.map((v) => v.toFixed(4)).join(',')}]}`).join(',\n');
+    const prompt = [
+      'На изображении фрагмент электрической схемы российского проекта. Модель уже нашла элементы (рамки в долях изображения, [x,y,ширина,высота] от левого верхнего угла):',
+      `[${listing}]`,
+      '',
+      'Для КАЖДОГО индекса i прочитай видимые НА СХЕМЕ подписи этого элемента и верни СТРОГО JSON без пояснений:',
+      '{"params":[{"i":0,"designation":"QF1","fields":{"Тип":"ВА47-29","Полюса":"1P","Хар-ка":"C","Номинал, А":"16"}},…]}',
+      'Ключи fields — русские, как в примере; для кабелей: "Марка", "Жилы×сечение", "Длина, м". Если подпись не видна — пропусти ключ; не выдумывай значения.',
+    ].join('\n');
+
+    try {
+      const parsed = await this.callGeminiJson(buf, prompt);
+      const params: any[] = Array.isArray(parsed?.params) ? parsed.params : [];
+      for (const p of params) {
+        const i = Number(p?.i);
+        if (!Number.isInteger(i) || i < 0 || i >= boxes.length) continue;
+        boxes[i].designation = String(p?.designation || '').slice(0, 60);
+        boxes[i].fields = this.sanitizeFields(p?.fields);
+      }
+    } catch (e: any) {
+      this.logger.warn(`Каскад: LLM не дочитала параметры (${e?.message || e}) — отдаём рамки без параметров`);
+    }
+    return boxes;
+  }
+
+  /** Теневой режим: пользователю — результат LLM; YOLO гоняется параллельно,
+   *  итог пишется в recognition_shadow_runs для сравнения качества. */
+  private async runShadow(buf: Buffer, cfg: ClassConfig, pageId: number, zone: Bbox) {
+    const llmStart = Date.now();
+    const llmPromise = this.callVisionModel(buf, cfg).then(
+      (els) => ({ els, ms: Date.now() - llmStart, err: '' }),
+    );
+    const yoloStart = Date.now();
+    const yoloPromise = this.runYolo(buf, cfg).then(
+      (els) => ({ els, ms: Date.now() - yoloStart, err: '' }),
+      (e: any) => ({ els: [] as any[], ms: Date.now() - yoloStart, err: String(e?.message || e).slice(0, 200) }),
+    );
+    const [llm, yolo] = await Promise.all([llmPromise, yoloPromise]);
+
+    this.shadowRepo.save({
+      page_id: pageId,
+      zone,
+      llm_count: llm.els.length,
+      yolo_count: yolo.els.length,
+      llm_ms: llm.ms,
+      yolo_ms: yolo.ms,
+      yolo_elements: yolo.els.map((e) => ({ klass: e.klass, confidence: e.confidence, bbox: e.bbox })),
+      yolo_error: yolo.err,
+    }).catch(() => { /* сравнение не должно ломать распознавание */ });
+
+    return llm.els;
   }
 
   /** Вызов Gemini через агрегатор (см. RECOGNITION_API_URL). stream:false —
@@ -369,6 +501,22 @@ export class RecognitionService {
       'Каждый аппарат, каждую кабельную линию и каждый приёмник размечай ОТДЕЛЬНЫМ элементом. Если параметр не виден — не выдумывай, пропусти ключ.',
       'Если на фрагменте нет электрооборудования — верни {"elements":[]}.',
     ].join('\n');
+
+    const parsed = await this.callGeminiJson(imageJpeg, prompt);
+    const list = Array.isArray(parsed) ? parsed : parsed?.elements;
+    if (!Array.isArray(list)) {
+      this.logger.warn(`Модель вернула неожиданный формат ответа`);
+      throw new ServiceUnavailableException('Модель вернула неожиданный ответ — попробуйте зону поменьше');
+    }
+    return list.filter((el: any) => Array.isArray(el?.bbox) && el.bbox.length === 4);
+  }
+
+  /** Транспорт к Gemini: картинка + промпт → распарсенный JSON.
+   *  Используется и основным LLM-распознаванием, и каскадом. */
+  private async callGeminiJson(imageJpeg: Buffer, prompt: string): Promise<any> {
+    const base = (process.env.RECOGNITION_API_URL || '').trim().replace(/\/+$/, '');
+    const model = (process.env.RECOGNITION_MODEL || 'gemini-3-5-flash').trim();
+    const url = `${base}/gemini/v1/models/${model}:streamGenerateContent`;
 
     const body = {
       stream: false,
@@ -409,13 +557,7 @@ export class RecognitionService {
     }
 
     const text = this.extractTextFromProviderResponse(raw);
-    const parsed = this.extractJson(text);
-    const list = Array.isArray(parsed) ? parsed : parsed?.elements;
-    if (!Array.isArray(list)) {
-      this.logger.warn(`Модель вернула неожиданный формат: ${text.slice(0, 300)}`);
-      throw new ServiceUnavailableException('Модель вернула неожиданный ответ — попробуйте зону поменьше');
-    }
-    return list.filter((el: any) => Array.isArray(el?.bbox) && el.bbox.length === 4);
+    return this.extractJson(text);
   }
 
   /** Достаёт текст модели и из единого JSON-ответа, и из SSE-потока чанков. */
@@ -640,11 +782,20 @@ export class RecognitionService {
         const linked = await this.elementsRepo.find({
           where: { page_id: In(pages.map((p) => p.id)), in_sheet: true },
         });
+        // Проверенную экспертом разметку (verified) не понижаем — только отвязываем
         const removed = linked.filter((e) => !presentIds.has(e.id));
-        if (removed.length) {
+        const demote = removed.filter((e) => !e.verified);
+        const detach = removed.filter((e) => e.verified);
+        if (demote.length) {
           await this.elementsRepo.update(
-            { id: In(removed.map((e) => e.id)) },
+            { id: In(demote.map((e) => e.id)) },
             { in_sheet: false, status: 'auto' },
+          );
+        }
+        if (detach.length) {
+          await this.elementsRepo.update(
+            { id: In(detach.map((e) => e.id)) },
+            { in_sheet: false },
           );
         }
       }
@@ -787,6 +938,223 @@ export class RecognitionService {
       skipped_system_elements: elements.length - exportable.length,
       tasks,
     };
+  }
+
+  /** ZIP-архив, готовый и для Label Studio, и для обучения ultralytics:
+   *  images/ + labels/ (YOLO txt по category) + classes.txt + data.yaml
+   *  + labelstudio.json. */
+  async exportDatasetZip(from?: string, to?: string): Promise<{ archive: any; filename: string }> {
+    const cfg = await this.getClassConfig();
+    const ls = await this.exportDataset(from, to);
+
+    // category → строка names; code — латинский слаг, удобен ultralytics
+    const catToClass = new Map<number, RecognitionClass>();
+    for (const c of cfg.classes) {
+      if (c.category != null && !catToClass.has(c.category)) catToClass.set(c.category, c);
+    }
+    const maxCat = Math.max(-1, ...catToClass.keys());
+    const names: string[] = [];
+    for (let i = 0; i <= maxCat; i++) names.push(catToClass.get(i)?.code || `unused_${i}`);
+
+    const lsValueToCat = new Map<string, number>();
+    for (const [cat, c] of catToClass) lsValueToCat.set(c.lsValue, cat);
+
+    const archiver = require('archiver');
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.on('warning', (e: any) => this.logger.warn(`zip: ${e?.message || e}`));
+
+    for (const task of ls.tasks) {
+      const imageUrl: string = task?.data?.image || '';
+      const fileName = imageUrl.split('/').pop() || '';
+      const imgPath = join(UPLOAD_DIR, fileName);
+      if (!fileName || !fs.existsSync(imgPath)) continue;
+      archive.file(imgPath, { name: `images/${fileName}` });
+
+      const lines: string[] = [];
+      for (const r of task.annotations?.[0]?.result || []) {
+        if (r?.type !== 'rectanglelabels') continue;
+        const label = r?.value?.rectanglelabels?.[0];
+        const cat = lsValueToCat.get(label);
+        if (cat == null) continue;
+        // LS: проценты левого верхнего угла → YOLO: доли центра
+        const x = Number(r.value.x) / 100;
+        const y = Number(r.value.y) / 100;
+        const w = Number(r.value.width) / 100;
+        const h = Number(r.value.height) / 100;
+        lines.push(`${cat} ${(x + w / 2).toFixed(6)} ${(y + h / 2).toFixed(6)} ${w.toFixed(6)} ${h.toFixed(6)}`);
+      }
+      const base = fileName.replace(/\.[a-z0-9]+$/i, '');
+      archive.append(lines.join('\n') + (lines.length ? '\n' : ''), { name: `labels/${base}.txt` });
+    }
+
+    archive.append(names.join('\n') + '\n', { name: 'classes.txt' });
+    const yaml = [
+      '# INDEXALL — датасет распознавания схем (сгенерирован автоматически)',
+      'path: .',
+      'train: images',
+      'val: images',
+      `nc: ${names.length}`,
+      'names:',
+      ...names.map((n, i) => `  ${i}: ${n}`),
+      '',
+    ].join('\n');
+    archive.append(yaml, { name: 'data.yaml' });
+    archive.append(JSON.stringify(ls.tasks, null, 2), { name: 'labelstudio.json' });
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    return { archive, filename: `indexall-dataset-${stamp}.zip` };
+  }
+
+  /** Импорт проверенной разметки из Label Studio (эталон от Максима).
+   *  Страница ищется по имени файла в data.image; рамки матчатся с нашими
+   *  по IoU ≥ 0.5 (сначала в том же классе, потом в любом). */
+  async importLsAnnotations(userId: number, jsonText: string) {
+    const cfg = await this.getClassConfig();
+    const byLsValue = new Map(cfg.classes.filter((c) => c.lsValue).map((c) => [c.lsValue, c.code]));
+
+    let tasks: any[];
+    try {
+      const parsed = JSON.parse(jsonText);
+      tasks = Array.isArray(parsed) ? parsed : parsed?.tasks;
+    } catch {
+      throw new BadRequestException('Файл не читается как JSON');
+    }
+    if (!Array.isArray(tasks)) throw new BadRequestException('Не похоже на экспорт Label Studio (нет списка задач)');
+
+    const stats = { pages: 0, pages_not_found: 0, updated: 0, created: 0, demoted: 0 };
+
+    for (const task of tasks) {
+      const imageUrl = String(task?.data?.image || '');
+      const fileName = decodeURIComponent(imageUrl.split('/').pop() || '').replace(/\?.*$/, '');
+      if (!fileName) { stats.pages_not_found++; continue; }
+      const page = await this.pagesRepo.findOne({ where: { image_file: fileName } });
+      if (!page) { stats.pages_not_found++; continue; }
+      const doc = await this.docsRepo.findOne({ where: { id: page.document_id } });
+      if (!doc || doc.owner_id !== userId) { stats.pages_not_found++; continue; }
+
+      // Разметка из файла (annotations приоритетнее predictions)
+      const results = (task?.annotations?.[0]?.result || []).filter((r: any) => r?.type === 'rectanglelabels');
+      const incoming = results.map((r: any) => ({
+        klass: byLsValue.get(r?.value?.rectanglelabels?.[0]) || 'other',
+        bbox: {
+          x: Math.max(0, Number(r.value.x) / 100),
+          y: Math.max(0, Number(r.value.y) / 100),
+          w: Math.max(0.001, Number(r.value.width) / 100),
+          h: Math.max(0.001, Number(r.value.height) / 100),
+        },
+      })).filter((r: any) => r.bbox.w > 0 && r.bbox.h > 0);
+
+      const existing = await this.elementsRepo.find({ where: { page_id: page.id } });
+      const matchedExisting = new Set<number>();
+
+      for (const inc of incoming) {
+        // 1) лучший IoU среди того же класса, 2) среди любых
+        let best: RecognitionElement | null = null;
+        let bestIou = 0.5;
+        for (const pass of [1, 2] as const) {
+          for (const el of existing) {
+            if (matchedExisting.has(el.id)) continue;
+            if (pass === 1 && el.klass !== inc.klass) continue;
+            const i = this.iouBbox(el.bbox, inc.bbox);
+            if (i >= bestIou) { best = el; bestIou = i; }
+          }
+          if (best) break;
+        }
+        if (best) {
+          matchedExisting.add(best.id);
+          await this.elementsRepo.update(best.id, {
+            klass: inc.klass,
+            bbox: inc.bbox,
+            status: 'corrected',
+            verified: true,
+            confidence: 1,
+          });
+          stats.updated++;
+        } else {
+          await this.elementsRepo.save({
+            page_id: page.id,
+            klass: inc.klass,
+            designation: '',
+            fields: {},
+            bbox: inc.bbox,
+            confidence: 1,
+            status: 'corrected',
+            verified: true,
+          });
+          stats.created++;
+        }
+      }
+
+      // Наши подтверждённые, которых нет в проверенном файле — Максим их отверг
+      for (const el of existing) {
+        if (matchedExisting.has(el.id)) continue;
+        if (el.status === 'confirmed' || el.status === 'corrected') {
+          await this.elementsRepo.update(el.id, { status: 'auto', verified: false, in_sheet: false });
+          stats.demoted++;
+        }
+      }
+      stats.pages++;
+    }
+    return stats;
+  }
+
+  private iouBbox(a: Bbox, b: Bbox): number {
+    const x1 = Math.max(a.x, b.x);
+    const y1 = Math.max(a.y, b.y);
+    const x2 = Math.min(a.x + a.w, b.x + b.w);
+    const y2 = Math.min(a.y + a.h, b.y + b.h);
+    const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+    const union = a.w * a.h + b.w * b.h - inter;
+    return union > 0 ? inter / union : 0;
+  }
+
+  // ── Версии модели YOLO ────────────────────────────────────────
+
+  async listModels() {
+    const models = await this.modelsRepo.find({ order: { id: 'DESC' } });
+    const shadowRuns = await this.shadowRepo.find({ order: { id: 'DESC' }, take: 20 });
+    return {
+      models,
+      activeId: models.find((m) => m.active)?.id || null,
+      mode: await this.getMode(),
+      shadowRuns,
+    };
+  }
+
+  async uploadModel(file: Express.Multer.File, note: string) {
+    if (!/\.onnx$/i.test(file.originalname)) {
+      try { fs.unlinkSync(file.path); } catch {}
+      throw new BadRequestException('Нужен файл .onnx (экспорт ultralytics: model.export(format="onnx"))');
+    }
+    const version = await this.modelsRepo.save({
+      filename: file.filename,
+      orig_name: fixFileName(file.originalname),
+      note: String(note || '').slice(0, 200),
+      active: false,
+    });
+    return version;
+  }
+
+  async activateModel(id: number) {
+    const model = await this.modelsRepo.findOne({ where: { id } });
+    if (!model) throw new NotFoundException('Версия модели не найдена');
+    if (!fs.existsSync(join(UPLOAD_DIR, model.filename))) {
+      throw new BadRequestException('Файл модели отсутствует на диске — загрузите заново');
+    }
+    // update с пустым criteria TypeORM запрещает — через QueryBuilder
+    await this.modelsRepo.createQueryBuilder().update().set({ active: false }).execute();
+    await this.modelsRepo.update(id, { active: true });
+    resetYoloSession();
+    return this.listModels();
+  }
+
+  async deleteModel(id: number) {
+    const model = await this.modelsRepo.findOne({ where: { id } });
+    if (!model) throw new NotFoundException('Версия модели не найдена');
+    if (model.active) throw new BadRequestException('Нельзя удалить активную версию — сначала активируйте другую');
+    try { fs.unlinkSync(join(UPLOAD_DIR, model.filename)); } catch {}
+    await this.modelsRepo.delete(id);
+    return { success: true };
   }
 
   // ── Владение ──────────────────────────────────────────────────

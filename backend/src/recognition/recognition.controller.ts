@@ -1,10 +1,11 @@
 import {
-  Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, Request,
+  Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, Request, Res,
   UseGuards, UseInterceptors, UploadedFile, ParseIntPipe, BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
+import { diskStorage, memoryStorage } from 'multer';
 import { extname } from 'path';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RecognitionAccessGuard } from './recognition-access.guard';
 import { RecognitionService } from './recognition.service';
@@ -12,6 +13,11 @@ import { RecognitionService } from './recognition.service';
 const documentStorage = diskStorage({
   destination: process.env.UPLOAD_DIR || './uploads',
   filename: (_, file, cb) => cb(null, `recog-src-${Date.now()}${extname(file.originalname).toLowerCase()}`),
+});
+
+const modelStorage = diskStorage({
+  destination: process.env.UPLOAD_DIR || './uploads',
+  filename: (_, file, cb) => cb(null, `model-${Date.now()}.onnx`),
 });
 
 // Пока модуль обкатывается — доступ только аккаунтам из
@@ -48,6 +54,66 @@ export class RecognitionController {
   @Get('dataset/export')
   exportDataset(@Query('from') from?: string, @Query('to') to?: string) {
     return this.service.exportDataset(from, to);
+  }
+
+  /** ZIP: images/ + labels/ (YOLO) + classes.txt + data.yaml + labelstudio.json */
+  @Get('dataset/export-zip')
+  async exportDatasetZip(
+    @Res() res: Response,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const { archive, filename } = await this.service.exportDatasetZip(from, to);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    archive.pipe(res);
+    await archive.finalize();
+  }
+
+  /** Импорт проверенной разметки из Label Studio (JSON-экспорт). */
+  @Post('dataset/import')
+  @UseInterceptors(FileInterceptor('file', {
+    storage: memoryStorage(),
+    limits: { fileSize: 50 * 1024 * 1024 },
+  }))
+  importDataset(@UploadedFile() file: Express.Multer.File, @Request() req) {
+    if (!file?.buffer) throw new BadRequestException('Файл не загружен');
+    return this.service.importLsAnnotations(req.user.userId, file.buffer.toString('utf8'));
+  }
+
+  // ── Версии модели YOLO и режим распознавания ─────────────────
+
+  @Get('models')
+  listModels() {
+    return this.service.listModels();
+  }
+
+  @Post('models')
+  @UseInterceptors(FileInterceptor('file', {
+    storage: modelStorage,
+    limits: { fileSize: 300 * 1024 * 1024 },
+  }))
+  uploadModel(
+    @UploadedFile() file: Express.Multer.File,
+    @Body('note') note: string,
+  ) {
+    if (!file) throw new BadRequestException('Файл не загружен');
+    return this.service.uploadModel(file, note);
+  }
+
+  @Post('models/:id/activate')
+  activateModel(@Param('id', ParseIntPipe) id: number) {
+    return this.service.activateModel(id);
+  }
+
+  @Delete('models/:id')
+  deleteModel(@Param('id', ParseIntPipe) id: number) {
+    return this.service.deleteModel(id);
+  }
+
+  @Put('mode')
+  setMode(@Body('mode') mode: string) {
+    return this.service.setMode(mode);
   }
 
   // ── Документы ─────────────────────────────────────────────────

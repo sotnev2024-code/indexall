@@ -375,6 +375,28 @@ export const recognitionApi = {
   datasetStats: () => api.get('/recognition/dataset/stats'),
   exportDataset: (from?: string, to?: string) =>
     api.get('/recognition/dataset/export', { params: { ...(from ? { from } : {}), ...(to ? { to } : {}) } }),
+  exportDatasetZip: (from?: string, to?: string) =>
+    api.get('/recognition/dataset/export-zip', {
+      params: { ...(from ? { from } : {}), ...(to ? { to } : {}) },
+      responseType: 'blob',
+      timeout: 300000,
+    }),
+  importDataset: (file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return api.post('/recognition/dataset/import', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 });
+  },
+  // Модель YOLO и режим распознавания
+  listModels: () => api.get('/recognition/models'),
+  uploadModel: (file: File, note: string) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('note', note);
+    return api.post('/recognition/models', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600000 });
+  },
+  activateModel: (id: number) => api.post(`/recognition/models/${id}/activate`),
+  deleteModel: (id: number) => api.delete(`/recognition/models/${id}`),
+  setMode: (mode: string) => api.put('/recognition/mode', { mode }),
   detect: (pageId: number, zone: { x: number; y: number; w: number; h: number }) =>
     api.post<{ elements: RecogElement[] }>(`/recognition/pages/${pageId}/detect`, { zone }, { timeout: 120000 }),
   createElement: (pageId: number, data: Partial<RecogElement>) =>

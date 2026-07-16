@@ -3,6 +3,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { RecognitionDocument } from './recognition-document.entity';
 import { RecognitionPage } from './recognition-page.entity';
 import { RecognitionElement } from './recognition-element.entity';
+import { RecognitionModelVersion } from './recognition-model.entity';
+import { RecognitionShadowRun } from './recognition-shadow.entity';
 import { RecognitionService } from './recognition.service';
 import { RecognitionController } from './recognition.controller';
 import { Sheet } from '../sheets/sheet.entity';
@@ -16,6 +18,8 @@ import { AppSetting } from '../admin/app-setting.entity';
       RecognitionDocument,
       RecognitionPage,
       RecognitionElement,
+      RecognitionModelVersion,
+      RecognitionShadowRun,
       Sheet,
       EquipmentRow,
       Folder,

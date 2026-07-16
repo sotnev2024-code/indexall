@@ -52,6 +52,11 @@ export class RecognitionElement {
   @Column({ default: false })
   in_sheet: boolean;
 
+  /** Разметка проверена экспертом (импорт из Label Studio Максима).
+   *  Такие рамки не понижаются автоматикой и приоритетны для датасета. */
+  @Column({ default: false })
+  verified: boolean;
+
   /** Пользовательский цвет рамки (пусто — цвет класса) */
   @Column({ default: '' })
   color: string;
