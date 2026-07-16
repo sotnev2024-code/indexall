@@ -67,7 +67,8 @@ export default function RecognitionPage() {
     }
     authApi.me()
       .then(({ data }) => {
-        if (data?.plan !== 'admin') {
+        // Обкатка: доступ только этому аккаунту (синхронно с бэком)
+        if ((data?.email || '').toLowerCase() !== 'sotnev2024@gmail.com') {
           router.replace('/projects');
           return;
         }

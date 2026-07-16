@@ -40,6 +40,9 @@ export default function Header({ breadcrumb = 'Проекты', projectCost, sho
   }
 
   const isAdmin = user?.plan === 'admin';
+  // Распознавание схем на обкатке — доступ только этому аккаунту
+  // (синхронно с RECOGNITION_ALLOWED_EMAILS на бэке).
+  const canRecognition = (user?.email || '').toLowerCase() === 'sotnev2024@gmail.com';
 
   return (
     <header className="app-header">
@@ -94,8 +97,8 @@ export default function Header({ breadcrumb = 'Проекты', projectCost, sho
         )}
         {projectCost && <span className="project-cost">{projectCost}</span>}
 
-        {/* Распознавание схем — пока только для админа (обкатка) */}
-        {isAdmin && (
+        {/* Распознавание схем — пока только для одного аккаунта (обкатка) */}
+        {canRecognition && (
           <button
             onClick={() => router.push('/recognition')}
             title="Распознавание схем — загрузите PDF, ИИ соберёт лист спецификации (видно только администратору)"
