@@ -23,6 +23,24 @@ import { Folder } from '../folders/folder.entity';
 const execFileAsync = promisify(execFile);
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || join(process.cwd(), 'uploads');
+
+/** multer/busboy декодирует имя загруженного файла как latin1 — кириллица
+ *  приходит «кракозябрами» (Ð¡Ð½Ð¸Ð¼Ð¾Ðº…). Возвращаем UTF-8. Декодируем
+ *  только строки, целиком состоящие из latin1-символов, чтобы не испортить
+ *  уже корректные имена. */
+function fixFileName(name: string): string {
+  if (!name) return name;
+  let hasHigh = false;
+  for (let i = 0; i < name.length; i++) {
+    const c = name.charCodeAt(i);
+    if (c > 0xff) return name; // уже нормальный юникод — не трогаем
+    if (c > 0x7f) hasHigh = true; // есть latin1-байты — похоже на кракозябры
+  }
+  if (!hasHigh) return name; // чистый ASCII
+  const decoded = Buffer.from(name, 'latin1').toString('utf8');
+  // если после декодирования появились символы-заменители — оставляем как было
+  return decoded.indexOf(String.fromCharCode(0xfffd)) >= 0 ? name : decoded;
+}
 /** Максимум страниц PDF на документ (защита диска и очереди рендера) */
 const MAX_PAGES = 60;
 /** dpi рендера страниц: баланс читаемости мелких надписей и размера файла */
@@ -85,7 +103,7 @@ export class RecognitionService {
 
     const doc = await this.docsRepo.save({
       owner_id: userId,
-      filename: file.originalname,
+      filename: fixFileName(file.originalname),
       source_file: file.filename,
       page_count: pageCount,
       status: 'rendering',
