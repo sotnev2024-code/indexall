@@ -79,7 +79,8 @@ type PickedProduct = { product_name: string; brand: string; article: string; etm
 
 export default function RecognitionPage() {
   const router = useRouter();
-  const [docs, setDocs] = useState<any[]>([]);
+  /* null — ещё грузится; [] — пусто */
+  const [docs, setDocs] = useState<any[] | null>(null);
   const [docsError, setDocsError] = useState(false);
   const [clsCfg, setClsCfg] = useState<RecogClassConfig>(DEFAULT_CFG);
   const [doc, setDoc] = useState<RecogDocument | null>(null);
@@ -111,8 +112,9 @@ export default function RecognitionPage() {
 
   const loadDocs = useCallback(() => {
     recognitionApi.list()
-      .then(({ data: d }) => { setDocs(d); setDocsError(false); })
-      .catch(() => {
+      .then(({ data: d }) => { setDocs(Array.isArray(d) ? d : []); setDocsError(false); })
+      .catch((e) => {
+        console.error('recognition: список документов не загрузился', e);
         setDocsError(true);
         toast.error('Не удалось загрузить список документов');
       });
@@ -555,16 +557,19 @@ export default function RecognitionPage() {
             <div className="recog-warn">Распознавание пока не настроено администратором — загрузка и разметка работают, автораспознавание будет недоступно.</div>
           )}
 
-          {(docs.length > 0 || docsError) && (
-            <div className="recog-doclist">
-              <div className="recog-doclist-title">Мои документы</div>
-              {docsError && (
-                <div className="recog-doclist-error">
-                  Список не загрузился.
-                  <button className="btn-outline" onClick={loadDocs}>Повторить</button>
-                </div>
-              )}
-              {docs.map((d) => (
+          <div className="recog-doclist">
+            <div className="recog-doclist-title">Мои документы</div>
+            {docsError && (
+              <div className="recog-doclist-error">
+                Список не загрузился (подробности в консоли браузера, F12).
+                <button className="btn-outline" onClick={loadDocs}>Повторить</button>
+              </div>
+            )}
+            {!docsError && docs === null && <div className="recog-doclist-note">Загрузка…</div>}
+            {!docsError && docs !== null && docs.length === 0 && (
+              <div className="recog-doclist-note">Документов пока нет — загрузите первый файл ниже.</div>
+            )}
+            {(docs || []).map((d) => (
                 <div key={d.id} className="recog-docitem" onClick={() => reloadDoc(d.id).then(() => { setPageId(null); setSelId(null); })}>
                   <span className="recog-docname">{d.filename}</span>
                   <span className="recog-docmeta">{d.page_count} стр. · {new Date(d.createdAt).toLocaleDateString('ru-RU')}</span>
@@ -574,13 +579,12 @@ export default function RecognitionPage() {
                       e.stopPropagation();
                       if (!confirm('Удалить документ со всей разметкой?')) return;
                       await recognitionApi.remove(d.id);
-                      setDocs((list) => list.filter((x) => x.id !== d.id));
+                      setDocs((list) => (list || []).filter((x) => x.id !== d.id));
                     }}
                   ><Icon.cross /></button>
                 </div>
               ))}
-            </div>
-          )}
+          </div>
 
           <div
             className="recog-drop"
@@ -1100,6 +1104,19 @@ function InspectorPanel({ el, cfg, editing, onEdit, onClose, onSave, onDelete, o
 }
 
 /* ── Пикер товара из каталога (пункт 9): поиск + категории с фильтрами ── */
+
+/** каталог отдаёт разные формы данных (tile_products / botDb / прайс-листы) —
+ *  рендерим только скаляры, чтобы неожиданный объект не уронил страницу */
+const sv = (v: any): string => (v == null || typeof v === 'object' ? '' : String(v));
+/** опции фильтра: поддерживаем {label, opts} и легаси-формы {label, options}/{name, values} */
+const filterOpts = (f: any): string[] => {
+  const raw = Array.isArray(f?.opts) ? f.opts
+    : Array.isArray(f?.options) ? f.options
+    : Array.isArray(f?.values) ? f.values : [];
+  return raw.map(sv).filter(Boolean);
+};
+const filterLabel = (f: any): string => sv(f?.label) || sv(f?.name);
+
 function CatalogPickerModal({ onClose, onPick }: {
   onClose: () => void;
   onPick: (p: PickedProduct) => void;
@@ -1173,11 +1190,11 @@ function CatalogPickerModal({ onClose, onPick }: {
 
   function pick(p: any) {
     onPick({
-      product_name: String(p?.name || '').slice(0, 300),
-      brand: String(p?.brand || p?.manufacturer || '').slice(0, 120),
-      article: String(p?.article || '').slice(0, 120),
-      etm_code: String(p?.etm_code || p?.etmCode || '').slice(0, 60),
-      price: p?.price != null && p?.price !== '' ? String(p.price) : '0',
+      product_name: sv(p?.name).slice(0, 300),
+      brand: (sv(p?.brand) || sv(p?.manufacturer) || sv(p?.manufacturer?.name)).slice(0, 120),
+      article: sv(p?.article).slice(0, 120),
+      etm_code: (sv(p?.etm_code) || sv(p?.etmCode)).slice(0, 60),
+      price: sv(p?.price) || '0',
     });
   }
 
@@ -1199,28 +1216,33 @@ function CatalogPickerModal({ onClose, onPick }: {
         <div className="recog-picker-body">
           <aside className="recog-picker-side">
             <div className="recog-picker-side-t">Категории</div>
-            {tiles.map((t) => (
-              <button key={t.slug || t.id}
+            {tiles.filter((t) => t?.slug).map((t) => (
+              <button key={t.slug}
                 className={`recog-picker-cat ${slug === t.slug ? 'on' : ''}`}
                 onClick={() => openCategory(t.slug)}>
-                {t.name}
+                {sv(t.name) || t.slug}
               </button>
             ))}
-            {slug && filters.map((f) => (
-              <div key={f.label} className="recog-picker-filter">
-                <div className="recog-picker-filter-t">{f.label}</div>
-                <div className="recog-picker-opts">
-                  {f.opts.slice(0, 40).map((o) => (
-                    <label key={o} className="recog-picker-opt">
-                      <input type="checkbox"
-                        checked={(sel[f.label] || []).includes(o)}
-                        onChange={() => toggleOpt(f.label, o)} />
-                      <span>{o}</span>
-                    </label>
-                  ))}
+            {slug && filters.map((f, fi) => {
+              const label = filterLabel(f);
+              const opts = filterOpts(f);
+              if (!label || !opts.length) return null;
+              return (
+                <div key={`${label}-${fi}`} className="recog-picker-filter">
+                  <div className="recog-picker-filter-t">{label}</div>
+                  <div className="recog-picker-opts">
+                    {opts.slice(0, 40).map((o) => (
+                      <label key={o} className="recog-picker-opt">
+                        <input type="checkbox"
+                          checked={(sel[label] || []).includes(o)}
+                          onChange={() => toggleOpt(label, o)} />
+                        <span>{o}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </aside>
 
           <div className="recog-picker-main">
@@ -1246,11 +1268,11 @@ function CatalogPickerModal({ onClose, onPick }: {
                   </thead>
                   <tbody>
                     {items.slice(0, 200).map((p, i) => (
-                      <tr key={p.id ?? `${p.article}-${i}`}>
-                        <td className="col-name">{p.name}</td>
-                        <td>{p.brand || p.manufacturer || '—'}</td>
-                        <td>{p.article || '—'}</td>
-                        <td>{p.price != null && p.price !== '' ? p.price : '—'}</td>
+                      <tr key={`${sv(p?.id) || sv(p?.article)}-${i}`}>
+                        <td className="col-name">{sv(p?.name) || '—'}</td>
+                        <td>{sv(p?.brand) || sv(p?.manufacturer) || sv(p?.manufacturer?.name) || '—'}</td>
+                        <td>{sv(p?.article) || '—'}</td>
+                        <td>{sv(p?.price) || '—'}</td>
                         <td>
                           <button className="btn-primary recog-picker-pick" onClick={() => pick(p)}>Выбрать</button>
                         </td>
