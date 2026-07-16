@@ -1,0 +1,49 @@
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  ManyToOne,
+  JoinColumn,
+  OneToMany,
+} from 'typeorm';
+import { RecognitionDocument } from './recognition-document.entity';
+import { RecognitionElement } from './recognition-element.entity';
+
+/** Одна страница документа (одна схема). Картинка лежит в uploads. */
+@Entity('recognition_pages')
+export class RecognitionPage {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  document_id: number;
+
+  @ManyToOne(() => RecognitionDocument, (d) => d.pages, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'document_id' })
+  document: RecognitionDocument;
+
+  /** Номер страницы в исходном PDF, с 1 */
+  @Column()
+  page_index: number;
+
+  /** Имя JPEG-файла в uploads ('' — ещё рендерится) */
+  @Column({ default: '' })
+  image_file: string;
+
+  @Column({ default: 0 })
+  width: number;
+
+  @Column({ default: 0 })
+  height: number;
+
+  /** «Удалённая» пользователем страница: скрыта из интерфейса, PDF не трогаем */
+  @Column({ default: false })
+  hidden: boolean;
+
+  /** Пользователь пометил страницу как полностью проверенную */
+  @Column({ default: false })
+  confirmed: boolean;
+
+  @OneToMany(() => RecognitionElement, (e) => e.page)
+  elements: RecognitionElement[];
+}

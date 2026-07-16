@@ -19,6 +19,7 @@ const ONBOARDING_SECTIONS: { key: string; label: string }[] = [
   { key: 'templates', label: 'Шаблоны' },
   { key: 'projects', label: 'Проекты' },
   { key: 'catalog', label: 'Каталог' },
+  { key: 'recognition', label: 'Распознавание схем' },
 ];
 
 function getBackendOrigin(): string {

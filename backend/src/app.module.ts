@@ -16,6 +16,7 @@ import { MailModule } from './mail/mail.module';
 import { ExportModule } from './export/export.module';
 import { PaymentsModule } from './payments/payments.module';
 import { FoldersModule } from './folders/folders.module';
+import { RecognitionModule } from './recognition/recognition.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { FoldersModule } from './folders/folders.module';
     ExportModule,
     PaymentsModule,
     FoldersModule,
+    RecognitionModule,
   ],
 })
 export class AppModule {}

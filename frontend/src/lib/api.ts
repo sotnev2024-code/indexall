@@ -310,3 +310,59 @@ export const paymentsApi = {
   adminTestPayment: (returnUrl?: string) =>
     api.post('/payments/admin/test', returnUrl ? { returnUrl } : {}),
 };
+
+// ── Recognition (распознавание схем) ──────────────────────────
+export interface RecogElement {
+  id: number;
+  page_id: number;
+  klass: string;
+  designation: string;
+  fields: Record<string, string>;
+  bbox: { x: number; y: number; w: number; h: number };
+  confidence: number;
+  status: 'auto' | 'confirmed' | 'corrected';
+  color: string;
+}
+export interface RecogPage {
+  id: number;
+  page_index: number;
+  image_url: string | null;
+  width: number;
+  height: number;
+  hidden: boolean;
+  confirmed: boolean;
+}
+export interface RecogDocument {
+  id: number;
+  filename: string;
+  page_count: number;
+  status: 'rendering' | 'ready' | 'error';
+  error_message: string;
+  createdAt: string;
+  pages: RecogPage[];
+  elements: RecogElement[];
+}
+export const recognitionApi = {
+  status: () => api.get<{ configured: boolean }>('/recognition/status'),
+  upload: (file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return api.post<RecogDocument>('/recognition/documents', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  list: () => api.get('/recognition/documents'),
+  getOne: (id: number) => api.get<RecogDocument>(`/recognition/documents/${id}`),
+  remove: (id: number) => api.delete(`/recognition/documents/${id}`),
+  updatePage: (id: number, patch: { hidden?: boolean; confirmed?: boolean }) =>
+    api.patch(`/recognition/pages/${id}`, patch),
+  detect: (pageId: number, zone: { x: number; y: number; w: number; h: number }) =>
+    api.post<{ elements: RecogElement[] }>(`/recognition/pages/${pageId}/detect`, { zone }, { timeout: 120000 }),
+  createElement: (pageId: number, data: Partial<RecogElement>) =>
+    api.post<RecogElement>(`/recognition/pages/${pageId}/elements`, data),
+  updateElement: (id: number, patch: Partial<RecogElement>) =>
+    api.patch<RecogElement>(`/recognition/elements/${id}`, patch),
+  removeElement: (id: number) => api.delete(`/recognition/elements/${id}`),
+  createSheet: (docId: number) =>
+    api.post<{ sheetId: number; folderId: number; rowCount: number }>(`/recognition/documents/${docId}/create-sheet`),
+};
