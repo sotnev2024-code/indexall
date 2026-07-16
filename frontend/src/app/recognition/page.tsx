@@ -112,6 +112,7 @@ export default function RecognitionPage() {
   }, [detecting]);
 
   const visiblePages = useMemo(() => (doc?.pages || []).filter((p) => !p.hidden), [doc]);
+  const hiddenPages = useMemo(() => (doc?.pages || []).filter((p) => p.hidden), [doc]);
   const page = useMemo(() => visiblePages.find((p) => p.id === pageId) || visiblePages[0] || null, [visiblePages, pageId]);
   const pageElements = useMemo(() => (doc?.elements || []).filter((e) => page && e.page_id === page.id), [doc, page]);
   const selEl = useMemo(() => pageElements.find((e) => e.id === selId) || null, [pageElements, selId]);
@@ -294,11 +295,32 @@ export default function RecognitionPage() {
   }
 
   async function hidePage(p: RecogPage) {
-    if (!confirm(`Убрать страницу ${p.page_index} из документа? Вернуть её будет нельзя.`)) return;
+    if (!confirm(`Скрыть страницу ${p.page_index}? Вернуть можно кнопкой «Показать скрытые» внизу списка.`)) return;
     await recognitionApi.updatePage(p.id, { hidden: true });
     setDoc((d) => d ? { ...d, pages: d.pages.map((x) => (x.id === p.id ? { ...x, hidden: true } : x)) } : d);
     if (page?.id === p.id) setPageId(null);
   }
+
+  async function restoreHiddenPages() {
+    if (!doc) return;
+    const hidden = doc.pages.filter((p) => p.hidden);
+    for (const p of hidden) {
+      try { await recognitionApi.updatePage(p.id, { hidden: false }); } catch {}
+    }
+    setDoc((d) => d ? { ...d, pages: d.pages.map((x) => ({ ...x, hidden: false })) } : d);
+    toast.success(`Страниц возвращено: ${hidden.length}`);
+  }
+
+  /** зум кнопками — к центру видимой области */
+  const zoomBy = (k: number) => {
+    const vp = vpRef.current;
+    if (!vp) return;
+    const r = vp.getBoundingClientRect();
+    const v = viewRef.current;
+    const z = Math.max(0.05, Math.min(4, v.z * k));
+    const mx = r.width / 2, my = r.height / 2;
+    setView({ x: mx - ((mx - v.x) / v.z) * z, y: my - ((my - v.y) / v.z) * z, z });
+  };
 
   async function togglePageConfirmed(p: RecogPage) {
     const { data } = await recognitionApi.updatePage(p.id, { confirmed: !p.confirmed });
@@ -421,6 +443,12 @@ export default function RecognitionPage() {
               <button className="btn-outline recog-back" onClick={() => { setDoc(null); setSelId(null); }}>← Документы</button>
               <div className="recog-doc-title" title={doc.filename}>{doc.filename}</div>
             </div>
+            <div className="recog-pages-title">Страницы ({visiblePages.length})</div>
+            {visiblePages.length === 0 && doc.status !== 'rendering' && (
+              <div className="recog-render-note">
+                {hiddenPages.length ? 'Все страницы скрыты' : 'Страниц нет'}
+              </div>
+            )}
             {visiblePages.map((p) => (
               <div key={p.id} className={`recog-pageitem ${page?.id === p.id ? 'on' : ''}`} onClick={() => { setPageId(p.id); setSelId(null); }}>
                 <div className="recog-pagethumb">
@@ -437,12 +465,18 @@ export default function RecognitionPage() {
                   <button title={p.confirmed ? 'Снять отметку' : 'Подтвердить страницу'}
                     className={p.confirmed ? 'ok' : ''}
                     onClick={(e) => { e.stopPropagation(); togglePageConfirmed(p); }}>✓</button>
-                  <button title="Убрать страницу (безвозвратно скрыть)"
+                  <button title="Скрыть страницу (лишний лист проекта)"
                     onClick={(e) => { e.stopPropagation(); hidePage(p); }}>×</button>
                 </div>
               </div>
             ))}
             {doc.status === 'rendering' && <div className="recog-render-note">Готовим страницы… {visiblePages.filter((p) => p.image_url).length}/{doc.page_count}</div>}
+            {hiddenPages.length > 0 && (
+              <button className="recog-hidden-note" onClick={restoreHiddenPages}
+                title="Скрытые страницы не участвуют в распознавании и листе">
+                Скрыто страниц: {hiddenPages.length} — показать
+              </button>
+            )}
           </aside>
 
           {/* центр: канвас */}
@@ -480,7 +514,6 @@ export default function RecognitionPage() {
                   : 'Колесо — масштаб · зажать и тянуть — перемещение'}
               </span>
               <span className="recog-toolspacer" />
-              <button className="btn-outline" onClick={() => fitPage()} disabled={!page}>Вписать</button>
             </div>
 
             <div
@@ -547,6 +580,14 @@ export default function RecognitionPage() {
               ) : (
                 <div className="recog-nopage">Нет видимых страниц</div>
               )}
+
+              {/* зум-виджет (как в референсе Контура) */}
+              <div className="recog-zoomctl" onPointerDown={(e) => e.stopPropagation()}>
+                <button onClick={() => zoomBy(0.8)} title="Отдалить" disabled={!page}>−</button>
+                <span className="recog-zoomval">{Math.round(view.z * 100)}%</span>
+                <button onClick={() => zoomBy(1.25)} title="Приблизить" disabled={!page}>+</button>
+                <button className="recog-zoomfit" onClick={() => fitPage()} title="Вписать страницу" disabled={!page}>⛶</button>
+              </div>
 
               {/* прогресс распознавания */}
               {detecting && (

@@ -1578,6 +1578,18 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-pageacts button:hover { border-color: var(--text); color: var(--text); }
 .recog-pageacts button.ok { background: #e6f4ea; border-color: #1e7e34; color: #1e7e34; }
 .recog-render-note { font-size: 12px; color: var(--muted); text-align: center; padding: 8px 0; }
+.recog-pages-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; padding: 2px 2px 0; }
+.recog-hidden-note { border: 1px dashed var(--border); background: none; border-radius: 8px; padding: 8px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.recog-hidden-note:hover { border-color: var(--text); color: var(--text); }
+
+/* зум-виджет на канвасе */
+.recog-zoomctl { position: absolute; top: 10px; right: 10px; z-index: 15; display: flex; align-items: center;
+  background: var(--white); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,.08); overflow: hidden; }
+.recog-zoomctl button { width: 34px; height: 32px; border: none; background: none; font-size: 16px; cursor: pointer; color: var(--text); line-height: 1; }
+.recog-zoomctl button:hover { background: var(--selected); }
+.recog-zoomctl button:disabled { opacity: .4; cursor: default; }
+.recog-zoomval { font-size: 12.5px; font-weight: 600; min-width: 48px; text-align: center; color: var(--text); font-variant-numeric: tabular-nums; }
+.recog-zoomfit { border-left: 1px solid var(--border) !important; font-size: 13px !important; }
 
 /* центр: канвас */
 .recog-canvas-wrap { display: flex; flex-direction: column; min-width: 0; min-height: 320px; }
