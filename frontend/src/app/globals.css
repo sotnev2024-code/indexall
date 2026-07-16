@@ -1588,8 +1588,11 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-zoomctl button { width: 34px; height: 32px; border: none; background: none; font-size: 16px; cursor: pointer; color: var(--text); line-height: 1; }
 .recog-zoomctl button:hover { background: var(--selected); }
 .recog-zoomctl button:disabled { opacity: .4; cursor: default; }
-.recog-zoomval { font-size: 12.5px; font-weight: 600; min-width: 48px; text-align: center; color: var(--text); font-variant-numeric: tabular-nums; }
-.recog-zoomfit { border-left: 1px solid var(--border) !important; font-size: 13px !important; }
+.recog-zoomctl .recog-zoomval { font-size: 12.5px; font-weight: 600; min-width: 52px; width: auto; text-align: center; color: var(--text); font-variant-numeric: tabular-nums; padding: 0 6px; }
+.recog-zoomfit { border-left: 1px solid var(--border) !important; display: flex; align-items: center; justify-content: center; }
+
+/* полноэкранный режим рабочей области */
+.recog-work:fullscreen { background: var(--bg); }
 
 /* центр: канвас */
 .recog-canvas-wrap { display: flex; flex-direction: column; min-width: 0; min-height: 320px; }
@@ -1723,9 +1726,62 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-shadow-row b { color: var(--text); }
 .recog-shadow-row .err { color: #b45309; }
 
+/* добавление листа и переименование */
+.recog-addpage { display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px dashed var(--border);
+  background: var(--white); border-radius: 8px; padding: 9px; font-size: 12.5px; font-weight: 600; cursor: pointer; color: var(--text); }
+.recog-addpage:hover { border-color: var(--yellow); background: var(--selected); }
+.recog-addpage:disabled { opacity: .5; cursor: default; }
+.recog-doclist-error { display: flex; align-items: center; gap: 10px; padding: 10px 16px; font-size: 12.5px; color: #b45309; }
+
+/* свотчи цветов (15 популярных + свой) */
+.recog-swatches { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.recog-swatch { width: 22px; height: 22px; border-radius: 5px; border: 1px solid rgba(0,0,0,.15); cursor: pointer; padding: 0; }
+.recog-swatch.on { outline: 2px solid var(--black); outline-offset: 1px; }
+.recog-swatch-add { background: var(--white); display: flex; align-items: center; justify-content: center; color: var(--muted); border: 1px dashed var(--border); }
+.recog-swatch-add:hover { color: var(--text); border-color: var(--text); }
+.recog-swatch-reset { padding: 4px 8px !important; font-size: 11.5px !important; }
+
+/* товар из базы в инспекторе */
+.recog-product { border: 1px solid var(--border); border-left: 3px solid var(--yellow); border-radius: 8px; padding: 9px 11px; margin: 10px 0; background: #fffdf2; }
+.recog-product-t { font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; }
+.recog-product-name { font-size: 12.5px; font-weight: 600; line-height: 1.35; }
+.recog-product-meta { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+.recog-product-acts { display: flex; gap: 6px; margin-top: 8px; }
+.recog-product-acts .btn-outline { padding: 4px 9px; font-size: 11.5px; }
+.recog-frombase { width: 100%; margin-top: 10px; justify-content: center; }
+
 /* модалка листа */
 .recog-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: flex-end; justify-content: center; z-index: 300; }
 .recog-modal { background: var(--white); border-radius: 12px 12px 0 0; width: min(880px, 100%); max-height: 82vh; display: flex; flex-direction: column; box-shadow: 0 -6px 30px rgba(0,0,0,.25); }
+.recog-modal-big { width: min(1160px, 98vw); height: 90vh; max-height: 90vh; align-self: center; border-radius: 12px; }
+.recog-modal-x { background: none; border: none; color: var(--muted); cursor: pointer; padding: 4px; display: flex; }
+.recog-modal-x:hover { color: var(--text); }
+
+/* вкладки схем в модалке спецификации */
+.recog-spectabs { display: flex; gap: 4px; flex: 1; overflow-x: auto; margin: 0 12px; }
+.recog-spectab { border: 1px solid var(--border); background: var(--white); border-radius: 6px 6px 0 0; border-bottom: none;
+  padding: 7px 13px; font-size: 12.5px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.recog-spectab.on { background: var(--yellow); border-color: var(--yellow); font-weight: 700; color: var(--text); }
+.recog-spectab-dot { width: 7px; height: 7px; border-radius: 50%; background: #1e7e34; display: inline-block; }
+.recog-specwrap { padding: 0 6px; }
+
+/* пикер каталога */
+.recog-picker-search { flex: 1; margin: 0 12px; border: 1px solid var(--border); border-radius: 6px; padding: 8px 11px; font-size: 13px; }
+.recog-picker-body { flex: 1; display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 0; }
+.recog-picker-side { border-right: 1px solid var(--border); overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 4px; }
+.recog-picker-side-t { font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; padding: 2px; }
+.recog-picker-cat { text-align: left; border: 1px solid transparent; background: none; border-radius: 6px; padding: 7px 9px; font-size: 12.5px; cursor: pointer; color: var(--text); }
+.recog-picker-cat:hover { background: var(--selected); }
+.recog-picker-cat.on { background: var(--yellow); font-weight: 700; }
+.recog-picker-filter { border-top: 1px solid #eee; padding-top: 8px; margin-top: 6px; }
+.recog-picker-filter-t { font-size: 11px; font-weight: 700; margin-bottom: 4px; }
+.recog-picker-opts { display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; }
+.recog-picker-opt { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; padding: 2px 2px; }
+.recog-picker-opt input { accent-color: #1a1a1a; }
+.recog-picker-main { overflow: auto; min-height: 0; display: flex; flex-direction: column; }
+.recog-picker-tablewrap { padding: 0 6px; }
+.recog-picker-note { padding: 30px; color: var(--muted); font-size: 13px; text-align: center; }
+.recog-picker-pick { padding: 4px 10px; font-size: 11.5px; }
 .recog-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); }
 .recog-modal-head b { font-size: 15px; }
 .recog-modal-head button { background: none; border: none; font-size: 20px; color: var(--muted); cursor: pointer; }

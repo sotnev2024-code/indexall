@@ -4,7 +4,10 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import SectionOnboarding from '@/components/SectionOnboarding';
-import { authApi, recognitionApi, RecogClass, RecogClassConfig, RecogDocument, RecogElement, RecogPage } from '@/lib/api';
+import {
+  authApi, catalogApi, recognitionApi,
+  RecogClass, RecogClassConfig, RecogDocument, RecogElement, RecogPage,
+} from '@/lib/api';
 
 /* ── Классы оборудования ──
  * Таксономия динамическая: приходит с бэка из конфига Label Studio Максима
@@ -31,15 +34,53 @@ const FUN_PHRASES = [
   'Ща-ща…',
 ];
 
+/* 15 популярных цветов рамок (пункт 7) */
+const SWATCHES = [
+  '#E74C3C', '#D35400', '#F39C12', '#F1C40F', '#2ECC71',
+  '#16A085', '#1ABC9C', '#3498DB', '#2E86C1', '#5B6EE1',
+  '#9B59B6', '#E84393', '#BE185D', '#8D6E63', '#7F8C8D',
+];
+
+/* Мелкие SVG-иконки в стиле проекта (без эмодзи) */
+const Icon = {
+  check: () => (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+      <polyline points="20 6 9 17 4 12" /></svg>),
+  cross: () => (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>),
+  pencil: () => (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>),
+  plus: () => (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+      <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>),
+  back: () => (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+      <polyline points="15 18 9 12 15 6" /></svg>),
+  expand: () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" /></svg>),
+  compress: () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" /></svg>),
+  up: () => (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+      <polyline points="18 15 12 9 6 15" /></svg>),
+};
+
 const API_ORIGIN = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api').replace(/\/api\/?$/, '');
 const imgUrl = (p: RecogPage) => (p.image_url ? `${API_ORIGIN}${p.image_url}` : '');
+const pageTitle = (p: RecogPage) => p.title || `Схема ${p.page_index}`;
 
 type Zone = { x: number; y: number; w: number; h: number };
 type Mode = 'pan' | 'zone' | 'draw';
+type PickedProduct = { product_name: string; brand: string; article: string; etm_code: string; price: string };
 
 export default function RecognitionPage() {
   const router = useRouter();
   const [docs, setDocs] = useState<any[]>([]);
+  const [docsError, setDocsError] = useState(false);
   const [clsCfg, setClsCfg] = useState<RecogClassConfig>(DEFAULT_CFG);
   const [doc, setDoc] = useState<RecogDocument | null>(null);
   const [pageId, setPageId] = useState<number | null>(null);
@@ -49,8 +90,12 @@ export default function RecognitionPage() {
   const [phrase, setPhrase] = useState(FUN_PHRASES[0]);
   const [uploading, setUploading] = useState(false);
   const [specOpen, setSpecOpen] = useState(false);
+  const [specTab, setSpecTab] = useState<number | null>(null);
   const [creatingSheet, setCreatingSheet] = useState(false);
   const [configured, setConfigured] = useState(true);
+  const [pickerElId, setPickerElId] = useState<number | null>(null);
+  const [isFs, setIsFs] = useState(false);
+  const workRef = useRef<HTMLDivElement>(null);
 
   /* пан/зум */
   const [view, setView] = useState({ x: 40, y: 40, z: 0.5 });
@@ -63,6 +108,15 @@ export default function RecognitionPage() {
   /* подтверждённая рамка «запекается»; редактируется только этот id */
   const [editingId, setEditingId] = useState<number | null>(null);
   const lastDownRef = useRef({ t: 0, x: 0, y: 0 });
+
+  const loadDocs = useCallback(() => {
+    recognitionApi.list()
+      .then(({ data: d }) => { setDocs(d); setDocsError(false); })
+      .catch(() => {
+        setDocsError(true);
+        toast.error('Не удалось загрузить список документов');
+      });
+  }, []);
 
   /* ── загрузка данных (раздел пока только для администратора) ── */
   useEffect(() => {
@@ -77,12 +131,12 @@ export default function RecognitionPage() {
           router.replace('/projects');
           return;
         }
-        recognitionApi.list().then(({ data: d }) => setDocs(d)).catch(() => {});
+        loadDocs();
         recognitionApi.status().then(({ data: d }) => setConfigured(d.configured)).catch(() => {});
         recognitionApi.getClasses().then(({ data: d }) => { if (d?.classes?.length) setClsCfg(d); }).catch(() => {});
       })
       .catch(() => router.replace('/projects'));
-  }, [router]);
+  }, [router, loadDocs]);
 
   /* динамическая таксономия: код класса → карточка */
   const classByCode = useMemo(
@@ -137,6 +191,18 @@ export default function RecognitionPage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  /* полноэкранный режим рабочей области (пункт 8) */
+  useEffect(() => {
+    const onFs = () => setIsFs(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onFs);
+    return () => document.removeEventListener('fullscreenchange', onFs);
+  }, []);
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else workRef.current?.requestFullscreen?.().catch(() => toast.error('Полноэкранный режим недоступен в этом браузере'));
+  };
+
   const page = useMemo(() => visiblePages.find((p) => p.id === pageId) || visiblePages[0] || null, [visiblePages, pageId]);
   const pageElements = useMemo(() => (doc?.elements || []).filter((e) => page && e.page_id === page.id), [doc, page]);
   const selEl = useMemo(() => pageElements.find((e) => e.id === selId) || null, [pageElements, selId]);
@@ -151,7 +217,7 @@ export default function RecognitionPage() {
     setView({ x: (r.width - pg.width * z) / 2, y: (r.height - pg.height * z) / 2, z });
   }, [page]);
 
-  useEffect(() => { fitPage(); /* eslint-disable-next-line */ }, [page?.id, page?.width]);
+  useEffect(() => { fitPage(); /* eslint-disable-next-line */ }, [page?.id, page?.width, isFs]);
 
   /* ── загрузка файла ── */
   const uploadFile = useCallback(async (file: File) => {
@@ -162,23 +228,41 @@ export default function RecognitionPage() {
       setDoc(data);
       setPageId(null);
       setSelId(null);
-      recognitionApi.list().then(({ data: d }) => setDocs(d)).catch(() => {});
+      loadDocs();
     } catch (e: any) {
       toast.error(e?.response?.data?.message || 'Не удалось загрузить файл');
     } finally {
       setUploading(false);
     }
-  }, [uploading]);
+  }, [uploading, loadDocs]);
 
-  /* Ctrl+V вставка картинки */
+  /* дозагрузка листов в открытый документ (пункт 1) */
+  const addPagesFile = useCallback(async (file: File) => {
+    if (!doc || uploading) return;
+    setUploading(true);
+    try {
+      const { data } = await recognitionApi.addPages(doc.id, file);
+      setDoc(data);
+      toast.success('Листы добавляются — рендер идёт в фоне');
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Не удалось добавить листы');
+    } finally {
+      setUploading(false);
+    }
+  }, [doc, uploading]);
+
+  /* Ctrl+V вставка картинки: на стартовом экране — новый документ,
+     внутри документа — добавление листа */
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       const f = Array.from(e.clipboardData?.files || [])[0];
-      if (f && /^(image\/|application\/pdf)/.test(f.type)) uploadFile(f);
+      if (!f || !/^(image\/|application\/pdf)/.test(f.type)) return;
+      if (doc) addPagesFile(f);
+      else uploadFile(f);
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
-  }, [uploadFile]);
+  }, [uploadFile, addPagesFile, doc]);
 
   /* ── пан/зум/зона ── */
   const toPagePoint = (clientX: number, clientY: number) => {
@@ -274,6 +358,9 @@ export default function RecognitionPage() {
   const patchElementLocal = (id: number, patch: Partial<RecogElement>) => {
     setDoc((d) => d ? { ...d, elements: d.elements.map((e) => (e.id === id ? { ...e, ...patch } : e)) } : d);
   };
+  const patchPageLocal = (id: number, patch: Partial<RecogPage>) => {
+    setDoc((d) => d ? { ...d, pages: d.pages.map((p) => (p.id === id ? { ...p, ...patch } : p)) } : d);
+  };
 
   /* ── действия ── */
   async function runDetect(zone: Zone) {
@@ -282,7 +369,7 @@ export default function RecognitionPage() {
     try {
       const { data } = await recognitionApi.detect(page.id, zone);
       setDoc((d) => d ? { ...d, elements: [...d.elements, ...data.elements] } : d);
-      if (data.elements.length === 0) toast('В выбранной зоне ничего не нашлось — попробуйте другую область', { icon: '🤔' });
+      if (data.elements.length === 0) toast('В выбранной зоне ничего не нашлось — попробуйте другую область');
       else toast.success(`Распознано элементов: ${data.elements.length}`);
     } catch (e: any) {
       toast.error(e?.response?.data?.message || 'Распознавание не удалось, попробуйте ещё раз');
@@ -300,22 +387,26 @@ export default function RecognitionPage() {
     } catch { toast.error('Не удалось добавить рамку'); }
   }
 
-  /** Лист уже связан с документом → после правок тихо пересобираем его. */
-  function silentSheetSync() {
-    if (!doc?.sheet_id) return;
-    recognitionApi.createSheet(doc.id).catch(() => { /* напр. не осталось подтверждённых */ });
+  /** Схема уже связана с листом → после правок тихо пересобираем его. */
+  function silentSheetSync(el?: RecogElement | null) {
+    const pg = el
+      ? (doc?.pages || []).find((p) => p.id === el.page_id)
+      : page;
+    if (!pg?.sheet_id) return;
+    recognitionApi.createSheetForPage(pg.id).catch(() => { /* напр. не осталось подтверждённых */ });
   }
 
   async function saveElement(el: RecogElement, patch: Partial<RecogElement>, status?: string) {
     try {
       const { data } = await recognitionApi.updateElement(el.id, { ...patch, ...(status ? { status } : {}) } as any);
       if (data) patchElementLocal(el.id, data as any);
+      const pg = (doc?.pages || []).find((p) => p.id === el.page_id);
       if (status === 'confirmed') {
-        toast.success(doc?.sheet_id ? 'Подтверждено — лист спецификации обновлён' : 'Подтверждено — попадёт в лист спецификации');
+        toast.success(pg?.sheet_id ? 'Подтверждено — лист спецификации обновлён' : 'Подтверждено — попадёт в лист спецификации');
       }
       if (status === 'confirmed' || status === 'corrected') {
         setEditingId(null); // рамка «запекается» обратно в схему
-        silentSheetSync();
+        silentSheetSync(el);
       }
     } catch { toast.error('Не удалось сохранить'); }
   }
@@ -326,14 +417,26 @@ export default function RecognitionPage() {
       setDoc((d) => d ? { ...d, elements: d.elements.filter((e) => e.id !== el.id) } : d);
       setSelId(null);
       setEditingId(null);
-      silentSheetSync();
+      silentSheetSync(el);
     } catch { toast.error('Не удалось удалить'); }
   }
 
+  /** товар каталога выбран в пикере (пункт 9) */
+  async function applyProduct(elId: number, p: PickedProduct) {
+    try {
+      const { data } = await recognitionApi.updateElement(elId, p as any);
+      if (data) patchElementLocal(elId, data as any);
+      setPickerElId(null);
+      toast.success('Товар привязан — данные подтянутся в лист спецификации');
+      const el = (doc?.elements || []).find((e) => e.id === elId);
+      if (el && el.status !== 'auto') silentSheetSync(el);
+    } catch { toast.error('Не удалось привязать товар'); }
+  }
+
   async function hidePage(p: RecogPage) {
-    if (!confirm(`Скрыть страницу ${p.page_index}? Вернуть можно кнопкой «Показать скрытые» внизу списка.`)) return;
+    if (!confirm(`Скрыть «${pageTitle(p)}»? Вернуть можно кнопкой «Показать скрытые» внизу списка.`)) return;
     await recognitionApi.updatePage(p.id, { hidden: true });
-    setDoc((d) => d ? { ...d, pages: d.pages.map((x) => (x.id === p.id ? { ...x, hidden: true } : x)) } : d);
+    patchPageLocal(p.id, { hidden: true });
     if (page?.id === p.id) setPageId(null);
   }
 
@@ -344,7 +447,18 @@ export default function RecognitionPage() {
       try { await recognitionApi.updatePage(p.id, { hidden: false }); } catch {}
     }
     setDoc((d) => d ? { ...d, pages: d.pages.map((x) => ({ ...x, hidden: false })) } : d);
-    toast.success(`Страниц возвращено: ${hidden.length}`);
+    toast.success(`Листов возвращено: ${hidden.length}`);
+  }
+
+  /** переименование схемы (пункт 4): лист спецификации переименуется на бэке */
+  async function renamePage(p: RecogPage) {
+    const name = prompt('Название схемы:', pageTitle(p));
+    if (name == null) return;
+    try {
+      const { data } = await recognitionApi.updatePage(p.id, { title: name.trim() });
+      patchPageLocal(p.id, data as any);
+      if (p.sheet_id) toast.success('Схема и её лист спецификации переименованы');
+    } catch { toast.error('Не удалось переименовать'); }
   }
 
   /** зум кнопками — к центру видимой области */
@@ -360,57 +474,67 @@ export default function RecognitionPage() {
 
   async function togglePageConfirmed(p: RecogPage) {
     const { data } = await recognitionApi.updatePage(p.id, { confirmed: !p.confirmed });
-    setDoc((d) => d ? { ...d, pages: d.pages.map((x) => (x.id === p.id ? { ...x, ...data } : x)) } : d);
+    patchPageLocal(p.id, data as any);
   }
 
-  /* ── лист спецификации ── */
-  const specRows = useMemo(() => {
-    if (!doc) return [];
-    const visibleIds = new Set(visiblePages.map((p) => p.id));
+  /* ── лист спецификации (по-схемно, пункты 2–3) ── */
+  const buildSpecRows = useCallback((pgId: number | null) => {
+    if (!doc || !pgId) return [];
     const els = doc.elements.filter((e) =>
-      visibleIds.has(e.page_id) && (e.status === 'confirmed' || e.status === 'corrected') &&
-      e.klass !== 'load' && e.klass !== 'other');
-    const map = new Map<string, { name: string; klass: string; qty: number; unit: string }>();
+      e.page_id === pgId && (e.status === 'confirmed' || e.status === 'corrected') &&
+      (e.product_name || (e.klass !== 'load' && e.klass !== 'other')));
+    const map = new Map<string, {
+      name: string; brand: string; article: string; price: string;
+      klass: string; qty: number; unit: string;
+    }>();
     for (const el of els) {
       const f = el.fields || {};
-      let name: string, unit = 'шт', add = 1;
-      if (el.klass === 'cable') {
+      const isCable = el.klass === 'cable';
+      const len = parseFloat(String(f['Длина, м'] || '').replace(',', '.')) || 0;
+      let key: string, name: string, brand = '', article = '', price = '0';
+      let unit = isCable ? 'м' : 'шт';
+      if (el.product_name) {
+        name = el.product_name; brand = el.brand || ''; article = el.article || '';
+        price = el.price || '0';
+        key = `t:${article || name}`;
+      } else if (isCable) {
         name = `Кабель ${f['Марка'] || ''} ${f['Жилы×сечение'] || ''}`.replace(/\s+/g, ' ').trim();
-        unit = 'м';
-        add = parseFloat(String(f['Длина, м'] || '').replace(',', '.')) || 0;
+        key = name;
       } else {
-        const t = f['Тип'] || '', p = f['Полюса'] || '', ch = f['Хар-ка'] || '', a = f['Номинал, А'] || '';
+        const t = f['Тип'] || '', pl = f['Полюса'] || '', ch = f['Хар-ка'] || '', a = f['Номинал, А'] || '';
         const special: Record<string, string> = {
           mcb: 'Автоматический выключатель', mccb: 'Автоматический выключатель',
           acb: 'Воздушный автоматический выключатель',
           rcbo: 'Дифавтомат', rccb: 'УЗО', rcd: 'УЗО',
         };
         const base = special[el.klass] || (className(el.klass).charAt(0).toUpperCase() + className(el.klass).slice(1));
-        name = `${base} ${t} ${p}${ch ? `, хар. ${ch}` : ''}${a ? `, ${a} А` : ''}`
+        name = `${base} ${t} ${pl}${ch ? `, хар. ${ch}` : ''}${a ? `, ${a} А` : ''}`
           .replace(/\s+/g, ' ').replace(/\s+,/g, ',').trim();
+        key = name;
       }
-      const cur = map.get(name) || { name, klass: el.klass, qty: 0, unit };
-      cur.qty += add;
-      map.set(name, cur);
+      const cur = map.get(key) || { name, brand, article, price, klass: el.klass, qty: 0, unit };
+      cur.qty += isCable ? len : 1;
+      map.set(key, cur);
     }
     return [...map.values()];
-  }, [doc, visiblePages, className]);
+  }, [doc, className]);
 
-  const confirmedCount = useMemo(() =>
-    (doc?.elements || []).filter((e) => e.status !== 'auto').length, [doc]);
+  const specTabPage = useMemo(
+    () => visiblePages.find((p) => p.id === specTab) || null,
+    [visiblePages, specTab],
+  );
+  const specRows = useMemo(() => buildSpecRows(specTabPage?.id || null), [buildSpecRows, specTabPage]);
+  const currentPageRows = useMemo(() => buildSpecRows(page?.id || null), [buildSpecRows, page]);
 
-  async function createSheet() {
-    if (!doc) return;
+  async function createSheet(pg: RecogPage | null) {
+    if (!pg) return;
     setCreatingSheet(true);
     try {
-      const { data } = await recognitionApi.createSheet(doc.id);
-      setDoc((d) => d ? { ...d, sheet_id: data.sheetId } : d);
-      if (data.updated) {
-        toast.success(`Лист обновлён (${data.rowCount} позиций)`);
-      } else {
-        toast.success(`Лист создан (${data.rowCount} позиций) — папка «Распознавание»`);
-        router.push(`/spec/${data.sheetId}`);
-      }
+      const { data } = await recognitionApi.createSheetForPage(pg.id);
+      patchPageLocal(pg.id, { sheet_id: data.sheetId });
+      toast.success(data.updated
+        ? `Лист «${pageTitle(pg)}» обновлён (${data.rowCount} позиций)`
+        : `Лист «${pageTitle(pg)}» создан (${data.rowCount} позиций) — папка «Распознавание»`);
     } catch (e: any) {
       toast.error(e?.response?.data?.message || 'Не удалось создать лист');
     } finally {
@@ -425,30 +549,21 @@ export default function RecognitionPage() {
       <SectionOnboarding section="recognition" />
 
       {!doc ? (
-        /* ── экран выбора/загрузки документа ── */
+        /* ── экран выбора/загрузки документа (пункт 6: документы первыми) ── */
         <div className="recog-home">
           {!configured && (
             <div className="recog-warn">Распознавание пока не настроено администратором — загрузка и разметка работают, автораспознавание будет недоступно.</div>
           )}
-          <div
-            className="recog-drop"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) uploadFile(f); }}
-            onClick={() => document.getElementById('recog-file-input')?.click()}
-          >
-            <input
-              id="recog-file-input" type="file" accept=".pdf,image/png,image/jpeg,image/webp" hidden
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadFile(f); (e.target as HTMLInputElement).value = ''; }}
-            />
-            <div className="recog-drop-icon">⇪</div>
-            <div className="recog-drop-title">{uploading ? 'Загружаем…' : 'Перетащите PDF или изображение схемы'}</div>
-            <div className="recog-drop-sub">или нажмите, чтобы выбрать файл · можно вставить через Ctrl+V · PDF до 200 МБ</div>
-            <button className="btn-primary" disabled={uploading}>Загрузить файл</button>
-          </div>
 
-          {docs.length > 0 && (
+          {(docs.length > 0 || docsError) && (
             <div className="recog-doclist">
               <div className="recog-doclist-title">Мои документы</div>
+              {docsError && (
+                <div className="recog-doclist-error">
+                  Список не загрузился.
+                  <button className="btn-outline" onClick={loadDocs}>Повторить</button>
+                </div>
+              )}
               {docs.map((d) => (
                 <div key={d.id} className="recog-docitem" onClick={() => reloadDoc(d.id).then(() => { setPageId(null); setSelId(null); })}>
                   <span className="recog-docname">{d.filename}</span>
@@ -461,58 +576,85 @@ export default function RecognitionPage() {
                       await recognitionApi.remove(d.id);
                       setDocs((list) => list.filter((x) => x.id !== d.id));
                     }}
-                  >×</button>
+                  ><Icon.cross /></button>
                 </div>
               ))}
             </div>
           )}
+
+          <div
+            className="recog-drop"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) uploadFile(f); }}
+            onClick={() => document.getElementById('recog-file-input')?.click()}
+          >
+            <input
+              id="recog-file-input" type="file" accept=".pdf,image/png,image/jpeg,image/webp" hidden
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadFile(f); (e.target as HTMLInputElement).value = ''; }}
+            />
+            <div className="recog-drop-title">{uploading ? 'Загружаем…' : 'Перетащите PDF или изображение схемы'}</div>
+            <div className="recog-drop-sub">или нажмите, чтобы выбрать файл · можно вставить через Ctrl+V · PDF до 200 МБ</div>
+            <button className="btn-primary" disabled={uploading}>Загрузить файл</button>
+          </div>
 
           <DatasetPanel cfg={clsCfg} onCfgSaved={setClsCfg} />
           <ModelPanel />
         </div>
       ) : (
         /* ── рабочее пространство документа ── */
-        <div className="recog-work">
-          {/* левая колонка: страницы */}
+        <div className="recog-work" ref={workRef}>
+          {/* левая колонка: схемы */}
           <aside className="recog-pages">
             <div className="recog-pages-head">
-              <button className="btn-outline recog-back" onClick={() => { setDoc(null); setSelId(null); }}>← Документы</button>
+              <button className="btn-outline recog-back" onClick={() => { setDoc(null); setSelId(null); }}>
+                <Icon.back /> Документы
+              </button>
               <div className="recog-doc-title" title={doc.filename}>{doc.filename}</div>
             </div>
-            <div className="recog-pages-title">Страницы ({visiblePages.length})</div>
+            <div className="recog-pages-title">Листы ({visiblePages.length})</div>
             {visiblePages.length === 0 && doc.status !== 'rendering' && (
               <div className="recog-render-note">
-                {hiddenPages.length ? 'Все страницы скрыты' : 'Страниц нет'}
+                {hiddenPages.length ? 'Все листы скрыты' : 'Листов нет'}
               </div>
             )}
             {visiblePages.map((p) => (
               <div key={p.id} className={`recog-pageitem ${page?.id === p.id ? 'on' : ''}`} onClick={() => { setPageId(p.id); setSelId(null); }}>
                 <div className="recog-pagethumb">
                   {p.image_url
-                    ? <img src={imgUrl(p)} alt={`Страница ${p.page_index}`} loading="lazy" />
-                    : <div className="recog-pagewait">⏳</div>}
+                    ? <img src={imgUrl(p)} alt={pageTitle(p)} loading="lazy" />
+                    : <div className="recog-pagewait">…</div>}
                 </div>
                 <div className="recog-pageinfo">
-                  <b>Стр. {p.page_index}</b>
+                  <b title={pageTitle(p)}>{pageTitle(p)}</b>
                   <span>{(doc.elements || []).filter((e) => e.page_id === p.id).length} рамок</span>
-                  {p.confirmed && <span className="recog-pageok">✓ проверена</span>}
+                  {p.sheet_id ? <span className="recog-pageok">лист связан</span>
+                    : p.confirmed ? <span className="recog-pageok">проверена</span> : null}
                 </div>
                 <div className="recog-pageacts">
-                  <button title={p.confirmed ? 'Снять отметку' : 'Подтвердить страницу'}
+                  <button title="Переименовать схему (лист спецификации переименуется тоже)"
+                    onClick={(e) => { e.stopPropagation(); renamePage(p); }}><Icon.pencil /></button>
+                  <button title={p.confirmed ? 'Снять отметку «проверена»' : 'Подтвердить лист (проверен целиком)'}
                     className={p.confirmed ? 'ok' : ''}
-                    onClick={(e) => { e.stopPropagation(); togglePageConfirmed(p); }}>✓</button>
-                  <button title="Скрыть страницу (лишний лист проекта)"
-                    onClick={(e) => { e.stopPropagation(); hidePage(p); }}>×</button>
+                    onClick={(e) => { e.stopPropagation(); togglePageConfirmed(p); }}><Icon.check /></button>
+                  <button title="Скрыть лист (лишний в проекте)"
+                    onClick={(e) => { e.stopPropagation(); hidePage(p); }}><Icon.cross /></button>
                 </div>
               </div>
             ))}
-            {doc.status === 'rendering' && <div className="recog-render-note">Готовим страницы… {visiblePages.filter((p) => p.image_url).length}/{doc.page_count}</div>}
+            {doc.status === 'rendering' && <div className="recog-render-note">Готовим листы… {visiblePages.filter((p) => p.image_url).length}/{doc.page_count}</div>}
             {hiddenPages.length > 0 && (
               <button className="recog-hidden-note" onClick={restoreHiddenPages}
-                title="Скрытые страницы не участвуют в распознавании и листе">
-                Скрыто страниц: {hiddenPages.length} — показать
+                title="Скрытые листы не участвуют в распознавании и спецификации">
+                Скрыто листов: {hiddenPages.length} — показать
               </button>
             )}
+            {/* пункт 1: добавить лист */}
+            <button className="recog-addpage" disabled={uploading}
+              onClick={() => document.getElementById('recog-addpage-input')?.click()}>
+              <Icon.plus /> Добавить лист
+            </button>
+            <input id="recog-addpage-input" type="file" accept=".pdf,image/png,image/jpeg,image/webp" hidden
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) addPagesFile(f); (e.target as HTMLInputElement).value = ''; }} />
           </aside>
 
           {/* центр: канвас */}
@@ -522,13 +664,13 @@ export default function RecognitionPage() {
                 disabled={!page?.image_url || detecting || !configured}
                 title={configured ? 'Выделите область схемы — ИИ найдёт в ней оборудование' : 'Распознавание не настроено (нет ключа API)'}
                 onClick={() => setMode(mode === 'zone' ? 'pan' : 'zone')}>
-                ⚡ Распознать зону
+                Распознать зону
               </button>
               <button className={mode === 'draw' ? 'btn-primary' : 'btn-outline'}
                 disabled={!page?.image_url}
                 title="Нарисовать рамку вручную"
                 onClick={() => setMode(mode === 'draw' ? 'pan' : 'draw')}>
-                ▭ Добавить рамку
+                Добавить рамку
               </button>
               {page && (
                 <select
@@ -538,7 +680,7 @@ export default function RecognitionPage() {
                   onChange={async (e) => {
                     const v = e.target.value;
                     const { data } = await recognitionApi.updatePage(page.id, { schema_type: v });
-                    setDoc((d) => d ? { ...d, pages: d.pages.map((x) => (x.id === page.id ? { ...x, ...data } : x)) } : d);
+                    patchPageLocal(page.id, data as any);
                   }}
                 >
                   {clsCfg.schemaTypes.map((t) => <option key={t.value} value={t.value}>{t.nameRu}</option>)}
@@ -564,7 +706,7 @@ export default function RecognitionPage() {
                 <div className="recog-world" style={{ transform: `translate(${view.x}px,${view.y}px) scale(${view.z})` }}>
                   {page.image_url
                     ? <img className="recog-pageimg" src={imgUrl(page)} width={page.width} height={page.height} alt="" draggable={false} />
-                    : <div className="recog-pageloading">Страница готовится…</div>}
+                    : <div className="recog-pageloading">Лист готовится…</div>}
                   {/* рамки */}
                   {page.width > 0 && pageElements.map((el) => {
                     const c = classColor(el);
@@ -594,7 +736,6 @@ export default function RecognitionPage() {
                       >
                         <span className="recog-el-chip" style={{ color: c, borderColor: c }}>
                           {el.klass} {Math.round((el.confidence || 0) * 100)}%
-                          {el.status === 'confirmed' ? ' ✓' : el.status === 'corrected' ? ' ✎' : ''}
                         </span>
                         {sel && !locked && ['nw','n','ne','e','se','s','sw','w'].map((h) => (
                           <span
@@ -624,7 +765,7 @@ export default function RecognitionPage() {
                   )}
                 </div>
               ) : (
-                <div className="recog-nopage">Нет видимых страниц</div>
+                <div className="recog-nopage">Нет видимых листов</div>
               )}
 
               {/* кнопка подтверждения выделенной зоны */}
@@ -640,18 +781,23 @@ export default function RecognitionPage() {
                   <button className="btn-primary" disabled={detecting || !configured}
                     title={configured ? 'Распознать оборудование в выделенной области' : 'Распознавание не настроено'}
                     onClick={() => { const z = pendingZone; setPendingZone(null); runDetect(z); }}>
-                    ⚡ Распознать
+                    Распознать
                   </button>
-                  <button className="btn-outline" onClick={() => setPendingZone(null)} title="Отменить выделение">✕</button>
+                  <button className="btn-outline" onClick={() => setPendingZone(null)} title="Отменить выделение"><Icon.cross /></button>
                 </div>
               )}
 
-              {/* зум-виджет (как в референсе Контура) */}
+              {/* зум-виджет */}
               <div className="recog-zoomctl" onPointerDown={(e) => e.stopPropagation()}>
                 <button onClick={() => zoomBy(0.8)} title="Отдалить" disabled={!page}>−</button>
-                <span className="recog-zoomval">{Math.round(view.z * 100)}%</span>
+                <button className="recog-zoomval" onClick={() => fitPage()} title="Вписать лист целиком" disabled={!page}>
+                  {Math.round(view.z * 100)}%
+                </button>
                 <button onClick={() => zoomBy(1.25)} title="Приблизить" disabled={!page}>+</button>
-                <button className="recog-zoomfit" onClick={() => fitPage()} title="Вписать страницу" disabled={!page}>⛶</button>
+                <button className="recog-zoomfit" onClick={toggleFullscreen}
+                  title={isFs ? 'Выйти из полноэкранного режима' : 'На весь экран (листы слева, инспектор справа)'}>
+                  {isFs ? <Icon.compress /> : <Icon.expand />}
+                </button>
               </div>
 
               {/* прогресс распознавания */}
@@ -665,13 +811,14 @@ export default function RecognitionPage() {
               )}
             </div>
 
-            {/* нижняя плашка листа спецификации */}
-            <div className="recog-specbar" onClick={() => setSpecOpen(true)} role="button" tabIndex={0}>
-              <span className="recog-specbar-chev">▲</span>
-              <span className="recog-specbar-t">Лист спецификации</span>
+            {/* нижняя плашка листа спецификации (по текущей схеме) */}
+            <div className="recog-specbar" role="button" tabIndex={0}
+              onClick={() => { setSpecTab(page?.id || null); setSpecOpen(true); }}>
+              <span className="recog-specbar-chev"><Icon.up /></span>
+              <span className="recog-specbar-t">Лист спецификации{page ? ` — ${pageTitle(page)}` : ''}</span>
               <span className="recog-specbar-m">
-                {specRows.length} позиций из подтверждённых рамок · подтверждено {confirmedCount} из {(doc.elements || []).length}
-                {doc.sheet_id ? ' · связан с листом, обновляется сам' : ''}
+                {currentPageRows.length} позиций
+                {page?.sheet_id ? ' · связан с листом, обновляется сам' : ' · лист ещё не создан'}
               </span>
               <span className="recog-specbar-hint">нажмите, чтобы открыть</span>
             </div>
@@ -683,7 +830,7 @@ export default function RecognitionPage() {
               <div className="recog-insp-empty">
                 <b>Инспектор элемента</b>
                 <p>Кликните рамку на схеме — здесь появятся класс и параметры.</p>
-                <p>«⚡ Распознать зону» — выделите область, ИИ разметит её автоматически.</p>
+                <p>«Распознать зону» — выделите область, ИИ разметит её автоматически.</p>
               </div>
             ) : (
               <InspectorPanel
@@ -695,63 +842,102 @@ export default function RecognitionPage() {
                 onClose={() => setSelId(null)}
                 onSave={(patch, status) => saveElement(selEl, patch, status)}
                 onDelete={() => deleteElement(selEl)}
+                onPickCatalog={() => setPickerElId(selEl.id)}
+                onClearProduct={() => applyProduct(selEl.id, { product_name: '', brand: '', article: '', etm_code: '', price: '' })}
               />
             )}
           </aside>
         </div>
       )}
 
-      {/* модалка листа спецификации */}
+      {/* модалка листа спецификации (пункты 2–3: большая, вкладки по схемам) */}
       {specOpen && doc && (
         <div className="recog-overlay" onClick={(e) => { if (e.target === e.currentTarget) setSpecOpen(false); }}>
-          <div className="recog-modal">
+          <div className="recog-modal recog-modal-big">
             <div className="recog-modal-head">
-              <b>Лист спецификации — {doc.filename}</b>
-              <button onClick={() => setSpecOpen(false)}>×</button>
+              <b>Лист спецификации</b>
+              <div className="recog-spectabs">
+                {visiblePages.map((p) => (
+                  <button key={p.id}
+                    className={`recog-spectab ${specTabPage?.id === p.id ? 'on' : ''}`}
+                    onClick={() => setSpecTab(p.id)}>
+                    {pageTitle(p)}
+                    {p.sheet_id ? <i className="recog-spectab-dot" title="Лист создан" /> : null}
+                  </button>
+                ))}
+              </div>
+              <button className="recog-modal-x" onClick={() => setSpecOpen(false)}><Icon.cross /></button>
             </div>
             {specRows.length === 0 ? (
               <div className="recog-modal-empty">
-                Пока пусто. Подтвердите рамки на схеме (кнопка «Подтвердить» в инспекторе) — подтверждённые элементы попадут сюда.
+                На схеме «{specTabPage ? pageTitle(specTabPage) : ''}» пока нет подтверждённых элементов.
+                Подтвердите рамки (кнопка «Подтвердить» в инспекторе) — они появятся здесь.
               </div>
             ) : (
-              <table className="recog-spectable">
-                <thead><tr><th>№</th><th>Наименование</th><th>Класс</th><th>Кол-во</th><th>Ед.</th></tr></thead>
-                <tbody>
-                  {specRows.map((r, i) => (
-                    <tr key={r.name}>
-                      <td>{i + 1}</td>
-                      <td>{r.name}</td>
-                      <td><span className="recog-klasstag" style={{ color: classByCode.get(r.klass)?.color || '#64748b' }}>{r.klass}</span></td>
-                      <td>{Math.round(r.qty * 100) / 100}</td>
-                      <td>{r.unit}</td>
+              <div className="spec-table-wrap recog-specwrap">
+                <table className="spec-table">
+                  <thead>
+                    <tr>
+                      <th className="col-num">№</th>
+                      <th className="col-name">Наименование</th>
+                      <th>Бренд</th>
+                      <th>Артикул</th>
+                      <th>Класс</th>
+                      <th>Кол-во</th>
+                      <th>Ед.</th>
+                      <th>Цена</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {specRows.map((r, i) => (
+                      <tr key={`${r.name}-${i}`}>
+                        <td className="col-num">{i + 1}</td>
+                        <td className="col-name">{r.name}</td>
+                        <td>{r.brand || '—'}</td>
+                        <td>{r.article || '—'}</td>
+                        <td><span className="recog-klasstag" style={{ color: classByCode.get(r.klass)?.color || '#64748b' }}>{r.klass}</span></td>
+                        <td>{Math.round(r.qty * 100) / 100}</td>
+                        <td>{r.unit}</td>
+                        <td>{r.price && r.price !== '0' ? r.price : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
             <div className="recog-modal-note">
-              Электроприёмники (класс load) в лист не переносятся. После создания листа цены подтянутся штатно — кнопкой «Цены и сроки».
+              Электроприёмники в лист не переносятся. Привяжите к рамке товар из базы («Добавить из базы» в инспекторе) —
+              в лист уйдут наименование, бренд и артикул, а цены ЭТМ подтянутся кнопкой «Цены и сроки».
             </div>
             <div className="recog-modal-foot">
               <button className="btn-outline" onClick={() => setSpecOpen(false)}>Закрыть</button>
-              {doc.sheet_id && (
-                <button className="btn-outline" onClick={() => router.push(`/spec/${doc.sheet_id}`)}>
+              {specTabPage?.sheet_id && (
+                <button className="btn-outline" onClick={() => router.push(`/spec/${specTabPage.sheet_id}`)}>
                   Открыть лист
                 </button>
               )}
-              <button className="btn-primary" disabled={!specRows.length || creatingSheet} onClick={createSheet}>
-                {creatingSheet ? 'Сохраняем…' : doc.sheet_id ? 'Обновить лист' : 'Создать лист в ИНДЕКСАЛЛ'}
+              <button className="btn-primary" disabled={!specRows.length || creatingSheet}
+                onClick={() => createSheet(specTabPage)}>
+                {creatingSheet ? 'Сохраняем…' : specTabPage?.sheet_id ? 'Обновить лист' : 'Создать лист в ИНДЕКСАЛЛ'}
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* пикер каталога (пункт 9) */}
+      {pickerElId != null && (
+        <CatalogPickerModal
+          onClose={() => setPickerElId(null)}
+          onPick={(p) => applyProduct(pickerElId, p)}
+        />
       )}
     </div>
   );
 }
 
 /* ── Инспектор ── */
-function InspectorPanel({ el, cfg, editing, onEdit, onClose, onSave, onDelete }: {
+function InspectorPanel({ el, cfg, editing, onEdit, onClose, onSave, onDelete, onPickCatalog, onClearProduct }: {
   el: RecogElement;
   cfg: RecogClassConfig;
   editing: boolean;
@@ -759,6 +945,8 @@ function InspectorPanel({ el, cfg, editing, onEdit, onClose, onSave, onDelete }:
   onClose: () => void;
   onSave: (patch: Partial<RecogElement>, status?: string) => void;
   onDelete: () => void;
+  onPickCatalog: () => void;
+  onClearProduct: () => void;
 }) {
   const [klass, setKlass] = useState(el.klass);
   const [designation, setDesignation] = useState(el.designation || '');
@@ -770,6 +958,23 @@ function InspectorPanel({ el, cfg, editing, onEdit, onClose, onSave, onDelete }:
   const collect = (): Partial<RecogElement> => ({ klass, designation, fields, color });
   const warn = el.confidence > 0 && el.confidence < 0.7 && el.status === 'auto';
 
+  const productBlock = el.product_name ? (
+    <div className="recog-product">
+      <div className="recog-product-t">Товар из базы</div>
+      <div className="recog-product-name">{el.product_name}</div>
+      <div className="recog-product-meta">
+        {[el.brand, el.article && `арт. ${el.article}`, el.price && el.price !== '0' && `${el.price} ₽`]
+          .filter(Boolean).join(' · ')}
+      </div>
+      {editing && (
+        <div className="recog-product-acts">
+          <button className="btn-outline" onClick={onPickCatalog}>Заменить</button>
+          <button className="btn-outline" onClick={onClearProduct}>Убрать</button>
+        </div>
+      )}
+    </div>
+  ) : null;
+
   /* Подтверждённая рамка «уложена в схему» — просмотр без правок,
      редактирование только после явной кнопки. */
   if (!editing) {
@@ -777,13 +982,14 @@ function InspectorPanel({ el, cfg, editing, onEdit, onClose, onSave, onDelete }:
       <div className="recog-insp">
         <div className="recog-insp-head">
           <b>{el.designation || byCode.get(el.klass)?.nameRu || 'Элемент'}</b>
-          <button onClick={onClose} title="Закрыть">×</button>
+          <button onClick={onClose} title="Закрыть"><Icon.cross /></button>
         </div>
         <div className="recog-insp-status">
           <span className={`recog-pill st-${el.status}`}>
             {el.status === 'confirmed' ? 'Подтверждён' : 'Исправлен'}
           </span>
         </div>
+        {productBlock}
         <div className="recog-insp-view">
           <div className="recog-insp-viewrow">
             <span>Класс</span><b>{el.klass} — {byCode.get(el.klass)?.nameRu || ''}</b>
@@ -796,7 +1002,7 @@ function InspectorPanel({ el, cfg, editing, onEdit, onClose, onSave, onDelete }:
           ))}
         </div>
         <div className="recog-insp-btns">
-          <button className="btn-primary" onClick={onEdit}>✎ Редактировать</button>
+          <button className="btn-primary" onClick={onEdit}>Редактировать</button>
         </div>
         <p className="recog-insp-hint">
           Рамка зафиксирована на схеме: перемещение и изменение размера отключены.
@@ -810,7 +1016,7 @@ function InspectorPanel({ el, cfg, editing, onEdit, onClose, onSave, onDelete }:
     <div className="recog-insp">
       <div className="recog-insp-head">
         <b>{designation || byCode.get(klass)?.nameRu || 'Элемент'}</b>
-        <button onClick={onClose} title="Закрыть">×</button>
+        <button onClick={onClose} title="Закрыть"><Icon.cross /></button>
       </div>
       <div className="recog-insp-status">
         <span className={`recog-pill st-${el.status}`}>
@@ -820,6 +1026,14 @@ function InspectorPanel({ el, cfg, editing, onEdit, onClose, onSave, onDelete }:
           <span className={`recog-conf ${warn ? 'warn' : ''}`}>уверенность {Math.round(el.confidence * 100)}%{warn ? ' — проверьте' : ''}</span>
         )}
       </div>
+
+      {productBlock}
+      {!el.product_name && (
+        <button className="btn-outline recog-frombase" onClick={onPickCatalog}
+          title="Выбрать оборудование из каталога — наименование, бренд и артикул подтянутся автоматически">
+          Добавить из базы
+        </button>
+      )}
 
       <label>Класс оборудования</label>
       <select value={klass} onChange={(e) => setKlass(e.target.value)}>
@@ -842,30 +1056,217 @@ function InspectorPanel({ el, cfg, editing, onEdit, onClose, onSave, onDelete }:
           <label>{k}</label>
           <div className="recog-fieldline">
             <input value={v} onChange={(e) => setFields((f) => ({ ...f, [k]: e.target.value }))} />
-            <button title="Убрать параметр" onClick={() => setFields((f) => { const n = { ...f }; delete n[k]; return n; })}>×</button>
+            <button title="Убрать параметр" onClick={() => setFields((f) => { const n = { ...f }; delete n[k]; return n; })}><Icon.cross /></button>
           </div>
         </div>
       ))}
       <div className="recog-addfield">
         <input placeholder="Новый параметр (напр. Номинал, А)" value={newKey} onChange={(e) => setNewKey(e.target.value)} />
         <button className="btn-outline" disabled={!newKey.trim()}
-          onClick={() => { setFields((f) => ({ ...f, [newKey.trim()]: '' })); setNewKey(''); }}>+</button>
+          onClick={() => { setFields((f) => ({ ...f, [newKey.trim()]: '' })); setNewKey(''); }}><Icon.plus /></button>
       </div>
 
+      {/* пункт 7: 15 популярных цветов + кнопка «добавить свой» */}
       <label>Цвет рамки</label>
-      <div className="recog-colorline">
-        <input type="color" value={color || byCode.get(klass)?.color || '#64748b'} onChange={(e) => setColor(e.target.value)} />
-        {color && <button className="btn-outline" onClick={() => setColor('')}>Цвет класса</button>}
+      <div className="recog-swatches">
+        {SWATCHES.map((c) => (
+          <button key={c}
+            className={`recog-swatch ${color === c ? 'on' : ''}`}
+            style={{ background: c }}
+            title={c}
+            onClick={() => setColor(c)}
+          />
+        ))}
+        <button className="recog-swatch recog-swatch-add" title="Выбрать свой цвет из палитры"
+          onClick={() => document.getElementById('recog-custom-color')?.click()}>
+          <Icon.plus />
+        </button>
+        <input id="recog-custom-color" type="color" hidden
+          value={color || byCode.get(klass)?.color || '#64748b'}
+          onChange={(e) => setColor(e.target.value)} />
+        {color && <button className="btn-outline recog-swatch-reset" onClick={() => setColor('')}>Цвет класса</button>}
       </div>
 
       <div className="recog-insp-btns">
-        <button className="btn-primary" onClick={() => onSave(collect(), 'confirmed')}>✓ Подтвердить</button>
+        <button className="btn-primary" onClick={() => onSave(collect(), 'confirmed')}>Подтвердить</button>
         <button className="btn-outline" onClick={() => onSave(collect(), 'corrected')}>Сохранить</button>
       </div>
       <button className="recog-insp-del" onClick={onDelete}>Удалить элемент</button>
       <p className="recog-insp-hint">
         Подтверждённые и исправленные рамки попадают в лист спецификации и копятся в датасет для дообучения модели.
       </p>
+    </div>
+  );
+}
+
+/* ── Пикер товара из каталога (пункт 9): поиск + категории с фильтрами ── */
+function CatalogPickerModal({ onClose, onPick }: {
+  onClose: () => void;
+  onPick: (p: PickedProduct) => void;
+}) {
+  const [q, setQ] = useState('');
+  const [tiles, setTiles] = useState<any[]>([]);
+  const [slug, setSlug] = useState<string>('');
+  const [filters, setFilters] = useState<{ label: string; opts: string[] }[]>([]);
+  const [sel, setSel] = useState<Record<string, string[]>>({});
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef<any>(null);
+
+  useEffect(() => {
+    catalogApi.getTiles()
+      .then(({ data }) => setTiles(Array.isArray(data) ? data : (data?.tiles || [])))
+      .catch(() => {});
+  }, []);
+
+  /* поиск по названию/артикулу */
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (q.trim().length < 2) { if (!slug) setItems([]); return; }
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const { data } = await catalogApi.search(q.trim());
+        setSlug('');
+        setItems(Array.isArray(data) ? data : (data?.items || []));
+      } catch { toast.error('Поиск не удался'); }
+      finally { setLoading(false); }
+    }, 350);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* выбор категории → фильтры + товары */
+  async function openCategory(s: string) {
+    setSlug(s);
+    setQ('');
+    setSel({});
+    setLoading(true);
+    try {
+      const [{ data: f }, { data: prods }] = await Promise.all([
+        catalogApi.getFilterOptions(s),
+        catalogApi.filterProducts(s),
+      ]);
+      setFilters(Array.isArray(f) ? f : []);
+      setItems(Array.isArray(prods) ? prods : []);
+    } catch { toast.error('Не удалось загрузить категорию'); }
+    finally { setLoading(false); }
+  }
+
+  async function applyFilters(next: Record<string, string[]>) {
+    setSel(next);
+    if (!slug) return;
+    setLoading(true);
+    try {
+      const brands = next['Производитель'] || [];
+      const { data } = await catalogApi.filterProducts(slug, brands.length ? brands : undefined, next);
+      setItems(Array.isArray(data) ? data : []);
+    } catch { toast.error('Не удалось применить фильтры'); }
+    finally { setLoading(false); }
+  }
+
+  function toggleOpt(label: string, opt: string) {
+    const cur = sel[label] || [];
+    const next = { ...sel, [label]: cur.includes(opt) ? cur.filter((o) => o !== opt) : [...cur, opt] };
+    if (!next[label].length) delete next[label];
+    applyFilters(next);
+  }
+
+  function pick(p: any) {
+    onPick({
+      product_name: String(p?.name || '').slice(0, 300),
+      brand: String(p?.brand || p?.manufacturer || '').slice(0, 120),
+      article: String(p?.article || '').slice(0, 120),
+      etm_code: String(p?.etm_code || p?.etmCode || '').slice(0, 60),
+      price: p?.price != null && p?.price !== '' ? String(p.price) : '0',
+    });
+  }
+
+  return (
+    <div className="recog-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="recog-modal recog-modal-big recog-picker">
+        <div className="recog-modal-head">
+          <b>Добавить из базы</b>
+          <input
+            className="recog-picker-search"
+            placeholder="Поиск по названию или артикулу (от 2 символов)…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            autoFocus
+          />
+          <button className="recog-modal-x" onClick={onClose}><Icon.cross /></button>
+        </div>
+
+        <div className="recog-picker-body">
+          <aside className="recog-picker-side">
+            <div className="recog-picker-side-t">Категории</div>
+            {tiles.map((t) => (
+              <button key={t.slug || t.id}
+                className={`recog-picker-cat ${slug === t.slug ? 'on' : ''}`}
+                onClick={() => openCategory(t.slug)}>
+                {t.name}
+              </button>
+            ))}
+            {slug && filters.map((f) => (
+              <div key={f.label} className="recog-picker-filter">
+                <div className="recog-picker-filter-t">{f.label}</div>
+                <div className="recog-picker-opts">
+                  {f.opts.slice(0, 40).map((o) => (
+                    <label key={o} className="recog-picker-opt">
+                      <input type="checkbox"
+                        checked={(sel[f.label] || []).includes(o)}
+                        onChange={() => toggleOpt(f.label, o)} />
+                      <span>{o}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </aside>
+
+          <div className="recog-picker-main">
+            {loading && <div className="recog-picker-note">Загрузка…</div>}
+            {!loading && items.length === 0 && (
+              <div className="recog-picker-note">
+                {q.trim().length >= 2 ? 'Ничего не нашлось — попробуйте другой запрос'
+                  : slug ? 'В категории пусто по выбранным фильтрам'
+                  : 'Введите запрос или выберите категорию слева'}
+              </div>
+            )}
+            {!loading && items.length > 0 && (
+              <div className="spec-table-wrap recog-picker-tablewrap">
+                <table className="spec-table">
+                  <thead>
+                    <tr>
+                      <th className="col-name">Наименование</th>
+                      <th>Бренд</th>
+                      <th>Артикул</th>
+                      <th>Цена</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.slice(0, 200).map((p, i) => (
+                      <tr key={p.id ?? `${p.article}-${i}`}>
+                        <td className="col-name">{p.name}</td>
+                        <td>{p.brand || p.manufacturer || '—'}</td>
+                        <td>{p.article || '—'}</td>
+                        <td>{p.price != null && p.price !== '' ? p.price : '—'}</td>
+                        <td>
+                          <button className="btn-primary recog-picker-pick" onClick={() => pick(p)}>Выбрать</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="recog-modal-note">
+          Выбранный товар привяжется к рамке: наименование, бренд, артикул и цена автоматически уйдут в лист спецификации.
+        </div>
+      </div>
     </div>
   );
 }
@@ -892,7 +1293,7 @@ function DatasetPanel({ cfg, onCfgSaved }: {
     try {
       const { data } = await recognitionApi.exportDataset(from || undefined, to || undefined);
       if (!data.tasks?.length) {
-        toast('Пока нечего выгружать — нет подтверждённых рамок за период', { icon: '🤷' });
+        toast('Пока нечего выгружать — нет подтверждённых рамок за период');
         return;
       }
       const blob = new Blob([JSON.stringify(data.tasks, null, 2)], { type: 'application/json' });
@@ -987,7 +1388,7 @@ function DatasetPanel({ cfg, onCfgSaved }: {
         <label>по <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
         <button className="btn-primary" onClick={downloadZip} disabled={exporting}
           title="Готовый датасет: картинки + YOLO-разметка + data.yaml + Label Studio JSON">
-          {exporting ? 'Выгружаем…' : '⬇ Скачать датасет (ZIP)'}
+          {exporting ? 'Выгружаем…' : 'Скачать датасет (ZIP)'}
         </button>
         <button className="btn-outline" onClick={download} disabled={exporting}
           title="Только разметка, картинки ссылками на сервер">
@@ -995,7 +1396,7 @@ function DatasetPanel({ cfg, onCfgSaved }: {
         </button>
         <button className="btn-outline" onClick={() => document.getElementById('recog-import-input')?.click()}
           title="JSON-экспорт из Label Studio: проверенная разметка станет эталоном (verified)">
-          ⬆ Импорт проверенной разметки
+          Импорт проверенной разметки
         </button>
         <input id="recog-import-input" type="file" accept=".json,application/json" hidden
           onChange={(e) => { const f = e.target.files?.[0]; if (f) importFile(f); (e.target as HTMLInputElement).value = ''; }} />
@@ -1130,7 +1531,7 @@ function ModelPanel() {
         />
         <button className="btn-primary" disabled={uploading}
           onClick={() => document.getElementById('recog-model-input')?.click()}>
-          {uploading ? 'Загружаем…' : '⬆ Загрузить модель (.onnx)'}
+          {uploading ? 'Загружаем…' : 'Загрузить модель (.onnx)'}
         </button>
         <input id="recog-model-input" type="file" accept=".onnx" hidden
           onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); (e.target as HTMLInputElement).value = ''; }} />
@@ -1142,7 +1543,7 @@ function ModelPanel() {
           {models.map((m) => (
             <div key={m.id} className={`recog-model-row ${m.active ? 'on' : ''}`}>
               <span className="recog-model-name">
-                {m.active ? '● ' : ''}{m.orig_name || m.filename}
+                {m.orig_name || m.filename}
                 {m.note && <small> — {m.note}</small>}
               </span>
               <span className="recog-model-date">{new Date(m.createdAt).toLocaleString('ru-RU')}</span>
@@ -1153,7 +1554,7 @@ function ModelPanel() {
                     <button className="btn-outline" disabled={busy} onClick={() => activate(m.id)}>
                       {hasActive ? 'Откатиться на эту' : 'Активировать'}
                     </button>
-                    <button className="recog-docdel" title="Удалить версию" onClick={() => removeVersion(m.id)}>×</button>
+                    <button className="recog-docdel" title="Удалить версию" onClick={() => removeVersion(m.id)}><Icon.cross /></button>
                   </>
                 )}
             </div>
@@ -1178,7 +1579,7 @@ function ModelPanel() {
       )}
 
       <p className="recog-dataset-note">
-        Обучение — у Максима (ultralytics): датасет из ZIP выше → `yolo train data=data.yaml` → `model.export(format="onnx")` →
+        Обучение — у Максима (ultralytics): датасет из ZIP выше → yolo train data=data.yaml → model.export(format=onnx) →
         загрузить файл сюда и активировать. Старые версии остаются для отката. Режимы кроме LLM доступны при активной модели.
       </p>
     </div>

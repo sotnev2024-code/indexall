@@ -109,7 +109,7 @@ export default function Header({ breadcrumb = 'Проекты', projectCost, sho
               cursor: 'pointer', whiteSpace: 'nowrap',
             }}
           >
-            ⚡ Схемы
+            Схемы
           </button>
         )}
 

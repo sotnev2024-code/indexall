@@ -177,27 +177,81 @@ export class RecognitionService {
 
     // Рендер в фоне: страница за страницей, документ доступен сразу,
     // фронт опрашивает готовность.
-    this.enqueueRender(doc, file.path, isPdf, pages.map((p) => p.id));
+    this.enqueueRender(doc, file.path, isPdf, pages.map((p, i) => ({ pageId: p.id, fileNo: i + 1 })));
 
     return this.getDocument(doc.id, userId);
   }
 
-  private enqueueRender(doc: RecognitionDocument, srcPath: string, isPdf: boolean, pageIds: number[]) {
+  /** Дозагрузка листов в существующий документ (кнопка «+ Добавить лист»). */
+  async addPagesToDocument(docId: number, userId: number, file: Express.Multer.File) {
+    const doc = await this.checkDocOwner(docId, userId);
+    const isPdf = /pdf$/i.test(file.mimetype) || /\.pdf$/i.test(file.originalname);
+    const isImage = /^image\/(png|jpe?g|webp)$/i.test(file.mimetype);
+    if (!isPdf && !isImage) {
+      try { fs.unlinkSync(file.path); } catch {}
+      throw new BadRequestException('Поддерживаются PDF, PNG и JPG');
+    }
+
+    let addCount = 1;
+    if (isPdf) {
+      try {
+        const { stdout } = await execFileAsync('pdfinfo', [file.path], { timeout: 30_000 });
+        const m = stdout.match(/^Pages:\s+(\d+)/m);
+        addCount = m ? parseInt(m[1], 10) : 1;
+      } catch {
+        try { fs.unlinkSync(file.path); } catch {}
+        throw new BadRequestException('Не удалось прочитать PDF (файл повреждён?)');
+      }
+    }
+    const existingCount = await this.pagesRepo.count({ where: { document_id: doc.id } });
+    if (existingCount + addCount > MAX_PAGES) {
+      try { fs.unlinkSync(file.path); } catch {}
+      throw new BadRequestException(`В документе уже ${existingCount} страниц — максимум ${MAX_PAGES}`);
+    }
+    const maxRow = await this.pagesRepo
+      .createQueryBuilder('p')
+      .select('COALESCE(MAX(p.page_index), 0)', 'max')
+      .where('p.document_id = :id', { id: doc.id })
+      .getRawOne();
+    const startIndex = Number(maxRow?.max || 0) + 1;
+
+    const pages = await this.pagesRepo.save(
+      Array.from({ length: addCount }, (_, i) => ({
+        document_id: doc.id,
+        page_index: startIndex + i,
+      })),
+    );
+    await this.docsRepo.update(doc.id, { page_count: existingCount + addCount, status: 'rendering' });
+    this.enqueueRender(doc, file.path, isPdf, pages.map((p, i) => ({ pageId: p.id, fileNo: i + 1 })));
+    return this.getDocument(doc.id, userId);
+  }
+
+  private enqueueRender(
+    doc: RecognitionDocument,
+    srcPath: string,
+    isPdf: boolean,
+    items: { pageId: number; fileNo: number }[],
+  ) {
     this.renderChain = this.renderChain
-      .then(() => this.renderDocument(doc, srcPath, isPdf, pageIds))
+      .then(() => this.renderPages(doc, srcPath, isPdf, items))
       .catch(async (e) => {
         this.logger.error(`Рендер документа ${doc.id} упал: ${e?.message || e}`);
         await this.docsRepo.update(doc.id, { status: 'error', error_message: 'Не удалось подготовить страницы' });
       });
   }
 
-  private async renderDocument(doc: RecognitionDocument, srcPath: string, isPdf: boolean, pageIds: number[]) {
+  private async renderPages(
+    doc: RecognitionDocument,
+    srcPath: string,
+    isPdf: boolean,
+    items: { pageId: number; fileNo: number }[],
+  ) {
     // sharp подключаем лениво: до пересборки Docker-образа модуль может
     // отсутствовать — тогда падаем с понятной ошибкой, не роняя приложение.
     const sharp = require('sharp');
-    for (let i = 0; i < pageIds.length; i++) {
-      const pageNo = i + 1;
-      const outName = `recog-${doc.id}-p${pageNo}.jpg`;
+    for (const item of items) {
+      // имя по id страницы — уникально и при дозагрузке листов
+      const outName = `recog-${doc.id}-pg${item.pageId}.jpg`;
       const outPath = join(UPLOAD_DIR, outName);
 
       if (isPdf) {
@@ -208,11 +262,11 @@ export class RecognitionService {
           await execFileAsync(
             'pdftoppm',
             ['-jpeg', '-jpegopt', 'quality=82', '-r', String(RENDER_DPI),
-             '-f', String(pageNo), '-l', String(pageNo), srcPath, join(tmpDir, 'p')],
+             '-f', String(item.fileNo), '-l', String(item.fileNo), srcPath, join(tmpDir, 'p')],
             { timeout: 120_000, maxBuffer: 16 * 1024 * 1024 },
           );
           const made = fs.readdirSync(tmpDir).find((f) => f.endsWith('.jpg'));
-          if (!made) throw new Error(`pdftoppm не создал страницу ${pageNo}`);
+          if (!made) throw new Error(`pdftoppm не создал страницу ${item.fileNo}`);
           fs.copyFileSync(join(tmpDir, made), outPath);
         } finally {
           try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
@@ -223,7 +277,7 @@ export class RecognitionService {
       }
 
       const meta = await sharp(outPath).metadata();
-      await this.pagesRepo.update(pageIds[i], {
+      await this.pagesRepo.update(item.pageId, {
         image_file: outName,
         width: meta.width || 0,
         height: meta.height || 0,
@@ -276,12 +330,13 @@ export class RecognitionService {
   async updatePage(
     pageId: number,
     userId: number,
-    patch: { hidden?: boolean; confirmed?: boolean; schema_type?: string },
+    patch: { hidden?: boolean; confirmed?: boolean; schema_type?: string; title?: string },
   ) {
     const page = await this.checkPageOwner(pageId, userId);
     const safe: any = {};
     if (typeof patch.hidden === 'boolean') safe.hidden = patch.hidden;
     if (typeof patch.confirmed === 'boolean') safe.confirmed = patch.confirmed;
+    if (patch.title != null) safe.title = String(patch.title).slice(0, 80).trim();
     if (patch.schema_type) {
       const cfg = await this.getClassConfig();
       if (cfg.schemaTypes.some((t) => t.value === patch.schema_type)) {
@@ -289,6 +344,11 @@ export class RecognitionService {
       }
     }
     await this.pagesRepo.update(page.id, safe);
+    // Переименовали схему — лист спецификации принимает то же название
+    if (safe.title !== undefined && page.sheet_id) {
+      const name = safe.title || `Схема ${page.page_index}`;
+      await this.sheetsRepo.update(page.sheet_id, { name });
+    }
     return this.pagesRepo.findOne({ where: { id: page.id } });
   }
 
@@ -637,6 +697,10 @@ export class RecognitionService {
     if (patch.bbox) safe.bbox = this.clampZone(patch.bbox);
     if (patch.color != null) safe.color = String(patch.color).slice(0, 20);
     if (patch.status && ['auto', 'confirmed', 'corrected'].includes(patch.status)) safe.status = patch.status;
+    // Товар каталога («Добавить из базы»): пустые строки очищают привязку
+    for (const k of ['product_name', 'brand', 'article', 'etm_code', 'price'] as const) {
+      if (patch[k] != null) safe[k] = String(patch[k]).slice(0, 300);
+    }
     await this.elementsRepo.update(el.id, safe);
     return this.elementsRepo.findOne({ where: { id: el.id } });
   }
@@ -649,47 +713,62 @@ export class RecognitionService {
 
   // ── Создание/синхронизация листа спецификации ─────────────────
 
-  /** Собирает лист ИНДЕКСАЛЛ из подтверждённых элементов документа.
-   *  Первый вызов создаёт лист (папка «Распознавание»), повторные —
-   *  обновляют его же: строки распознавания (помечены custom._recog)
-   *  пересобираются, строки, добавленные пользователем руками, не трогаем. */
-  async createSheetFromDocument(docId: number, userId: number) {
-    const doc = await this.checkDocOwner(docId, userId);
-    const pages = await this.pagesRepo.find({ where: { document_id: docId, hidden: false } });
-    if (!pages.length) throw new BadRequestException('В документе нет видимых страниц');
-    const allElements = await this.elementsRepo.find({ where: { page_id: In(pages.map((p) => p.id)) } });
+  /** Собирает лист ИНДЕКСАЛЛ из подтверждённых элементов ОДНОЙ схемы.
+   *  Первый вызов создаёт лист (папка «Распознавание») с названием схемы,
+   *  повторные — обновляют его же: строки распознавания (custom._recog)
+   *  пересобираются, строки, добавленные пользователем руками, не трогаем.
+   *  Элемент с привязанным товаром каталога даёт товарную строку
+   *  (name/brand/article/etm_code/price) — цены ЭТМ тянутся штатно. */
+  async createSheetFromPage(pageId: number, userId: number) {
+    const page = await this.checkPageOwner(pageId, userId);
+    const doc = await this.docsRepo.findOne({ where: { id: page.document_id } });
+    const allElements = await this.elementsRepo.find({ where: { page_id: page.id } });
     const usable = allElements.filter(
-      (e) => (e.status === 'confirmed' || e.status === 'corrected') && e.klass !== 'load' && e.klass !== 'other',
+      (e) => (e.status === 'confirmed' || e.status === 'corrected') &&
+        (e.product_name || (e.klass !== 'load' && e.klass !== 'other')),
     );
     if (!usable.length) {
-      throw new BadRequestException('Нет подтверждённых элементов — подтвердите рамки на схеме (кнопка «Подтвердить»)');
+      throw new BadRequestException('На этой схеме нет подтверждённых элементов — подтвердите рамки (кнопка «Подтвердить»)');
     }
 
     // Группировка одинаковых позиций (+ id рамок, из которых строка собрана)
     const cfg = await this.getClassConfig();
-    type Acc = { name: string; qty: number; unit: string; ids: number[] };
+    type Acc = {
+      name: string; brand: string; article: string; etm_code: string; price: string;
+      qty: number; unit: string; ids: number[];
+    };
     const acc = new Map<string, Acc>();
     for (const el of usable) {
       const f = el.fields || {};
-      if (el.klass === 'cable') {
+      const lenRaw = parseFloat(String(f['Длина, м'] || '').replace(',', '.'));
+      const isCable = el.klass === 'cable';
+      let key: string;
+      let base: Omit<Acc, 'qty' | 'ids'>;
+      if (el.product_name) {
+        key = `tovar:${el.article || el.product_name}`;
+        base = {
+          name: el.product_name, brand: el.brand || '', article: el.article || '',
+          etm_code: el.etm_code || '', price: el.price || '0',
+          unit: isCable ? 'м' : 'шт',
+        };
+      } else if (isCable) {
         const name = `Кабель ${f['Марка'] || ''} ${f['Жилы×сечение'] || ''}`.replace(/\s+/g, ' ').trim();
-        const len = parseFloat(String(f['Длина, м'] || '').replace(',', '.'));
-        const cur = acc.get(name) || { name, qty: 0, unit: 'м', ids: [] };
-        if (len > 0) cur.qty += len;
-        cur.ids.push(el.id);
-        acc.set(name, cur);
+        key = name;
+        base = { name, brand: '', article: '', etm_code: '', price: '0', unit: 'м' };
       } else {
         const name = this.deviceRowName(el.klass, f, cfg);
-        const cur = acc.get(name) || { name, qty: 0, unit: 'шт', ids: [] };
-        cur.qty += 1;
-        cur.ids.push(el.id);
-        acc.set(name, cur);
+        key = name;
+        base = { name, brand: '', article: '', etm_code: '', price: '0', unit: 'шт' };
       }
+      const cur = acc.get(key) || { ...base, qty: 0, ids: [] };
+      cur.qty += isCable ? (lenRaw > 0 ? lenRaw : 0) : 1;
+      cur.ids.push(el.id);
+      acc.set(key, cur);
     }
 
     // Существующий связанный лист (если не удалён)
-    let sheet = doc.sheet_id
-      ? await this.sheetsRepo.findOne({ where: { id: doc.sheet_id, owner_id: userId } })
+    let sheet = page.sheet_id
+      ? await this.sheetsRepo.findOne({ where: { id: page.sheet_id, owner_id: userId } })
       : null;
     let created = false;
 
@@ -703,13 +782,14 @@ export class RecognitionService {
           name: 'Распознавание', owner_id: userId, type: 'projects', parent_id: null,
         });
       }
-      const baseName = doc.filename.replace(/\.[a-z0-9]+$/i, '').slice(0, 80) || 'Схема';
+      const docBase = (doc?.filename || 'Схема').replace(/\.[a-z0-9]+$/i, '').slice(0, 60);
+      const name = page.title || `${docBase} — Схема ${page.page_index}`;
       sheet = await this.sheetsRepo.save({
         folder_id: folder.id,
         owner_id: userId,
-        name: `Распознавание — ${baseName}`,
+        name,
       });
-      await this.docsRepo.update(doc.id, { sheet_id: sheet.id });
+      await this.pagesRepo.update(page.id, { sheet_id: sheet.id });
       created = true;
     }
 
@@ -727,6 +807,10 @@ export class RecognitionService {
         await this.rowsRepo.update(row.id, {
           qty,
           unit: g.unit,
+          brand: g.brand || row.brand,
+          article: g.article || row.article,
+          etm_code: g.etm_code || row.etm_code,
+          ...(g.price !== '0' && (!row.price || row.price === '0') ? { price: g.price } : {}),
           custom: { ...(row.custom || {}), _recog: recogMark },
         });
         oursByName.delete(g.name);
@@ -735,11 +819,12 @@ export class RecognitionService {
           sheetId: sheet.id,
           sort_order: nextOrder++,
           name: g.name,
-          brand: '',
-          article: '',
+          brand: g.brand,
+          article: g.article,
+          etm_code: g.etm_code,
           qty,
           unit: g.unit,
-          price: '0',
+          price: g.price,
           store: '',
           coef: '1',
           total: '0',
@@ -768,45 +853,42 @@ export class RecognitionService {
    *  Разметку не удаляем физически — это ценность для датасета. */
   async onSheetRowsSaved(sheetId: number, rows: { custom?: Record<string, string> }[]) {
     try {
-      const docs = await this.docsRepo.find({ where: { sheet_id: sheetId } });
-      if (!docs.length) return;
+      const pages = await this.pagesRepo.find({ where: { sheet_id: sheetId } });
+      if (!pages.length) return;
       const presentIds = new Set<number>();
       for (const r of rows || []) {
         const mark = r?.custom?.['_recog'];
         if (!mark) continue;
         try { (JSON.parse(String(mark)) as number[]).forEach((id) => presentIds.add(Number(id))); } catch {}
       }
-      for (const doc of docs) {
-        const pages = await this.pagesRepo.find({ where: { document_id: doc.id } });
-        if (!pages.length) continue;
-        const linked = await this.elementsRepo.find({
-          where: { page_id: In(pages.map((p) => p.id)), in_sheet: true },
-        });
-        // Проверенную экспертом разметку (verified) не понижаем — только отвязываем
-        const removed = linked.filter((e) => !presentIds.has(e.id));
-        const demote = removed.filter((e) => !e.verified);
-        const detach = removed.filter((e) => e.verified);
-        if (demote.length) {
-          await this.elementsRepo.update(
-            { id: In(demote.map((e) => e.id)) },
-            { in_sheet: false, status: 'auto' },
-          );
-        }
-        if (detach.length) {
-          await this.elementsRepo.update(
-            { id: In(detach.map((e) => e.id)) },
-            { in_sheet: false },
-          );
-        }
+      const linked = await this.elementsRepo.find({
+        where: { page_id: In(pages.map((p) => p.id)), in_sheet: true },
+      });
+      // Проверенную экспертом разметку (verified) не понижаем — только отвязываем
+      const removed = linked.filter((e) => !presentIds.has(e.id));
+      const demote = removed.filter((e) => !e.verified);
+      const detach = removed.filter((e) => e.verified);
+      if (demote.length) {
+        await this.elementsRepo.update(
+          { id: In(demote.map((e) => e.id)) },
+          { in_sheet: false, status: 'auto' },
+        );
+      }
+      if (detach.length) {
+        await this.elementsRepo.update(
+          { id: In(detach.map((e) => e.id)) },
+          { in_sheet: false },
+        );
       }
     } catch (e: any) {
       this.logger.warn(`Обратная синхронизация листа ${sheetId} не удалась: ${e?.message || e}`);
     }
   }
 
-  /** Лист удалён целиком — отвязываем документы (разметку не трогаем). */
+  /** Лист удалён целиком — отвязываем схему (разметку не трогаем). */
   async onSheetRemoved(sheetId: number) {
     try {
+      await this.pagesRepo.update({ sheet_id: sheetId }, { sheet_id: null });
       await this.docsRepo.update({ sheet_id: sheetId }, { sheet_id: null });
     } catch { /* некритично */ }
   }

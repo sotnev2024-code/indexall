@@ -322,10 +322,18 @@ export interface RecogElement {
   confidence: number;
   status: 'auto' | 'confirmed' | 'corrected';
   color: string;
+  /* товар каталога («Добавить из базы») */
+  product_name: string;
+  brand: string;
+  article: string;
+  etm_code: string;
+  price: string;
 }
 export interface RecogPage {
   id: number;
   page_index: number;
+  title: string;
+  sheet_id: number | null;
   image_url: string | null;
   width: number;
   height: number;
@@ -368,8 +376,17 @@ export const recognitionApi = {
   list: () => api.get('/recognition/documents'),
   getOne: (id: number) => api.get<RecogDocument>(`/recognition/documents/${id}`),
   remove: (id: number) => api.delete(`/recognition/documents/${id}`),
-  updatePage: (id: number, patch: { hidden?: boolean; confirmed?: boolean; schema_type?: string }) =>
+  updatePage: (id: number, patch: { hidden?: boolean; confirmed?: boolean; schema_type?: string; title?: string }) =>
     api.patch(`/recognition/pages/${id}`, patch),
+  addPages: (docId: number, file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return api.post<RecogDocument>(`/recognition/documents/${docId}/pages`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  createSheetForPage: (pageId: number) =>
+    api.post<{ sheetId: number; rowCount: number; updated: boolean }>(`/recognition/pages/${pageId}/create-sheet`),
   getClasses: () => api.get<RecogClassConfig>('/recognition/classes'),
   saveLsConfig: (xml: string) => api.put<RecogClassConfig>('/recognition/classes/ls-config', { xml }),
   datasetStats: () => api.get('/recognition/dataset/stats'),
@@ -404,6 +421,4 @@ export const recognitionApi = {
   updateElement: (id: number, patch: Partial<RecogElement>) =>
     api.patch<RecogElement>(`/recognition/elements/${id}`, patch),
   removeElement: (id: number) => api.delete(`/recognition/elements/${id}`),
-  createSheet: (docId: number) =>
-    api.post<{ sheetId: number; rowCount: number; updated: boolean }>(`/recognition/documents/${docId}/create-sheet`),
 };

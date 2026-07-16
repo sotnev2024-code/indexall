@@ -149,9 +149,25 @@ export class RecognitionController {
     return this.service.removeDocument(id, req.user.userId);
   }
 
-  @Post('documents/:id/create-sheet')
-  createSheet(@Param('id', ParseIntPipe) id: number, @Request() req) {
-    return this.service.createSheetFromDocument(id, req.user.userId);
+  /** Дозагрузка листов в существующий документ («+ Добавить лист») */
+  @Post('documents/:id/pages')
+  @UseInterceptors(FileInterceptor('file', {
+    storage: documentStorage,
+    limits: { fileSize: 200 * 1024 * 1024 },
+    fileFilter: (_, file, cb) => {
+      if (!/(pdf|png|jpe?g|webp)$/i.test(file.mimetype) && !/\.(pdf|png|jpe?g|webp)$/i.test(file.originalname)) {
+        return cb(new BadRequestException('Поддерживаются PDF, PNG и JPG'), false);
+      }
+      cb(null, true);
+    },
+  }))
+  addPages(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File,
+    @Request() req,
+  ) {
+    if (!file) throw new BadRequestException('Файл не загружен');
+    return this.service.addPagesToDocument(id, req.user.userId, file);
   }
 
   // ── Страницы ──────────────────────────────────────────────────
@@ -159,10 +175,16 @@ export class RecognitionController {
   @Patch('pages/:id')
   updatePage(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { hidden?: boolean; confirmed?: boolean; schema_type?: string },
+    @Body() body: { hidden?: boolean; confirmed?: boolean; schema_type?: string; title?: string },
     @Request() req,
   ) {
     return this.service.updatePage(id, req.user.userId, body);
+  }
+
+  /** Лист спецификации из подтверждённых элементов ЭТОЙ схемы */
+  @Post('pages/:id/create-sheet')
+  createSheet(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    return this.service.createSheetFromPage(id, req.user.userId);
   }
 
   @Post('pages/:id/detect')

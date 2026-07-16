@@ -26,6 +26,15 @@ export class RecognitionPage {
   @Column()
   page_index: number;
 
+  /** Название схемы (пусто — «Схема N»). Переименование переименовывает
+   *  и связанный лист спецификации. */
+  @Column({ default: '' })
+  title: string;
+
+  /** Лист спецификации ИНДЕКСАЛЛ, собранный из ЭТОЙ схемы */
+  @Column({ nullable: true })
+  sheet_id: number | null;
+
   /** Имя JPEG-файла в uploads ('' — ещё рендерится) */
   @Column({ default: '' })
   image_file: string;

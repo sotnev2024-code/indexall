@@ -57,6 +57,23 @@ export class RecognitionElement {
   @Column({ default: false })
   verified: boolean;
 
+  /** Товар каталога, привязанный к элементу («Добавить из базы»).
+   *  Если задан — в лист уходит товарная строка, цены ЭТМ тянутся штатно. */
+  @Column({ default: '' })
+  product_name: string;
+
+  @Column({ default: '' })
+  brand: string;
+
+  @Column({ default: '' })
+  article: string;
+
+  @Column({ default: '' })
+  etm_code: string;
+
+  @Column({ default: '' })
+  price: string;
+
   /** Пользовательский цвет рамки (пусто — цвет класса) */
   @Column({ default: '' })
   color: string;
