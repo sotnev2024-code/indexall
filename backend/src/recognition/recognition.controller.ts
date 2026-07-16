@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Patch, Delete, Param, Body, Request,
+  Controller, Get, Post, Put, Patch, Delete, Param, Body, Query, Request,
   UseGuards, UseInterceptors, UploadedFile, ParseIntPipe, BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -25,6 +25,30 @@ export class RecognitionController {
   @Get('status')
   status() {
     return { configured: this.service.isConfigured() };
+  }
+
+  // ── Таксономия классов (из конфига Label Studio) ──────────────
+
+  @Get('classes')
+  getClasses() {
+    return this.service.getClassConfig();
+  }
+
+  @Put('classes/ls-config')
+  saveLsConfig(@Body('xml') xml: string) {
+    return this.service.saveLsConfig(xml);
+  }
+
+  // ── Датасет ───────────────────────────────────────────────────
+
+  @Get('dataset/stats')
+  datasetStats() {
+    return this.service.datasetStats();
+  }
+
+  @Get('dataset/export')
+  exportDataset(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.service.exportDataset(from, to);
   }
 
   // ── Документы ─────────────────────────────────────────────────
@@ -70,7 +94,7 @@ export class RecognitionController {
   @Patch('pages/:id')
   updatePage(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { hidden?: boolean; confirmed?: boolean },
+    @Body() body: { hidden?: boolean; confirmed?: boolean; schema_type?: string },
     @Request() req,
   ) {
     return this.service.updatePage(id, req.user.userId, body);

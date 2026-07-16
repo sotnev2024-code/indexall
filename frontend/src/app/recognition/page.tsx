@@ -4,25 +4,24 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import SectionOnboarding from '@/components/SectionOnboarding';
-import { authApi, recognitionApi, RecogDocument, RecogElement, RecogPage } from '@/lib/api';
+import { authApi, recognitionApi, RecogClass, RecogClassConfig, RecogDocument, RecogElement, RecogPage } from '@/lib/api';
 
-/* ── Классы оборудования ── */
-const CLASSES: Record<string, { name: string; color: string }> = {
-  mcb:       { name: 'Модульный автомат',        color: '#1e7e34' },
-  mccb:      { name: 'Автомат в литом корпусе',  color: '#0d9488' },
-  rcbo:      { name: 'Дифавтомат',               color: '#7c3aed' },
-  rcd:       { name: 'УЗО',                      color: '#9333ea' },
-  contactor: { name: 'Контактор / пускатель',    color: '#c2410c' },
-  relay:     { name: 'Реле',                     color: '#a16207' },
-  meter:     { name: 'Прибор учёта',             color: '#0369a1' },
-  busbar:    { name: 'Шина',                     color: '#52616f' },
-  panel:     { name: 'Щит / распредпункт',       color: '#334155' },
-  cable:     { name: 'Кабель / провод',          color: '#1d4ed8' },
-  load:      { name: 'Электроприёмник',          color: '#be185d' },
-  other:     { name: 'Прочее',                   color: '#64748b' },
+/* ── Классы оборудования ──
+ * Таксономия динамическая: приходит с бэка из конфига Label Studio Максима
+ * (обновляется без деплоя). DEFAULT_CFG — запасной минимум до загрузки. */
+const DEFAULT_CFG: RecogClassConfig = {
+  classes: [
+    { code: 'mcb', lsValue: 'MCB — модульный автомат', nameRu: 'модульный автомат', category: 0, color: '#E74C3C' },
+    { code: 'cable', lsValue: '', nameRu: 'Кабель / провод', category: null, color: '#1d4ed8', system: true },
+    { code: 'load', lsValue: '', nameRu: 'Электроприёмник', category: null, color: '#be185d', system: true },
+    { code: 'other', lsValue: '', nameRu: 'Прочее', category: null, color: '#64748b', system: true },
+  ],
+  schemaTypes: [
+    { value: 'single_line', nameRu: 'Однолинейная схема' },
+    { value: 'schematic', nameRu: 'Принципиальная схема' },
+    { value: 'wiring', nameRu: 'Монтажная схема' },
+  ],
 };
-const classColor = (el: Pick<RecogElement, 'klass' | 'color'>) =>
-  el.color || CLASSES[el.klass]?.color || '#64748b';
 
 const FUN_PHRASES = [
   'Нейросеть в шоке…',
@@ -41,6 +40,7 @@ type Mode = 'pan' | 'zone' | 'draw';
 export default function RecognitionPage() {
   const router = useRouter();
   const [docs, setDocs] = useState<any[]>([]);
+  const [clsCfg, setClsCfg] = useState<RecogClassConfig>(DEFAULT_CFG);
   const [doc, setDoc] = useState<RecogDocument | null>(null);
   const [pageId, setPageId] = useState<number | null>(null);
   const [selId, setSelId] = useState<number | null>(null);
@@ -73,9 +73,20 @@ export default function RecognitionPage() {
         }
         recognitionApi.list().then(({ data: d }) => setDocs(d)).catch(() => {});
         recognitionApi.status().then(({ data: d }) => setConfigured(d.configured)).catch(() => {});
+        recognitionApi.getClasses().then(({ data: d }) => { if (d?.classes?.length) setClsCfg(d); }).catch(() => {});
       })
       .catch(() => router.replace('/projects'));
   }, [router]);
+
+  /* динамическая таксономия: код класса → карточка */
+  const classByCode = useMemo(
+    () => new Map<string, RecogClass>(clsCfg.classes.map((c) => [c.code, c])),
+    [clsCfg],
+  );
+  const classColor = useCallback((el: Pick<RecogElement, 'klass' | 'color'>) =>
+    el.color || classByCode.get(el.klass)?.color || '#64748b', [classByCode]);
+  const className = useCallback((code: string) =>
+    classByCode.get(code)?.nameRu || code, [classByCode]);
 
   const reloadDoc = useCallback(async (id: number) => {
     const { data } = await recognitionApi.getOne(id);
@@ -300,11 +311,13 @@ export default function RecognitionPage() {
         add = parseFloat(String(f['Длина, м'] || '').replace(',', '.')) || 0;
       } else {
         const t = f['Тип'] || '', p = f['Полюса'] || '', ch = f['Хар-ка'] || '', a = f['Номинал, А'] || '';
-        const kindName: Record<string, string> = {
-          rcbo: 'Дифавтомат', rcd: 'УЗО', contactor: 'Контактор', relay: 'Реле',
-          meter: 'Счётчик', busbar: 'Шина', panel: 'Щит',
+        const special: Record<string, string> = {
+          mcb: 'Автоматический выключатель', mccb: 'Автоматический выключатель',
+          acb: 'Воздушный автоматический выключатель',
+          rcbo: 'Дифавтомат', rccb: 'УЗО', rcd: 'УЗО',
         };
-        name = `${kindName[el.klass] || 'Автоматический выключатель'} ${t} ${p}${ch ? `, хар. ${ch}` : ''}${a ? `, ${a} А` : ''}`
+        const base = special[el.klass] || (className(el.klass).charAt(0).toUpperCase() + className(el.klass).slice(1));
+        name = `${base} ${t} ${p}${ch ? `, хар. ${ch}` : ''}${a ? `, ${a} А` : ''}`
           .replace(/\s+/g, ' ').replace(/\s+,/g, ',').trim();
       }
       const cur = map.get(name) || { name, klass: el.klass, qty: 0, unit };
@@ -312,7 +325,7 @@ export default function RecognitionPage() {
       map.set(name, cur);
     }
     return [...map.values()];
-  }, [doc, visiblePages]);
+  }, [doc, visiblePages, className]);
 
   const confirmedCount = useMemo(() =>
     (doc?.elements || []).filter((e) => e.status !== 'auto').length, [doc]);
@@ -379,6 +392,8 @@ export default function RecognitionPage() {
               ))}
             </div>
           )}
+
+          <DatasetPanel cfg={clsCfg} onCfgSaved={setClsCfg} />
         </div>
       ) : (
         /* ── рабочее пространство документа ── */
@@ -428,6 +443,20 @@ export default function RecognitionPage() {
                 onClick={() => setMode(mode === 'draw' ? 'pan' : 'draw')}>
                 ▭ Добавить рамку
               </button>
+              {page && (
+                <select
+                  className="recog-schematype"
+                  title="Тип схемы на этом листе (уходит в датасет)"
+                  value={page.schema_type || 'single_line'}
+                  onChange={async (e) => {
+                    const v = e.target.value;
+                    const { data } = await recognitionApi.updatePage(page.id, { schema_type: v });
+                    setDoc((d) => d ? { ...d, pages: d.pages.map((x) => (x.id === page.id ? { ...x, ...data } : x)) } : d);
+                  }}
+                >
+                  {clsCfg.schemaTypes.map((t) => <option key={t.value} value={t.value}>{t.nameRu}</option>)}
+                </select>
+              )}
               <span className="recog-toolhint">
                 {mode === 'zone' ? 'Выделите зону мышкой — распознавание запустится автоматически'
                   : mode === 'draw' ? 'Нарисуйте рамку вокруг элемента'
@@ -536,6 +565,7 @@ export default function RecognitionPage() {
               <InspectorPanel
                 key={selEl.id}
                 el={selEl}
+                cfg={clsCfg}
                 onClose={() => setSelId(null)}
                 onSave={(patch, status) => saveElement(selEl, patch, status)}
                 onDelete={() => deleteElement(selEl)}
@@ -565,7 +595,7 @@ export default function RecognitionPage() {
                     <tr key={r.name}>
                       <td>{i + 1}</td>
                       <td>{r.name}</td>
-                      <td><span className="recog-klasstag" style={{ color: CLASSES[r.klass]?.color }}>{r.klass}</span></td>
+                      <td><span className="recog-klasstag" style={{ color: classByCode.get(r.klass)?.color || '#64748b' }}>{r.klass}</span></td>
                       <td>{Math.round(r.qty * 100) / 100}</td>
                       <td>{r.unit}</td>
                     </tr>
@@ -590,8 +620,9 @@ export default function RecognitionPage() {
 }
 
 /* ── Инспектор ── */
-function InspectorPanel({ el, onClose, onSave, onDelete }: {
+function InspectorPanel({ el, cfg, onClose, onSave, onDelete }: {
   el: RecogElement;
+  cfg: RecogClassConfig;
   onClose: () => void;
   onSave: (patch: Partial<RecogElement>, status?: string) => void;
   onDelete: () => void;
@@ -602,13 +633,14 @@ function InspectorPanel({ el, onClose, onSave, onDelete }: {
   const [color, setColor] = useState(el.color || '');
   const [newKey, setNewKey] = useState('');
 
+  const byCode = new Map<string, RecogClass>(cfg.classes.map((c) => [c.code, c]));
   const collect = (): Partial<RecogElement> => ({ klass, designation, fields, color });
   const warn = el.confidence > 0 && el.confidence < 0.7 && el.status === 'auto';
 
   return (
     <div className="recog-insp">
       <div className="recog-insp-head">
-        <b>{designation || CLASSES[klass]?.name || 'Элемент'}</b>
+        <b>{designation || byCode.get(klass)?.nameRu || 'Элемент'}</b>
         <button onClick={onClose} title="Закрыть">×</button>
       </div>
       <div className="recog-insp-status">
@@ -622,7 +654,15 @@ function InspectorPanel({ el, onClose, onSave, onDelete }: {
 
       <label>Класс оборудования</label>
       <select value={klass} onChange={(e) => setKlass(e.target.value)}>
-        {Object.entries(CLASSES).map(([k, c]) => <option key={k} value={k}>{k} — {c.name}</option>)}
+        {!byCode.has(klass) && <option value={klass}>{klass}</option>}
+        <optgroup label="Классы датасета (Label Studio)">
+          {cfg.classes.filter((c) => !c.system).map((c) =>
+            <option key={c.code} value={c.code}>{c.code} — {c.nameRu}</option>)}
+        </optgroup>
+        <optgroup label="Служебные (для листа спецификации)">
+          {cfg.classes.filter((c) => c.system).map((c) =>
+            <option key={c.code} value={c.code}>{c.code} — {c.nameRu}</option>)}
+        </optgroup>
       </select>
 
       <label>Обозначение (QF1, Гр.2…)</label>
@@ -645,7 +685,7 @@ function InspectorPanel({ el, onClose, onSave, onDelete }: {
 
       <label>Цвет рамки</label>
       <div className="recog-colorline">
-        <input type="color" value={color || CLASSES[klass]?.color || '#64748b'} onChange={(e) => setColor(e.target.value)} />
+        <input type="color" value={color || byCode.get(klass)?.color || '#64748b'} onChange={(e) => setColor(e.target.value)} />
         {color && <button className="btn-outline" onClick={() => setColor('')}>Цвет класса</button>}
       </div>
 
@@ -656,6 +696,122 @@ function InspectorPanel({ el, onClose, onSave, onDelete }: {
       <button className="recog-insp-del" onClick={onDelete}>Удалить элемент</button>
       <p className="recog-insp-hint">
         Подтверждённые и исправленные рамки попадают в лист спецификации и копятся в датасет для дообучения модели.
+      </p>
+    </div>
+  );
+}
+
+/* ── Датасет: статистика, выгрузка в Label Studio, конфиг классов ── */
+function DatasetPanel({ cfg, onCfgSaved }: {
+  cfg: RecogClassConfig;
+  onCfgSaved: (c: RecogClassConfig) => void;
+}) {
+  const [stats, setStats] = useState<any>(null);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [cfgOpen, setCfgOpen] = useState(false);
+  const [xml, setXml] = useState('');
+  const [savingCfg, setSavingCfg] = useState(false);
+
+  useEffect(() => {
+    recognitionApi.datasetStats().then(({ data }) => setStats(data)).catch(() => {});
+  }, []);
+
+  async function download() {
+    setExporting(true);
+    try {
+      const { data } = await recognitionApi.exportDataset(from || undefined, to || undefined);
+      if (!data.tasks?.length) {
+        toast('Пока нечего выгружать — нет подтверждённых рамок за период', { icon: '🤷' });
+        return;
+      }
+      const blob = new Blob([JSON.stringify(data.tasks, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `indexall-dataset-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast.success(`Выгружено: ${data.exported_pages} страниц, ${data.exported_elements} рамок`);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Не удалось выгрузить датасет');
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function saveCfg() {
+    setSavingCfg(true);
+    try {
+      const { data } = await recognitionApi.saveLsConfig(xml);
+      onCfgSaved(data);
+      setXml('');
+      setCfgOpen(false);
+      toast.success(`Конфиг сохранён: ${data.classes.filter((c) => !c.system).length} классов`);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Не удалось сохранить конфиг');
+    } finally {
+      setSavingCfg(false);
+    }
+  }
+
+  const confirmedTotal = stats
+    ? Object.values(stats.byClass || {}).reduce((s: number, v: any) => s + (v.confirmed || 0), 0)
+    : 0;
+
+  return (
+    <div className="recog-dataset">
+      <div className="recog-dataset-head">
+        <b>Датасет для обучения YOLO</b>
+        <span className="recog-dataset-sub">
+          {stats ? `${stats.documents} докум. · ${stats.pages} страниц · подтверждено рамок: ${confirmedTotal}` : 'Загрузка…'}
+        </span>
+      </div>
+
+      {stats && confirmedTotal > 0 && (
+        <div className="recog-dataset-classes">
+          {Object.entries(stats.byClass as Record<string, { total: number; confirmed: number }>)
+            .filter(([, v]) => v.confirmed > 0)
+            .sort((a, b) => b[1].confirmed - a[1].confirmed)
+            .map(([k, v]) => (
+              <span key={k} className="recog-dataset-chip"
+                style={{ color: cfg.classes.find((c) => c.code === k)?.color || '#64748b' }}>
+                {k}: {v.confirmed}
+              </span>
+            ))}
+        </div>
+      )}
+
+      <div className="recog-dataset-actions">
+        <label>с <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+        <label>по <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+        <button className="btn-primary" onClick={download} disabled={exporting}>
+          {exporting ? 'Выгружаем…' : '⬇ Скачать разметку (Label Studio JSON)'}
+        </button>
+        <button className="btn-outline" onClick={() => setCfgOpen((v) => !v)}>
+          {cfgOpen ? 'Скрыть конфиг' : 'Обновить классы (конфиг LS)'}
+        </button>
+      </div>
+
+      {cfgOpen && (
+        <div className="recog-dataset-cfg">
+          <p>Вставьте XML-конфиг разметки из Label Studio (Settings → Labeling Interface → Code) —
+            классы обновятся во всей системе без деплоя. Сейчас классов: {cfg.classes.filter((c) => !c.system).length}.</p>
+          <textarea
+            rows={8}
+            placeholder="<View>…</View>"
+            value={xml}
+            onChange={(e) => setXml(e.target.value)}
+          />
+          <button className="btn-primary" disabled={!xml.trim() || savingCfg} onClick={saveCfg}>
+            {savingCfg ? 'Сохраняем…' : 'Сохранить конфиг'}
+          </button>
+        </div>
+      )}
+
+      <p className="recog-dataset-note">
+        В выгрузку попадают подтверждённые и исправленные рамки классов Label Studio (служебные cable/load/panel
+        в датасет YOLO не входят). Картинки в JSON — ссылками на сервер: Label Studio подтянет их сам.
       </p>
     </div>
   );

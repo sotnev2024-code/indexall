@@ -19,6 +19,15 @@ import { RecognitionElement } from './recognition-element.entity';
 import { Sheet } from '../sheets/sheet.entity';
 import { EquipmentRow } from '../equipment/equipment-row.entity';
 import { Folder } from '../folders/folder.entity';
+import { AppSetting } from '../admin/app-setting.entity';
+import {
+  ClassConfig,
+  DEFAULT_LS_CONFIG,
+  LEGACY_ALIASES,
+  mergeWithSystem,
+  parseLsConfig,
+  RecognitionClass,
+} from './recognition-classes';
 
 const execFileAsync = promisify(execFile);
 
@@ -48,10 +57,8 @@ const RENDER_DPI = 200;
 /** Длинная сторона кропа, отправляемого в модель */
 const DETECT_MAX_EDGE = 2200;
 
-export const RECOGNITION_CLASSES = [
-  'mcb', 'mccb', 'rcbo', 'rcd', 'contactor', 'relay',
-  'meter', 'busbar', 'panel', 'cable', 'load', 'other',
-] as const;
+/** Ключ настройки с XML-конфигом Label Studio (см. recognition-classes.ts) */
+const LS_CONFIG_KEY = 'recognition_ls_config';
 
 type Bbox = { x: number; y: number; w: number; h: number };
 
@@ -61,6 +68,7 @@ export class RecognitionService {
   /** Рендер строго по одной странице за раз — на VPS 2 CPU/4 ГБ параллельный
    *  poppler легко душит основное приложение. */
   private renderChain: Promise<void> = Promise.resolve();
+  private classConfigCache: { cfg: ClassConfig; at: number } | null = null;
 
   constructor(
     @InjectRepository(RecognitionDocument) private docsRepo: Repository<RecognitionDocument>,
@@ -69,10 +77,53 @@ export class RecognitionService {
     @InjectRepository(Sheet) private sheetsRepo: Repository<Sheet>,
     @InjectRepository(EquipmentRow) private rowsRepo: Repository<EquipmentRow>,
     @InjectRepository(Folder) private foldersRepo: Repository<Folder>,
+    @InjectRepository(AppSetting) private settingsRepo: Repository<AppSetting>,
   ) {}
 
   isConfigured(): boolean {
     return !!(process.env.RECOGNITION_API_URL?.trim() && process.env.RECOGNITION_API_KEY?.trim());
+  }
+
+  // ── Классы (таксономия из конфига Label Studio) ───────────────
+
+  /** Актуальная таксономия: XML из настройки (Максим обновляет его по мере
+   *  появления нового оборудования) + системные классы ИНДЕКСАЛЛ. Кэш 60 c. */
+  async getClassConfig(): Promise<ClassConfig> {
+    if (this.classConfigCache && Date.now() - this.classConfigCache.at < 60_000) {
+      return this.classConfigCache.cfg;
+    }
+    let xml = DEFAULT_LS_CONFIG;
+    try {
+      const row = await this.settingsRepo.findOne({ where: { key: LS_CONFIG_KEY } });
+      if (row?.value?.trim()) xml = row.value;
+    } catch { /* используем дефолт */ }
+    let parsed = parseLsConfig(xml);
+    if (!parsed.classes.length) parsed = parseLsConfig(DEFAULT_LS_CONFIG);
+    const cfg = mergeWithSystem(parsed);
+    this.classConfigCache = { cfg, at: Date.now() };
+    return cfg;
+  }
+
+  /** Сохранить новый XML-конфиг Label Studio (вставляется в интерфейсе). */
+  async saveLsConfig(xml: string) {
+    const parsed = parseLsConfig(String(xml || ''));
+    if (parsed.classes.length < 3) {
+      throw new BadRequestException('Не похоже на конфиг Label Studio: не нашёл метки <Label …>');
+    }
+    await this.settingsRepo.save({ key: LS_CONFIG_KEY, value: String(xml) });
+    this.classConfigCache = null;
+    return this.getClassConfig();
+  }
+
+  /** Приводит код класса к актуальному: legacy-алиасы старой версии модуля
+   *  (rcd → rccb…) и неизвестные значения → 'other'. */
+  private resolveKlass(klass: any, cfg: ClassConfig): string {
+    const k = String(klass || '').trim();
+    if (!k) return 'other';
+    if (cfg.classes.some((c) => c.code === k)) return k;
+    const alias = LEGACY_ALIASES[k];
+    if (alias && cfg.classes.some((c) => c.code === alias)) return alias;
+    return 'other';
   }
 
   // ── Документы ─────────────────────────────────────────────────
@@ -214,11 +265,21 @@ export class RecognitionService {
     return { success: true };
   }
 
-  async updatePage(pageId: number, userId: number, patch: { hidden?: boolean; confirmed?: boolean }) {
+  async updatePage(
+    pageId: number,
+    userId: number,
+    patch: { hidden?: boolean; confirmed?: boolean; schema_type?: string },
+  ) {
     const page = await this.checkPageOwner(pageId, userId);
     const safe: any = {};
     if (typeof patch.hidden === 'boolean') safe.hidden = patch.hidden;
     if (typeof patch.confirmed === 'boolean') safe.confirmed = patch.confirmed;
+    if (patch.schema_type) {
+      const cfg = await this.getClassConfig();
+      if (cfg.schemaTypes.some((t) => t.value === patch.schema_type)) {
+        safe.schema_type = patch.schema_type;
+      }
+    }
     await this.pagesRepo.update(page.id, safe);
     return this.pagesRepo.findOne({ where: { id: page.id } });
   }
@@ -253,12 +314,13 @@ export class RecognitionService {
     }
     const buf: Buffer = await pipeline.jpeg({ quality: 85 }).toBuffer();
 
-    const found = await this.callVisionModel(buf);
+    const cfg = await this.getClassConfig();
+    const found = await this.callVisionModel(buf, cfg);
 
     // bbox кропа → bbox страницы
     const toSave = found.map((el) => ({
       page_id: page.id,
-      klass: RECOGNITION_CLASSES.includes(el.klass as any) ? el.klass : 'other',
+      klass: this.resolveKlass(el.klass, cfg),
       designation: String(el.designation || '').slice(0, 60),
       fields: this.sanitizeFields(el.fields),
       bbox: {
@@ -275,8 +337,10 @@ export class RecognitionService {
   }
 
   /** Вызов Gemini через агрегатор (см. RECOGNITION_API_URL). stream:false —
-   *  просим единый JSON; на случай принудительного SSE парсим и поток. */
-  private async callVisionModel(imageJpeg: Buffer): Promise<Array<{
+   *  просим единый JSON; на случай принудительного SSE парсим и поток.
+   *  Список классов в промпте строится из актуальной таксономии — LLM
+   *  размечает в тех же кодах, в которых копится датасет для YOLO. */
+  private async callVisionModel(imageJpeg: Buffer, cfg: ClassConfig): Promise<Array<{
     klass: string; designation?: string; fields?: Record<string, string>;
     bbox: [number, number, number, number]; confidence?: number;
   }>> {
@@ -284,18 +348,23 @@ export class RecognitionService {
     const model = (process.env.RECOGNITION_MODEL || 'gemini-3-5-flash').trim();
     const url = `${base}/gemini/v1/models/${model}:streamGenerateContent`;
 
+    const lsClasses = cfg.classes.filter((c) => !c.system)
+      .map((c) => `${c.code} (${c.nameRu})`).join(', ');
     const prompt = [
-      'Ты — инженер-электрик. На изображении фрагмент однолинейной электрической схемы из российского проекта (раздел ИОС/ЭОМ).',
+      'Ты — инженер-электрик. На изображении фрагмент электрической схемы из российского проекта (однолинейная, принципиальная или монтажная; раздел ИОС/ЭОМ).',
       'Найди ВСЕ элементы электрооборудования и верни СТРОГО JSON без пояснений и без markdown:',
       '{"elements":[{"klass":"...","designation":"...","fields":{...},"bbox":[x,y,w,h],"confidence":0.95}]}',
       '',
-      'klass — ровно одно из: mcb (модульный автомат, ВА47/S200/NB1), mccb (автомат в литом корпусе, ВА88/NM8), rcbo (дифавтомат, АВДТ/АД), rcd (УЗО, ВД1/F202), contactor (контактор/пускатель, КМИ), relay (реле), meter (счётчик), busbar (шина), panel (щит/распредпункт, ЩО/ЩС/ПР/ППЗ), cable (кабельная линия), load (электроприёмник: светильник, клапан, вентилятор, розеточная сеть), other.',
+      `klass — ровно один код из списка: ${lsClasses}.`,
+      'Дополнительные служебные классы: cable (кабельная линия: марка/сечение/длина), load (электроприёмник: светильник, клапан, вентилятор, розеточная сеть), panel (щит/распредпункт целиком: ЩО/ЩС/ПР/ППЗ/ВРУ), busbar (шина), other (не удалось определить).',
       'designation — позиционное обозначение (QF1, QF27, КДУ-ДП3, Гр.1...), если видно.',
       'fields — параметры, которые видны на схеме, русскими ключами:',
-      '  для аппаратов: "Тип" (ВА47-29...), "Полюса" (1P/2P/3P/1P+N), "Хар-ка" (B/C/D), "Номинал, А", "Утечка, мА" (для УЗО/дифавтоматов);',
+      '  для аппаратов защиты: "Тип" (ВА47-29...), "Полюса" (1P/2P/3P/1P+N), "Хар-ка" (B/C/D), "Номинал, А", "Утечка, мА" (для УЗО/дифавтоматов);',
+      '  для контакторов/реле: "Тип", "Номинал, А", "Катушка, В";',
       '  для cable: "Марка" (ВВГнг(А)-LS...), "Жилы×сечение" (3×2,5), "Длина, м";',
-      '  для load: "Наименование", "Помещение", "Мощность, кВт".',
-      'bbox — рамка элемента В ДОЛЯХ ЭТОГО ИЗОБРАЖЕНИЯ: [x левого края, y верхнего края, ширина, высота], каждое 0..1.',
+      '  для load: "Наименование", "Помещение", "Мощность, кВт";',
+      '  для прочих: "Тип" и видимые характеристики.',
+      'bbox — рамка элемента В ДОЛЯХ ЭТОГО ИЗОБРАЖЕНИЯ: [x левого края, y верхнего края, ширина, высота], каждое 0..1. Рамка должна плотно обводить графический символ элемента вместе с его подписью.',
       'confidence — твоя уверенность 0..1.',
       'Каждый аппарат, каждую кабельную линию и каждый приёмник размечай ОТДЕЛЬНЫМ элементом. Если параметр не виден — не выдумывай, пропусти ключ.',
       'Если на фрагменте нет электрооборудования — верни {"elements":[]}.',
@@ -399,9 +468,10 @@ export class RecognitionService {
 
   async createElement(pageId: number, userId: number, data: Partial<RecognitionElement>) {
     const page = await this.checkPageOwner(pageId, userId);
+    const cfg = await this.getClassConfig();
     const el = await this.elementsRepo.save({
       page_id: page.id,
-      klass: RECOGNITION_CLASSES.includes(data.klass as any) ? data.klass : 'other',
+      klass: this.resolveKlass(data.klass, cfg),
       designation: String(data.designation || '').slice(0, 60),
       fields: this.sanitizeFields(data.fields),
       bbox: this.clampZone(data.bbox as Bbox),
@@ -415,7 +485,11 @@ export class RecognitionService {
   async updateElement(id: number, userId: number, patch: any) {
     const el = await this.checkElementOwner(id, userId);
     const safe: any = {};
-    if (patch.klass && RECOGNITION_CLASSES.includes(patch.klass)) safe.klass = patch.klass;
+    if (patch.klass) {
+      const cfg = await this.getClassConfig();
+      const resolved = this.resolveKlass(patch.klass, cfg);
+      if (resolved !== 'other' || patch.klass === 'other') safe.klass = resolved;
+    }
     if (patch.designation != null) safe.designation = String(patch.designation).slice(0, 60);
     if (patch.fields) safe.fields = this.sanitizeFields(patch.fields);
     if (patch.bbox) safe.bbox = this.clampZone(patch.bbox);
@@ -448,6 +522,7 @@ export class RecognitionService {
     }
 
     // Группировка одинаковых позиций
+    const cfg = await this.getClassConfig();
     type Acc = { name: string; qty: number; unit: string };
     const acc = new Map<string, Acc>();
     for (const el of usable) {
@@ -460,7 +535,7 @@ export class RecognitionService {
         else cur.unit = cur.qty > 0 ? cur.unit : 'м'; // длины нет — оставим 0, пользователь допишет
         acc.set(name, cur);
       } else {
-        const name = this.deviceRowName(el.klass, f);
+        const name = this.deviceRowName(el.klass, f, cfg);
         const cur = acc.get(name) || { name, qty: 0, unit: 'шт' };
         cur.qty += 1;
         acc.set(name, cur);
@@ -500,7 +575,7 @@ export class RecognitionService {
     return { sheetId: sheet.id, folderId: folder.id, rowCount: rows.length };
   }
 
-  private deviceRowName(klass: string, f: Record<string, string>): string {
+  private deviceRowName(klass: string, f: Record<string, string>, cfg: ClassConfig): string {
     const t = f['Тип'] || '';
     const p = f['Полюса'] || '';
     const ch = f['Хар-ка'] || '';
@@ -508,17 +583,125 @@ export class RecognitionService {
     const leak = f['Утечка, мА'] || '';
     let name: string;
     switch (klass) {
+      case 'mcb': name = `Автоматический выключатель ${t} ${p}${ch ? `, хар. ${ch}` : ''}${a ? `, ${a} А` : ''}`; break;
+      case 'mccb': name = `Автоматический выключатель ${t} ${p}${a ? `, ${a} А` : ''}`; break;
+      case 'acb': name = `Воздушный автоматический выключатель ${t}${a ? `, ${a} А` : ''}`; break;
       case 'rcbo': name = `Дифавтомат ${t} ${p}${ch || a ? `, ${ch}${a}` : ''}${leak ? `, ${leak} мА` : ''}`; break;
+      case 'rccb':
       case 'rcd': name = `УЗО ${t} ${p}${a ? `, ${a} А` : ''}${leak ? `, ${leak} мА` : ''}`; break;
       case 'contactor': name = `Контактор ${t}${a ? `, ${a} А` : ''}${f['Катушка, В'] ? `, катушка ${f['Катушка, В']} В` : ''}`; break;
-      case 'mccb': name = `Автоматический выключатель ${t} ${p}${a ? `, ${a} А` : ''}`; break;
-      case 'relay': name = `Реле ${t}`; break;
-      case 'meter': name = `Счётчик ${t}`; break;
       case 'busbar': name = `Шина ${t}`; break;
       case 'panel': name = `Щит ${t || f['Наименование'] || ''}`; break;
-      default: name = `Автоматический выключатель ${t} ${p}${ch ? `, хар. ${ch}` : ''}${a ? `, ${a} А` : ''}`;
+      default: {
+        // Прочие классы конфига (реле, клеммы, кнопки, УЗИП…): русское имя + параметры
+        const cls = cfg.classes.find((c) => c.code === klass);
+        const base = cls?.nameRu || 'Оборудование';
+        const capital = base.charAt(0).toUpperCase() + base.slice(1);
+        name = `${capital} ${t}${p ? ` ${p}` : ''}${a ? `, ${a} А` : ''}${leak ? `, ${leak} мА` : ''}`;
+      }
     }
     return name.replace(/\s+/g, ' ').replace(/\s+,/g, ',').trim();
+  }
+
+  // ── Датасет (выгрузка в Label Studio) ─────────────────────────
+
+  /** Статистика разметки: сколько рамок по классам и статусам. */
+  async datasetStats() {
+    const cfg = await this.getClassConfig();
+    const rows = await this.elementsRepo
+      .createQueryBuilder('e')
+      .select('e.klass', 'klass')
+      .addSelect('e.status', 'status')
+      .addSelect('COUNT(*)', 'cnt')
+      .groupBy('e.klass')
+      .addGroupBy('e.status')
+      .getRawMany();
+    const docs = await this.docsRepo.count();
+    const pages = await this.pagesRepo.count({ where: { hidden: false } });
+    const byClass: Record<string, { total: number; confirmed: number }> = {};
+    for (const r of rows) {
+      const k = r.klass || 'other';
+      byClass[k] = byClass[k] || { total: 0, confirmed: 0 };
+      byClass[k].total += Number(r.cnt);
+      if (r.status === 'confirmed' || r.status === 'corrected') byClass[k].confirmed += Number(r.cnt);
+    }
+    return {
+      documents: docs,
+      pages,
+      byClass,
+      classes: cfg.classes,
+      schemaTypes: cfg.schemaTypes,
+    };
+  }
+
+  /** Выгрузка подтверждённой разметки в формате задач Label Studio.
+   *  Картинки — абсолютными URL на этот сервер (LS подтянет их сам).
+   *  Системные классы (cable/load/panel/busbar/other) в датасет не входят. */
+  async exportDataset(from?: string, to?: string) {
+    const cfg = await this.getClassConfig();
+    const lsByCode = new Map(cfg.classes.filter((c) => !c.system && c.lsValue).map((c) => [c.code, c.lsValue]));
+    // legacy-коды тоже маппим на актуальные метки
+    for (const [oldCode, newCode] of Object.entries(LEGACY_ALIASES)) {
+      const v = lsByCode.get(newCode);
+      if (v) lsByCode.set(oldCode, v);
+    }
+
+    const qb = this.elementsRepo
+      .createQueryBuilder('e')
+      .where('e.status IN (:...st)', { st: ['confirmed', 'corrected'] });
+    if (from) qb.andWhere('e.updatedAt >= :from', { from: new Date(from) });
+    if (to) qb.andWhere('e.updatedAt <= :to', { to: new Date(to + 'T23:59:59') });
+    const elements = await qb.getMany();
+    const exportable = elements.filter((e) => lsByCode.has(e.klass));
+
+    const pageIds = [...new Set(exportable.map((e) => e.page_id))];
+    const pages = pageIds.length
+      ? await this.pagesRepo.find({ where: { id: In(pageIds), hidden: false } })
+      : [];
+    const pageById = new Map(pages.filter((p) => p.image_file && p.width).map((p) => [p.id, p]));
+
+    const origin = (process.env.APP_URL || '').trim().replace(/\/+$/, '');
+    const tasks: any[] = [];
+    for (const p of pageById.values()) {
+      const els = exportable.filter((e) => e.page_id === p.id);
+      if (!els.length) continue;
+      tasks.push({
+        data: { image: `${origin}/api/uploads/${p.image_file}` },
+        annotations: [{
+          result: [
+            {
+              type: 'choices',
+              from_name: 'schema_type',
+              to_name: 'image',
+              value: { choices: [p.schema_type || 'single_line'] },
+            },
+            ...els.map((e) => ({
+              id: `el-${e.id}`,
+              type: 'rectanglelabels',
+              from_name: 'label',
+              to_name: 'image',
+              original_width: p.width,
+              original_height: p.height,
+              image_rotation: 0,
+              value: {
+                x: e.bbox.x * 100,
+                y: e.bbox.y * 100,
+                width: e.bbox.w * 100,
+                height: e.bbox.h * 100,
+                rotation: 0,
+                rectanglelabels: [lsByCode.get(e.klass)],
+              },
+            })),
+          ],
+        }],
+      });
+    }
+    return {
+      exported_pages: tasks.length,
+      exported_elements: exportable.filter((e) => pageById.has(e.page_id)).length,
+      skipped_system_elements: elements.length - exportable.length,
+      tasks,
+    };
   }
 
   // ── Владение ──────────────────────────────────────────────────

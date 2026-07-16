@@ -36,6 +36,10 @@ export class RecognitionPage {
   @Column({ default: 0 })
   height: number;
 
+  /** Тип схемы на листе: single_line | schematic | wiring (конфиг Label Studio) */
+  @Column({ default: 'single_line' })
+  schema_type: string;
+
   /** «Удалённая» пользователем страница: скрыта из интерфейса, PDF не трогаем */
   @Column({ default: false })
   hidden: boolean;

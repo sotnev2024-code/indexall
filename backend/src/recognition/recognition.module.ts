@@ -8,6 +8,7 @@ import { RecognitionController } from './recognition.controller';
 import { Sheet } from '../sheets/sheet.entity';
 import { EquipmentRow } from '../equipment/equipment-row.entity';
 import { Folder } from '../folders/folder.entity';
+import { AppSetting } from '../admin/app-setting.entity';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { Folder } from '../folders/folder.entity';
       Sheet,
       EquipmentRow,
       Folder,
+      AppSetting,
     ]),
   ],
   controllers: [RecognitionController],

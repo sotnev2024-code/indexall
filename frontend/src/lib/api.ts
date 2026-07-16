@@ -331,6 +331,19 @@ export interface RecogPage {
   height: number;
   hidden: boolean;
   confirmed: boolean;
+  schema_type: string;
+}
+export interface RecogClass {
+  code: string;
+  lsValue: string;
+  nameRu: string;
+  category: number | null;
+  color: string;
+  system?: boolean;
+}
+export interface RecogClassConfig {
+  classes: RecogClass[];
+  schemaTypes: { value: string; nameRu: string }[];
 }
 export interface RecogDocument {
   id: number;
@@ -354,8 +367,13 @@ export const recognitionApi = {
   list: () => api.get('/recognition/documents'),
   getOne: (id: number) => api.get<RecogDocument>(`/recognition/documents/${id}`),
   remove: (id: number) => api.delete(`/recognition/documents/${id}`),
-  updatePage: (id: number, patch: { hidden?: boolean; confirmed?: boolean }) =>
+  updatePage: (id: number, patch: { hidden?: boolean; confirmed?: boolean; schema_type?: string }) =>
     api.patch(`/recognition/pages/${id}`, patch),
+  getClasses: () => api.get<RecogClassConfig>('/recognition/classes'),
+  saveLsConfig: (xml: string) => api.put<RecogClassConfig>('/recognition/classes/ls-config', { xml }),
+  datasetStats: () => api.get('/recognition/dataset/stats'),
+  exportDataset: (from?: string, to?: string) =>
+    api.get('/recognition/dataset/export', { params: { ...(from ? { from } : {}), ...(to ? { to } : {}) } }),
   detect: (pageId: number, zone: { x: number; y: number; w: number; h: number }) =>
     api.post<{ elements: RecogElement[] }>(`/recognition/pages/${pageId}/detect`, { zone }, { timeout: 120000 }),
   createElement: (pageId: number, data: Partial<RecogElement>) =>
