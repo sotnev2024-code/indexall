@@ -58,6 +58,11 @@ export default function RecognitionPage() {
   const vpRef = useRef<HTMLDivElement>(null);
   const drag = useRef<any>(null);
   const [zoneDraft, setZoneDraft] = useState<Zone | null>(null);
+  /* зона, выделенная двойным нажатием — ждёт кнопки «Распознать» */
+  const [pendingZone, setPendingZone] = useState<Zone | null>(null);
+  /* подтверждённая рамка «запекается»; редактируется только этот id */
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const lastDownRef = useRef({ t: 0, x: 0, y: 0 });
 
   /* ── загрузка данных (раздел пока только для администратора) ── */
   useEffect(() => {
@@ -113,6 +118,25 @@ export default function RecognitionPage() {
 
   const visiblePages = useMemo(() => (doc?.pages || []).filter((p) => !p.hidden), [doc]);
   const hiddenPages = useMemo(() => (doc?.pages || []).filter((p) => p.hidden), [doc]);
+
+  /* выбрали другую рамку — режим редактирования прежней снимается */
+  useEffect(() => {
+    setEditingId((cur) => (cur !== null && cur !== selId ? null : cur));
+  }, [selId]);
+
+  /* Esc: отмена выделенной зоны / снятие выбора */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setPendingZone((z) => {
+        if (z) return null;
+        setSelId(null);
+        return z;
+      });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const page = useMemo(() => visiblePages.find((p) => p.id === pageId) || visiblePages[0] || null, [visiblePages, pageId]);
   const pageElements = useMemo(() => (doc?.elements || []).filter((e) => page && e.page_id === page.id), [doc, page]);
   const selEl = useMemo(() => pageElements.find((e) => e.id === selId) || null, [pageElements, selId]);
@@ -174,12 +198,19 @@ export default function RecognitionPage() {
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if ((e.target as HTMLElement).closest('.recog-el, .recog-handle')) return;
+    if ((e.target as HTMLElement).closest('.recog-el, .recog-handle, .recog-zone-confirm')) return;
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     const start = { x: e.clientX, y: e.clientY };
-    if ((mode === 'zone' || mode === 'draw') && page?.image_url) {
+    /* двойное нажатие (второе — удержать и тянуть) = выделение зоны из режима перемещения */
+    const now = Date.now();
+    const isDouble = now - lastDownRef.current.t < 450 &&
+      Math.hypot(e.clientX - lastDownRef.current.x, e.clientY - lastDownRef.current.y) < 25;
+    lastDownRef.current = { t: now, x: e.clientX, y: e.clientY };
+
+    if ((mode === 'zone' || mode === 'draw' || (isDouble && mode === 'pan')) && page?.image_url) {
       const p = toPagePoint(e.clientX, e.clientY);
-      drag.current = { kind: 'zone', start: p };
+      drag.current = { kind: 'zone', start: p, viaDouble: isDouble && mode === 'pan' };
+      setPendingZone(null);
       setZoneDraft({ x: p.x, y: p.y, w: 0, h: 0 });
     } else {
       drag.current = { kind: 'pan', start, view: { ...viewRef.current } };
@@ -224,6 +255,7 @@ export default function RecognitionPage() {
       };
       setZoneDraft(null);
       if (z.w < 0.01 || z.h < 0.01) return;
+      if (d.viaDouble) { setPendingZone(z); return; } // ждём кнопку «Распознать»
       if (mode === 'zone') await runDetect(z);
       if (mode === 'draw') await createManual(z);
       setMode('pan');
@@ -281,7 +313,10 @@ export default function RecognitionPage() {
       if (status === 'confirmed') {
         toast.success(doc?.sheet_id ? 'Подтверждено — лист спецификации обновлён' : 'Подтверждено — попадёт в лист спецификации');
       }
-      if (status === 'confirmed' || status === 'corrected') silentSheetSync();
+      if (status === 'confirmed' || status === 'corrected') {
+        setEditingId(null); // рамка «запекается» обратно в схему
+        silentSheetSync();
+      }
     } catch { toast.error('Не удалось сохранить'); }
   }
 
@@ -290,6 +325,7 @@ export default function RecognitionPage() {
       await recognitionApi.removeElement(el.id);
       setDoc((d) => d ? { ...d, elements: d.elements.filter((e) => e.id !== el.id) } : d);
       setSelId(null);
+      setEditingId(null);
       silentSheetSync();
     } catch { toast.error('Не удалось удалить'); }
   }
@@ -511,7 +547,7 @@ export default function RecognitionPage() {
               <span className="recog-toolhint">
                 {mode === 'zone' ? 'Выделите зону мышкой — распознавание запустится автоматически'
                   : mode === 'draw' ? 'Нарисуйте рамку вокруг элемента'
-                  : 'Колесо — масштаб · зажать и тянуть — перемещение'}
+                  : 'Колесо — масштаб · тянуть — перемещение · двойное нажатие + протянуть — выделить зону'}
               </span>
               <span className="recog-toolspacer" />
             </div>
@@ -533,19 +569,22 @@ export default function RecognitionPage() {
                   {page.width > 0 && pageElements.map((el) => {
                     const c = classColor(el);
                     const sel = el.id === selId;
+                    /* подтверждённая рамка «запечена»: не двигается и не тянется,
+                       пока в инспекторе не нажали «Редактировать» */
+                    const locked = el.status !== 'auto' && el.id !== editingId;
                     return (
                       <div
                         key={el.id}
-                        className={`recog-el ${sel ? 'sel' : ''} ${el.status === 'auto' ? 'auto' : ''}`}
+                        className={`recog-el ${sel ? 'sel' : ''} ${el.status === 'auto' ? 'auto' : ''} ${locked ? 'locked' : ''}`}
                         style={{
                           left: el.bbox.x * page.width, top: el.bbox.y * page.height,
                           width: el.bbox.w * page.width, height: el.bbox.h * page.height,
-                          borderColor: c, background: `${c}14`,
+                          borderColor: c, background: locked ? 'transparent' : `${c}14`,
                         }}
                         onPointerDown={(e) => {
                           e.stopPropagation();
                           setSelId(el.id);
-                          if (sel) {
+                          if (sel && !locked) {
                             (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
                             drag.current = { kind: 'move', start: toPagePoint(e.clientX, e.clientY), bbox: { ...el.bbox } };
                           }
@@ -557,7 +596,7 @@ export default function RecognitionPage() {
                           {el.klass} {Math.round((el.confidence || 0) * 100)}%
                           {el.status === 'confirmed' ? ' ✓' : el.status === 'corrected' ? ' ✎' : ''}
                         </span>
-                        {sel && ['nw','n','ne','e','se','s','sw','w'].map((h) => (
+                        {sel && !locked && ['nw','n','ne','e','se','s','sw','w'].map((h) => (
                           <span
                             key={h} className={`recog-handle rh-${h}`}
                             onPointerDown={(e) => {
@@ -576,9 +615,35 @@ export default function RecognitionPage() {
                   {zoneDraft && (
                     <div className="recog-zonedraft" style={{ left: zoneDraft.x, top: zoneDraft.y, width: zoneDraft.w, height: zoneDraft.h }} />
                   )}
+                  {/* зона от двойного нажатия — ждёт подтверждения */}
+                  {pendingZone && (
+                    <div className="recog-zone-pending" style={{
+                      left: pendingZone.x * page.width, top: pendingZone.y * page.height,
+                      width: pendingZone.w * page.width, height: pendingZone.h * page.height,
+                    }} />
+                  )}
                 </div>
               ) : (
                 <div className="recog-nopage">Нет видимых страниц</div>
+              )}
+
+              {/* кнопка подтверждения выделенной зоны */}
+              {pendingZone && page && (
+                <div
+                  className="recog-zone-confirm"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  style={{
+                    left: view.x + (pendingZone.x + pendingZone.w / 2) * page.width * view.z,
+                    top: view.y + (pendingZone.y + pendingZone.h) * page.height * view.z + 10,
+                  }}
+                >
+                  <button className="btn-primary" disabled={detecting || !configured}
+                    title={configured ? 'Распознать оборудование в выделенной области' : 'Распознавание не настроено'}
+                    onClick={() => { const z = pendingZone; setPendingZone(null); runDetect(z); }}>
+                    ⚡ Распознать
+                  </button>
+                  <button className="btn-outline" onClick={() => setPendingZone(null)} title="Отменить выделение">✕</button>
+                </div>
               )}
 
               {/* зум-виджет (как в референсе Контура) */}
@@ -622,9 +687,11 @@ export default function RecognitionPage() {
               </div>
             ) : (
               <InspectorPanel
-                key={selEl.id}
+                key={`${selEl.id}-${selEl.id === editingId ? 'edit' : 'view'}`}
                 el={selEl}
                 cfg={clsCfg}
+                editing={selEl.status === 'auto' || selEl.id === editingId}
+                onEdit={() => setEditingId(selEl.id)}
                 onClose={() => setSelId(null)}
                 onSave={(patch, status) => saveElement(selEl, patch, status)}
                 onDelete={() => deleteElement(selEl)}
@@ -684,9 +751,11 @@ export default function RecognitionPage() {
 }
 
 /* ── Инспектор ── */
-function InspectorPanel({ el, cfg, onClose, onSave, onDelete }: {
+function InspectorPanel({ el, cfg, editing, onEdit, onClose, onSave, onDelete }: {
   el: RecogElement;
   cfg: RecogClassConfig;
+  editing: boolean;
+  onEdit: () => void;
   onClose: () => void;
   onSave: (patch: Partial<RecogElement>, status?: string) => void;
   onDelete: () => void;
@@ -700,6 +769,42 @@ function InspectorPanel({ el, cfg, onClose, onSave, onDelete }: {
   const byCode = new Map<string, RecogClass>(cfg.classes.map((c) => [c.code, c]));
   const collect = (): Partial<RecogElement> => ({ klass, designation, fields, color });
   const warn = el.confidence > 0 && el.confidence < 0.7 && el.status === 'auto';
+
+  /* Подтверждённая рамка «уложена в схему» — просмотр без правок,
+     редактирование только после явной кнопки. */
+  if (!editing) {
+    return (
+      <div className="recog-insp">
+        <div className="recog-insp-head">
+          <b>{el.designation || byCode.get(el.klass)?.nameRu || 'Элемент'}</b>
+          <button onClick={onClose} title="Закрыть">×</button>
+        </div>
+        <div className="recog-insp-status">
+          <span className={`recog-pill st-${el.status}`}>
+            {el.status === 'confirmed' ? 'Подтверждён' : 'Исправлен'}
+          </span>
+        </div>
+        <div className="recog-insp-view">
+          <div className="recog-insp-viewrow">
+            <span>Класс</span><b>{el.klass} — {byCode.get(el.klass)?.nameRu || ''}</b>
+          </div>
+          {el.designation && (
+            <div className="recog-insp-viewrow"><span>Обозначение</span><b>{el.designation}</b></div>
+          )}
+          {Object.entries(el.fields || {}).map(([k, v]) => (
+            <div key={k} className="recog-insp-viewrow"><span>{k}</span><b>{v || '—'}</b></div>
+          ))}
+        </div>
+        <div className="recog-insp-btns">
+          <button className="btn-primary" onClick={onEdit}>✎ Редактировать</button>
+        </div>
+        <p className="recog-insp-hint">
+          Рамка зафиксирована на схеме: перемещение и изменение размера отключены.
+          Нажмите «Редактировать», чтобы изменить класс, параметры или рамку.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="recog-insp">
