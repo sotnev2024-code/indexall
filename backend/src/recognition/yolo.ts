@@ -17,7 +17,10 @@ export interface YoloBox {
   bbox: { x: number; y: number; w: number; h: number };
 }
 
-const INPUT_SIZE = 640;
+/** Размер входа модели: должен совпадать с imgsz при экспорте в ONNX
+ *  (yolo export … imgsz=640). Обучили/экспортировали на 1280 — задайте
+ *  RECOGNITION_YOLO_SIZE=1280 в .env.production. */
+const INPUT_SIZE = parseInt(process.env.RECOGNITION_YOLO_SIZE || '640', 10) || 640;
 const CONF_THRESHOLD = 0.25;
 const IOU_THRESHOLD = 0.45;
 const MAX_DETECTIONS = 300;
