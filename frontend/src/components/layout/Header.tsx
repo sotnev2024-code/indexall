@@ -94,19 +94,21 @@ export default function Header({ breadcrumb = 'Проекты', projectCost, sho
         )}
         {projectCost && <span className="project-cost">{projectCost}</span>}
 
-        {/* Распознавание схем */}
-        <button
-          onClick={() => router.push('/recognition')}
-          title="Распознавание схем — загрузите PDF, ИИ соберёт лист спецификации"
-          style={{
-            background: 'none', color: '#f5c800',
-            border: '1px solid #f5c800', borderRadius: 6,
-            padding: '5px 12px', fontSize: 12, fontWeight: 600,
-            cursor: 'pointer', whiteSpace: 'nowrap',
-          }}
-        >
-          ⚡ Схемы
-        </button>
+        {/* Распознавание схем — пока только для админа (обкатка) */}
+        {isAdmin && (
+          <button
+            onClick={() => router.push('/recognition')}
+            title="Распознавание схем — загрузите PDF, ИИ соберёт лист спецификации (видно только администратору)"
+            style={{
+              background: 'none', color: '#f5c800',
+              border: '1px solid #f5c800', borderRadius: 6,
+              padding: '5px 12px', fontSize: 12, fontWeight: 600,
+              cursor: 'pointer', whiteSpace: 'nowrap',
+            }}
+          >
+            ⚡ Схемы
+          </button>
+        )}
 
         {/* Admin-only: open the global ETM lookup modal from any page. */}
         {isAdmin && (

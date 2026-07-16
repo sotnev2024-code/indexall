@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import SectionOnboarding from '@/components/SectionOnboarding';
-import { recognitionApi, RecogDocument, RecogElement, RecogPage } from '@/lib/api';
+import { authApi, recognitionApi, RecogDocument, RecogElement, RecogPage } from '@/lib/api';
 
 /* ── Классы оборудования ── */
 const CLASSES: Record<string, { name: string; color: string }> = {
@@ -59,14 +59,22 @@ export default function RecognitionPage() {
   const drag = useRef<any>(null);
   const [zoneDraft, setZoneDraft] = useState<Zone | null>(null);
 
-  /* ── загрузка данных ── */
+  /* ── загрузка данных (раздел пока только для администратора) ── */
   useEffect(() => {
     if (typeof window !== 'undefined' && !localStorage.getItem('token')) {
       router.push('/auth/login');
       return;
     }
-    recognitionApi.list().then(({ data }) => setDocs(data)).catch(() => {});
-    recognitionApi.status().then(({ data }) => setConfigured(data.configured)).catch(() => {});
+    authApi.me()
+      .then(({ data }) => {
+        if (data?.plan !== 'admin') {
+          router.replace('/projects');
+          return;
+        }
+        recognitionApi.list().then(({ data: d }) => setDocs(d)).catch(() => {});
+        recognitionApi.status().then(({ data: d }) => setConfigured(d.configured)).catch(() => {});
+      })
+      .catch(() => router.replace('/projects'));
   }, [router]);
 
   const reloadDoc = useCallback(async (id: number) => {

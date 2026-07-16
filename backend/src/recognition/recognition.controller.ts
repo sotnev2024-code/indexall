@@ -6,6 +6,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminGuard } from '../auth/guards/admin.guard';
 import { RecognitionService } from './recognition.service';
 
 const documentStorage = diskStorage({
@@ -13,8 +14,11 @@ const documentStorage = diskStorage({
   filename: (_, file, cb) => cb(null, `recog-src-${Date.now()}${extname(file.originalname).toLowerCase()}`),
 });
 
+// Пока модуль обкатывается — доступ только администратору.
+// Когда откроем всем: убрать AdminGuard здесь и условия isAdmin в
+// Header.tsx / app/recognition/page.tsx.
 @Controller('recognition')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AdminGuard)
 export class RecognitionController {
   constructor(private readonly service: RecognitionService) {}
 
