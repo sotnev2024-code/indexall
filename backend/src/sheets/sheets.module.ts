@@ -9,11 +9,13 @@ import { SheetsService } from './sheets.service';
 import { SheetsController } from './sheets.controller';
 import { TrashModule } from '../trash/trash.module';
 import { ProGuard } from '../auth/guards/pro.guard';
+import { RecognitionModule } from '../recognition/recognition.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Sheet, EquipmentRow, Project, Folder, User]),
     TrashModule,
+    RecognitionModule,
   ],
   providers: [SheetsService, ProGuard],
   controllers: [SheetsController],

@@ -267,11 +267,20 @@ export default function RecognitionPage() {
     } catch { toast.error('Не удалось добавить рамку'); }
   }
 
+  /** Лист уже связан с документом → после правок тихо пересобираем его. */
+  function silentSheetSync() {
+    if (!doc?.sheet_id) return;
+    recognitionApi.createSheet(doc.id).catch(() => { /* напр. не осталось подтверждённых */ });
+  }
+
   async function saveElement(el: RecogElement, patch: Partial<RecogElement>, status?: string) {
     try {
       const { data } = await recognitionApi.updateElement(el.id, { ...patch, ...(status ? { status } : {}) } as any);
       if (data) patchElementLocal(el.id, data as any);
-      if (status === 'confirmed') toast.success('Подтверждено — попадёт в лист спецификации');
+      if (status === 'confirmed') {
+        toast.success(doc?.sheet_id ? 'Подтверждено — лист спецификации обновлён' : 'Подтверждено — попадёт в лист спецификации');
+      }
+      if (status === 'confirmed' || status === 'corrected') silentSheetSync();
     } catch { toast.error('Не удалось сохранить'); }
   }
 
@@ -280,6 +289,7 @@ export default function RecognitionPage() {
       await recognitionApi.removeElement(el.id);
       setDoc((d) => d ? { ...d, elements: d.elements.filter((e) => e.id !== el.id) } : d);
       setSelId(null);
+      silentSheetSync();
     } catch { toast.error('Не удалось удалить'); }
   }
 
@@ -336,8 +346,13 @@ export default function RecognitionPage() {
     setCreatingSheet(true);
     try {
       const { data } = await recognitionApi.createSheet(doc.id);
-      toast.success(`Лист создан (${data.rowCount} позиций) — папка «Распознавание»`);
-      router.push(`/spec/${data.sheetId}`);
+      setDoc((d) => d ? { ...d, sheet_id: data.sheetId } : d);
+      if (data.updated) {
+        toast.success(`Лист обновлён (${data.rowCount} позиций)`);
+      } else {
+        toast.success(`Лист создан (${data.rowCount} позиций) — папка «Распознавание»`);
+        router.push(`/spec/${data.sheetId}`);
+      }
     } catch (e: any) {
       toast.error(e?.response?.data?.message || 'Не удалось создать лист');
     } finally {
@@ -549,6 +564,7 @@ export default function RecognitionPage() {
               <span className="recog-specbar-t">Лист спецификации</span>
               <span className="recog-specbar-m">
                 {specRows.length} позиций из подтверждённых рамок · подтверждено {confirmedCount} из {(doc.elements || []).length}
+                {doc.sheet_id ? ' · связан с листом, обновляется сам' : ''}
               </span>
               <span className="recog-specbar-hint">нажмите, чтобы открыть</span>
             </div>
@@ -609,8 +625,13 @@ export default function RecognitionPage() {
             </div>
             <div className="recog-modal-foot">
               <button className="btn-outline" onClick={() => setSpecOpen(false)}>Закрыть</button>
+              {doc.sheet_id && (
+                <button className="btn-outline" onClick={() => router.push(`/spec/${doc.sheet_id}`)}>
+                  Открыть лист
+                </button>
+              )}
               <button className="btn-primary" disabled={!specRows.length || creatingSheet} onClick={createSheet}>
-                {creatingSheet ? 'Создаём…' : 'Создать лист в ИНДЕКСАЛЛ'}
+                {creatingSheet ? 'Сохраняем…' : doc.sheet_id ? 'Обновить лист' : 'Создать лист в ИНДЕКСАЛЛ'}
               </button>
             </div>
           </div>

@@ -32,6 +32,10 @@ export class RecognitionDocument {
   @Column({ default: 'rendering' })
   status: string;
 
+  /** Лист ИНДЕКСАЛЛ, собранный из этого документа (для синхронизации) */
+  @Column({ nullable: true })
+  sheet_id: number | null;
+
   @Column({ default: '' })
   error_message: string;
 

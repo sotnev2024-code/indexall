@@ -11,6 +11,7 @@ import { EquipmentRow } from '../equipment/equipment-row.entity';
 import { Project } from '../projects/project.entity';
 import { Folder } from '../folders/folder.entity';
 import { TrashService } from '../trash/trash.service';
+import { RecognitionService } from '../recognition/recognition.service';
 
 @Injectable()
 export class SheetsService {
@@ -21,6 +22,7 @@ export class SheetsService {
     @InjectRepository(Folder) private foldersRepo: Repository<Folder>,
     private readonly dataSource: DataSource,
     private readonly trashService: TrashService,
+    private readonly recognitionService: RecognitionService,
   ) {}
 
   /** Create sheet in a project (legacy — keeps backward compat) */
@@ -133,6 +135,8 @@ export class SheetsService {
       name: sheet.name,
     });
     await this.sheetsRepo.delete(sheetId);
+    // Лист мог быть собран из распознанной схемы — отвязываем документ
+    this.recognitionService.onSheetRemoved(sheetId);
     return { success: true };
   }
 
@@ -165,6 +169,10 @@ export class SheetsService {
         await manager.insert(EquipmentRow, toSave);
       }
     });
+
+    // Синхронизация с распознанной схемой: удалённая из листа строка
+    // снимает подтверждение с рамок, из которых была собрана.
+    this.recognitionService.onSheetRowsSaved(sheetId, rows || []);
 
     return this.getSheetWithRows(sheetId);
   }

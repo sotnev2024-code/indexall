@@ -505,74 +505,159 @@ export class RecognitionService {
     return { success: true };
   }
 
-  // ── Создание листа спецификации ───────────────────────────────
+  // ── Создание/синхронизация листа спецификации ─────────────────
 
-  /** Собирает лист ИНДЕКСАЛЛ из подтверждённых элементов документа
-   *  (нескрытые страницы; электроприёмники в лист не входят). */
+  /** Собирает лист ИНДЕКСАЛЛ из подтверждённых элементов документа.
+   *  Первый вызов создаёт лист (папка «Распознавание»), повторные —
+   *  обновляют его же: строки распознавания (помечены custom._recog)
+   *  пересобираются, строки, добавленные пользователем руками, не трогаем. */
   async createSheetFromDocument(docId: number, userId: number) {
     const doc = await this.checkDocOwner(docId, userId);
     const pages = await this.pagesRepo.find({ where: { document_id: docId, hidden: false } });
     if (!pages.length) throw new BadRequestException('В документе нет видимых страниц');
-    const elements = await this.elementsRepo.find({
-      where: { page_id: In(pages.map((p) => p.id)), status: In(['confirmed', 'corrected']) },
-    });
-    const usable = elements.filter((e) => e.klass !== 'load' && e.klass !== 'other');
+    const allElements = await this.elementsRepo.find({ where: { page_id: In(pages.map((p) => p.id)) } });
+    const usable = allElements.filter(
+      (e) => (e.status === 'confirmed' || e.status === 'corrected') && e.klass !== 'load' && e.klass !== 'other',
+    );
     if (!usable.length) {
       throw new BadRequestException('Нет подтверждённых элементов — подтвердите рамки на схеме (кнопка «Подтвердить»)');
     }
 
-    // Группировка одинаковых позиций
+    // Группировка одинаковых позиций (+ id рамок, из которых строка собрана)
     const cfg = await this.getClassConfig();
-    type Acc = { name: string; qty: number; unit: string };
+    type Acc = { name: string; qty: number; unit: string; ids: number[] };
     const acc = new Map<string, Acc>();
     for (const el of usable) {
       const f = el.fields || {};
       if (el.klass === 'cable') {
         const name = `Кабель ${f['Марка'] || ''} ${f['Жилы×сечение'] || ''}`.replace(/\s+/g, ' ').trim();
         const len = parseFloat(String(f['Длина, м'] || '').replace(',', '.'));
-        const cur = acc.get(name) || { name, qty: 0, unit: 'м' };
+        const cur = acc.get(name) || { name, qty: 0, unit: 'м', ids: [] };
         if (len > 0) cur.qty += len;
-        else cur.unit = cur.qty > 0 ? cur.unit : 'м'; // длины нет — оставим 0, пользователь допишет
+        cur.ids.push(el.id);
         acc.set(name, cur);
       } else {
         const name = this.deviceRowName(el.klass, f, cfg);
-        const cur = acc.get(name) || { name, qty: 0, unit: 'шт' };
+        const cur = acc.get(name) || { name, qty: 0, unit: 'шт', ids: [] };
         cur.qty += 1;
+        cur.ids.push(el.id);
         acc.set(name, cur);
       }
     }
 
-    // Папка «Распознавание» в меню проектов (создаём при первом использовании)
-    let folder = await this.foldersRepo.findOne({
-      where: { owner_id: userId, type: 'projects', name: 'Распознавание', parent_id: IsNull() },
-    });
-    if (!folder) {
-      folder = await this.foldersRepo.save({
-        name: 'Распознавание', owner_id: userId, type: 'projects', parent_id: null,
+    // Существующий связанный лист (если не удалён)
+    let sheet = doc.sheet_id
+      ? await this.sheetsRepo.findOne({ where: { id: doc.sheet_id, owner_id: userId } })
+      : null;
+    let created = false;
+
+    if (!sheet) {
+      // Папка «Распознавание» в меню проектов (создаём при первом использовании)
+      let folder = await this.foldersRepo.findOne({
+        where: { owner_id: userId, type: 'projects', name: 'Распознавание', parent_id: IsNull() },
       });
+      if (!folder) {
+        folder = await this.foldersRepo.save({
+          name: 'Распознавание', owner_id: userId, type: 'projects', parent_id: null,
+        });
+      }
+      const baseName = doc.filename.replace(/\.[a-z0-9]+$/i, '').slice(0, 80) || 'Схема';
+      sheet = await this.sheetsRepo.save({
+        folder_id: folder.id,
+        owner_id: userId,
+        name: `Распознавание — ${baseName}`,
+      });
+      await this.docsRepo.update(doc.id, { sheet_id: sheet.id });
+      created = true;
     }
 
-    const baseName = doc.filename.replace(/\.[a-z0-9]+$/i, '').slice(0, 80) || 'Схема';
-    const sheet = await this.sheetsRepo.save({
-      folder_id: folder.id,
-      owner_id: userId,
-      name: `Распознавание — ${baseName}`,
-    });
-    const rows = [...acc.values()].map((r, i) => ({
-      sheetId: sheet.id,
-      sort_order: i,
-      name: r.name,
-      brand: '',
-      article: '',
-      qty: String(Math.round(r.qty * 100) / 100),
-      unit: r.unit,
-      price: '0',
-      store: '',
-      coef: '1',
-      total: '0',
-    }));
-    await this.rowsRepo.save(rows);
-    return { sheetId: sheet.id, folderId: folder.id, rowCount: rows.length };
+    // Upsert строк распознавания; пользовательские строки не трогаем
+    const existing = await this.rowsRepo.find({ where: { sheetId: sheet.id }, order: { sort_order: 'ASC', id: 'ASC' } });
+    const ours = existing.filter((r) => r.custom && (r.custom as any)._recog);
+    const oursByName = new Map(ours.map((r) => [r.name, r]));
+    let nextOrder = existing.length ? Math.max(...existing.map((r) => r.sort_order)) + 1 : 0;
+
+    for (const g of acc.values()) {
+      const qty = String(Math.round(g.qty * 100) / 100);
+      const recogMark = JSON.stringify(g.ids);
+      const row = oursByName.get(g.name);
+      if (row) {
+        await this.rowsRepo.update(row.id, {
+          qty,
+          unit: g.unit,
+          custom: { ...(row.custom || {}), _recog: recogMark },
+        });
+        oursByName.delete(g.name);
+      } else {
+        await this.rowsRepo.save({
+          sheetId: sheet.id,
+          sort_order: nextOrder++,
+          name: g.name,
+          brand: '',
+          article: '',
+          qty,
+          unit: g.unit,
+          price: '0',
+          store: '',
+          coef: '1',
+          total: '0',
+          custom: { _recog: recogMark },
+        });
+      }
+    }
+    // Строки распознавания, которым больше не соответствует ни один элемент
+    for (const stale of oursByName.values()) {
+      await this.rowsRepo.delete(stale.id);
+    }
+
+    // Пометка элементов, попавших в лист (для обратной синхронизации)
+    const inSheetIds = new Set(usable.map((e) => e.id));
+    await this.elementsRepo.update({ id: In(allElements.map((e) => e.id)) }, { in_sheet: false });
+    if (inSheetIds.size) {
+      await this.elementsRepo.update({ id: In([...inSheetIds]) }, { in_sheet: true });
+    }
+
+    return { sheetId: sheet.id, rowCount: acc.size, updated: !created };
+  }
+
+  /** Обратная синхронизация (вызывается из SheetsService после сохранения
+   *  строк): пользователь удалил распознанную строку из листа → у рамок,
+   *  из которых она была собрана, снимается подтверждение (status='auto').
+   *  Разметку не удаляем физически — это ценность для датасета. */
+  async onSheetRowsSaved(sheetId: number, rows: { custom?: Record<string, string> }[]) {
+    try {
+      const docs = await this.docsRepo.find({ where: { sheet_id: sheetId } });
+      if (!docs.length) return;
+      const presentIds = new Set<number>();
+      for (const r of rows || []) {
+        const mark = r?.custom?.['_recog'];
+        if (!mark) continue;
+        try { (JSON.parse(String(mark)) as number[]).forEach((id) => presentIds.add(Number(id))); } catch {}
+      }
+      for (const doc of docs) {
+        const pages = await this.pagesRepo.find({ where: { document_id: doc.id } });
+        if (!pages.length) continue;
+        const linked = await this.elementsRepo.find({
+          where: { page_id: In(pages.map((p) => p.id)), in_sheet: true },
+        });
+        const removed = linked.filter((e) => !presentIds.has(e.id));
+        if (removed.length) {
+          await this.elementsRepo.update(
+            { id: In(removed.map((e) => e.id)) },
+            { in_sheet: false, status: 'auto' },
+          );
+        }
+      }
+    } catch (e: any) {
+      this.logger.warn(`Обратная синхронизация листа ${sheetId} не удалась: ${e?.message || e}`);
+    }
+  }
+
+  /** Лист удалён целиком — отвязываем документы (разметку не трогаем). */
+  async onSheetRemoved(sheetId: number) {
+    try {
+      await this.docsRepo.update({ sheet_id: sheetId }, { sheet_id: null });
+    } catch { /* некритично */ }
   }
 
   private deviceRowName(klass: string, f: Record<string, string>, cfg: ClassConfig): string {

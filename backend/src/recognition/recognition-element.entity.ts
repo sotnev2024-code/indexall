@@ -48,6 +48,10 @@ export class RecognitionElement {
   @Column({ default: 'auto' })
   status: string;
 
+  /** Элемент выгружен в связанный лист спецификации (для обратной синхронизации) */
+  @Column({ default: false })
+  in_sheet: boolean;
+
   /** Пользовательский цвет рамки (пусто — цвет класса) */
   @Column({ default: '' })
   color: string;

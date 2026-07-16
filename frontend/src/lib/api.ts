@@ -352,6 +352,7 @@ export interface RecogDocument {
   status: 'rendering' | 'ready' | 'error';
   error_message: string;
   createdAt: string;
+  sheet_id: number | null;
   pages: RecogPage[];
   elements: RecogElement[];
 }
@@ -382,5 +383,5 @@ export const recognitionApi = {
     api.patch<RecogElement>(`/recognition/elements/${id}`, patch),
   removeElement: (id: number) => api.delete(`/recognition/elements/${id}`),
   createSheet: (docId: number) =>
-    api.post<{ sheetId: number; folderId: number; rowCount: number }>(`/recognition/documents/${docId}/create-sheet`),
+    api.post<{ sheetId: number; rowCount: number; updated: boolean }>(`/recognition/documents/${docId}/create-sheet`),
 };

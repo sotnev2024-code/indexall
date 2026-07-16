@@ -24,5 +24,6 @@ import { AppSetting } from '../admin/app-setting.entity';
   ],
   controllers: [RecognitionController],
   providers: [RecognitionService],
+  exports: [RecognitionService],
 })
 export class RecognitionModule {}
