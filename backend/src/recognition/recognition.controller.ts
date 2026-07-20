@@ -7,7 +7,7 @@ import { diskStorage, memoryStorage } from 'multer';
 import { extname } from 'path';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { RecognitionAccessGuard } from './recognition-access.guard';
+import { AdminGuard } from '../auth/guards/admin.guard';
 import { RecognitionService } from './recognition.service';
 
 const documentStorage = diskStorage({
@@ -20,10 +20,11 @@ const modelStorage = diskStorage({
   filename: (_, file, cb) => cb(null, `model-${Date.now()}.onnx`),
 });
 
-// Пока модуль обкатывается — доступ только аккаунтам из
-// RECOGNITION_ALLOWED_EMAILS (см. recognition-access.guard.ts).
+// Обкатка: доступ всем администраторам. Когда откроем пользователям —
+// убрать AdminGuard здесь и проверки isAdmin в Header.tsx /
+// app/recognition/page.tsx (панели «Датасет» и «Модель» оставить админам).
 @Controller('recognition')
-@UseGuards(JwtAuthGuard, RecognitionAccessGuard)
+@UseGuards(JwtAuthGuard, AdminGuard)
 export class RecognitionController {
   constructor(private readonly service: RecognitionService) {}
 

@@ -40,9 +40,8 @@ export default function Header({ breadcrumb = 'Проекты', projectCost, sho
   }
 
   const isAdmin = user?.plan === 'admin';
-  // Распознавание схем на обкатке — доступ только этому аккаунту
-  // (синхронно с RECOGNITION_ALLOWED_EMAILS на бэке).
-  const canRecognition = (user?.email || '').toLowerCase() === 'sotnev2024@gmail.com';
+  // Распознавание схем на обкатке — доступно всем администраторам
+  const canRecognition = isAdmin;
 
   return (
     <header className="app-header">

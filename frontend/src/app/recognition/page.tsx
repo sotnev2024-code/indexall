@@ -137,8 +137,8 @@ export default function RecognitionPage() {
     }
     authApi.me()
       .then(({ data }) => {
-        // Обкатка: доступ только этому аккаунту (синхронно с бэком)
-        if ((data?.email || '').toLowerCase() !== 'sotnev2024@gmail.com') {
+        // Обкатка: доступ всем администраторам (синхронно с AdminGuard на бэке)
+        if (data?.plan !== 'admin') {
           router.replace('/projects');
           return;
         }
