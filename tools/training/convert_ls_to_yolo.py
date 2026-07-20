@@ -59,15 +59,37 @@ def parse_config(xml_text: str):
     return value_to_cat, names
 
 
-def find_image(images_dir: Path, image_ref: str):
-    """Ищет файл по ссылке из task.data.image (LS добавляет к именам префиксы)."""
+def norm_name(name: str) -> str:
+    """Нормализация имени для матчинга: LS заменяет пробелы/запятые/скобки
+    на подчёркивания и добавляет префикс-хэш — сравниваем только буквы/цифры."""
+    stem = re.sub(r'\.[A-Za-z0-9]+$', '', name)          # без расширения
+    stem = re.sub(r'^[0-9a-f]{8}-', '', stem)            # без префикса LS
+    return re.sub(r'[^0-9a-zа-яё]', '', stem.lower())
+
+
+def build_index(images_dir: Path):
+    """имя файла и нормализованное имя → путь (для быстрого поиска)."""
+    exact: dict = {}
+    normed: dict = {}
+    for p in sorted(images_dir.rglob('*')):
+        if not p.is_file() or p.suffix.lower() not in ('.png', '.jpg', '.jpeg', '.webp'):
+            continue
+        exact.setdefault(p.name, p)
+        normed.setdefault(norm_name(p.name), p)
+    return exact, normed
+
+
+def find_image(index, image_ref: str):
+    exact, normed = index
     base = unquote(image_ref.split('/')[-1].split('?')[0])
-    exact = images_dir / base
-    if exact.is_file():
-        return exact
-    # LS-upload переименовывает в '8чек-исходное.jpg' — ищем по суффиксу
-    for p in images_dir.iterdir():
-        if p.is_file() and (p.name.endswith(base) or base.endswith(p.name)):
+    if base in exact:
+        return exact[base]
+    nb = norm_name(base)
+    if nb in normed:
+        return normed[nb]
+    # последний шанс: нормализованное имя файла — суффикс ссылки или наоборот
+    for nn, p in normed.items():
+        if nn and (nb.endswith(nn) or nn.endswith(nb)):
             return p
     return None
 
@@ -85,19 +107,19 @@ def main():
     tasks = json.loads(Path(args.json).read_text(encoding='utf-8'))
     if isinstance(tasks, dict):
         tasks = tasks.get('tasks') or []
-    images_dir = Path(args.images)
+    index = build_index(Path(args.images))
     out = Path(args.out)
 
     items = []          # (img_path, [строки label])
-    missing_imgs = 0
+    missing = []
     unknown_labels = {}
     total_boxes = 0
 
     for task in tasks:
         image_ref = str((task.get('data') or {}).get('image') or '')
-        img = find_image(images_dir, image_ref) if image_ref else None
+        img = find_image(index, image_ref) if image_ref else None
         if img is None:
-            missing_imgs += 1
+            missing.append(unquote(image_ref.split('/')[-1]))
             continue
         anns = task.get('annotations') or []
         results = (anns[0].get('result') if anns else None) or []
@@ -147,8 +169,10 @@ def main():
     print(f'Готово: {out}')
     print(f'  картинок: {len(items)} (train {len(splits["train"])}, val {n_val})')
     print(f'  рамок: {total_boxes}')
-    if missing_imgs:
-        print(f'  ! не нашлось картинок для задач: {missing_imgs}')
+    if missing:
+        print(f'  ! не нашлось картинок для задач: {len(missing)}')
+        for name in missing[:8]:
+            print(f'    - {name}')
     if unknown_labels:
         print(f'  ! метки вне конфига (пропущены): {unknown_labels}')
     print('\nОбучение:')

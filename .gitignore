@@ -57,3 +57,6 @@ frontend/.env.production
 backend/.env.staging
 frontend/.env.staging
 *.env.staging
+
+# Схемы клиента для обучения (большие, не для git)
+схемы/
