@@ -1741,10 +1741,6 @@ function ModelPanel() {
         </div>
       )}
 
-      <p className="recog-dataset-note">
-        Обучение — у Максима (ultralytics): датасет из ZIP выше → yolo train data=data.yaml → model.export(format=onnx) →
-        загрузить файл сюда и активировать. Старые версии остаются для отката. Режимы кроме LLM доступны при активной модели.
-      </p>
     </div>
   );
 }
