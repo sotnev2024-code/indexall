@@ -74,7 +74,7 @@ const imgUrl = (p: RecogPage) => (p.image_url ? `${API_ORIGIN}${p.image_url}` : 
 const pageTitle = (p: RecogPage) => p.title || `Схема ${p.page_index}`;
 
 type Zone = { x: number; y: number; w: number; h: number };
-type Mode = 'pan' | 'zone' | 'draw';
+type Mode = 'pan' | 'zone';
 type PickedProduct = {
   product_name: string; brand: string; article: string; etm_code: string; price: string;
   /** параметры из атрибутов товара — заполняют поля инспектора */
@@ -101,6 +101,7 @@ export default function RecognitionPage() {
   const [creatingSheet, setCreatingSheet] = useState(false);
   const [configured, setConfigured] = useState(true);
   const [pickerElId, setPickerElId] = useState<number | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
   const [isFs, setIsFs] = useState(false);
   const workRef = useRef<HTMLDivElement>(null);
 
@@ -129,6 +130,12 @@ export default function RecognitionPage() {
       });
   }, []);
 
+  const reloadDoc = useCallback(async (id: number) => {
+    const { data } = await recognitionApi.getOne(id);
+    setDoc(data);
+    return data;
+  }, []);
+
   /* ── загрузка данных (раздел пока только для администратора) ── */
   useEffect(() => {
     if (typeof window !== 'undefined' && !localStorage.getItem('token')) {
@@ -145,9 +152,26 @@ export default function RecognitionPage() {
         loadDocs();
         recognitionApi.status().then(({ data: d }) => setConfigured(d.configured)).catch(() => {});
         recognitionApi.getClasses().then(({ data: d }) => { if (d?.classes?.length) setClsCfg(d); }).catch(() => {});
+        // F5 не сбрасывает открытую схему: восстанавливаем документ и лист
+        try {
+          const saved = JSON.parse(sessionStorage.getItem('recogState') || 'null');
+          if (saved?.docId) {
+            reloadDoc(saved.docId)
+              .then(() => { if (saved.pageId) setPageId(saved.pageId); })
+              .catch(() => sessionStorage.removeItem('recogState'));
+          }
+        } catch { /* повреждённое состояние — игнорируем */ }
       })
       .catch(() => router.replace('/projects'));
-  }, [router, loadDocs]);
+  }, [router, loadDocs, reloadDoc]);
+
+  /* запоминаем открытый документ/лист для восстановления после F5 */
+  useEffect(() => {
+    try {
+      if (doc) sessionStorage.setItem('recogState', JSON.stringify({ docId: doc.id, pageId }));
+      else sessionStorage.removeItem('recogState');
+    } catch { /* приватный режим и т.п. */ }
+  }, [doc?.id, pageId]);
 
   /* динамическая таксономия: код класса → карточка */
   const classByCode = useMemo(
@@ -158,12 +182,6 @@ export default function RecognitionPage() {
     el.color || classByCode.get(el.klass)?.color || '#64748b', [classByCode]);
   const className = useCallback((code: string) =>
     classByCode.get(code)?.nameRu || code, [classByCode]);
-
-  const reloadDoc = useCallback(async (id: number) => {
-    const { data } = await recognitionApi.getOne(id);
-    setDoc(data);
-    return data;
-  }, []);
 
   /* опрос, пока страницы рендерятся */
   useEffect(() => {
@@ -218,7 +236,7 @@ export default function RecognitionPage() {
   const pageElements = useMemo(() => (doc?.elements || []).filter((e) => page && e.page_id === page.id), [doc, page]);
   const selEl = useMemo(() => pageElements.find((e) => e.id === selId) || null, [pageElements, selId]);
 
-  /* вписать страницу в окно */
+  /* вписать страницу в окно (кнопка на проценте зума) */
   const fitPage = useCallback((p?: RecogPage | null) => {
     const pg = p || page;
     const vp = vpRef.current;
@@ -228,7 +246,12 @@ export default function RecognitionPage() {
     setView({ x: (r.width - pg.width * z) / 2, y: (r.height - pg.height * z) / 2, z });
   }, [page]);
 
-  useEffect(() => { fitPage(); setBatch(null); /* eslint-disable-next-line */ }, [page?.id, page?.width, isFs]);
+  /* лист открывается на 100% с левого верхнего угла (просьба Максима) */
+  const openAt100 = useCallback(() => {
+    setView({ x: 24, y: 24, z: 1 });
+  }, []);
+
+  useEffect(() => { openAt100(); setBatch(null); /* eslint-disable-next-line */ }, [page?.id, page?.width, isFs]);
 
   /* ── загрузка файла ── */
   const uploadFile = useCallback(async (file: File) => {
@@ -250,6 +273,7 @@ export default function RecognitionPage() {
   /* дозагрузка листов в открытый документ (пункт 1) */
   const addPagesFile = useCallback(async (file: File) => {
     if (!doc || uploading) return;
+    setAddOpen(false);
     setUploading(true);
     try {
       const { data } = await recognitionApi.addPages(doc.id, file);
@@ -282,14 +306,21 @@ export default function RecognitionPage() {
     return { x: (clientX - r.left - v.x) / v.z, y: (clientY - r.top - v.y) / v.z };
   };
 
+  /* «режим руки»: колесо — прокрутка (Shift — вбок), зум — только Ctrl+колесо */
   const onWheel = (e: React.WheelEvent) => {
     e.preventDefault();
-    const r = vpRef.current!.getBoundingClientRect();
     const v = viewRef.current;
-    const k = Math.exp(-e.deltaY * 0.0013);
-    const z = Math.max(0.05, Math.min(4, v.z * k));
-    const mx = e.clientX - r.left, my = e.clientY - r.top;
-    setView({ x: mx - ((mx - v.x) / v.z) * z, y: my - ((my - v.y) / v.z) * z, z });
+    if (e.ctrlKey || e.metaKey) {
+      const r = vpRef.current!.getBoundingClientRect();
+      const k = Math.exp(-e.deltaY * 0.0013);
+      const z = Math.max(0.05, Math.min(4, v.z * k));
+      const mx = e.clientX - r.left, my = e.clientY - r.top;
+      setView({ x: mx - ((mx - v.x) / v.z) * z, y: my - ((my - v.y) / v.z) * z, z });
+    } else if (e.shiftKey) {
+      setView({ ...v, x: v.x - (e.deltaY || e.deltaX) });
+    } else {
+      setView({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY });
+    }
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
@@ -302,9 +333,9 @@ export default function RecognitionPage() {
       Math.hypot(e.clientX - lastDownRef.current.x, e.clientY - lastDownRef.current.y) < 25;
     lastDownRef.current = { t: now, x: e.clientX, y: e.clientY };
 
-    if ((mode === 'zone' || mode === 'draw' || (isDouble && mode === 'pan')) && page?.image_url) {
+    if ((mode === 'zone' || (isDouble && mode === 'pan')) && page?.image_url) {
       const p = toPagePoint(e.clientX, e.clientY);
-      drag.current = { kind: 'zone', start: p, viaDouble: isDouble && mode === 'pan' };
+      drag.current = { kind: 'zone', start: p };
       setPendingZone(null);
       setBatch(null);
       setZoneDraft({ x: p.x, y: p.y, w: 0, h: 0 });
@@ -350,11 +381,9 @@ export default function RecognitionPage() {
         w: zoneDraft.w / page.width, h: zoneDraft.h / page.height,
       };
       setZoneDraft(null);
-      if (z.w < 0.01 || z.h < 0.01) return;
-      if (d.viaDouble) { setPendingZone(z); return; } // ждём кнопку «Распознать»
-      if (mode === 'zone') await runDetect(z);
-      if (mode === 'draw') await createManual(z);
       setMode('pan');
+      if (z.w < 0.01 || z.h < 0.01) return;
+      setPendingZone(z); // у зоны появятся действия: Распознать / Создать рамку
     } else if ((d.kind === 'move' || d.kind === 'resize') && selEl) {
       try { await recognitionApi.updateElement(selEl.id, { bbox: selEl.bbox }); } catch {}
     }
@@ -430,7 +459,10 @@ export default function RecognitionPage() {
     try {
       const { data } = await recognitionApi.createElement(page.id, { klass: 'other', bbox: zone, fields: {} });
       setDoc((d) => d ? { ...d, elements: [...d.elements, data] } : d);
+      // сразу в режим редактирования — иначе рамка «запечётся» и станет
+      // невидимой («рамка не фиксируется — исчезает»)
       setSelId(data.id);
+      setEditingId(data.id);
     } catch { toast.error('Не удалось добавить рамку'); }
   }
 
@@ -708,29 +740,19 @@ export default function RecognitionPage() {
                 Скрыто листов: {hiddenPages.length} — показать
               </button>
             )}
-            {/* пункт 1: добавить лист */}
-            <button className="recog-addpage" disabled={uploading}
-              onClick={() => document.getElementById('recog-addpage-input')?.click()}>
+            <button className="recog-addpage" disabled={uploading} onClick={() => setAddOpen(true)}>
               <Icon.plus /> Добавить лист
             </button>
-            <input id="recog-addpage-input" type="file" accept=".pdf,image/png,image/jpeg,image/webp" hidden
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) addPagesFile(f); (e.target as HTMLInputElement).value = ''; }} />
           </aside>
 
           {/* центр: канвас */}
           <div className="recog-canvas-wrap">
             <div className="recog-canvas-toolbar">
               <button className={mode === 'zone' ? 'btn-primary' : 'btn-outline'}
-                disabled={!page?.image_url || detecting || !configured}
-                title={configured ? 'Выделите область схемы — ИИ найдёт в ней оборудование' : 'Распознавание не настроено (нет ключа API)'}
+                disabled={!page?.image_url || detecting}
+                title="Выделите область — появятся действия: распознать или создать рамку"
                 onClick={() => setMode(mode === 'zone' ? 'pan' : 'zone')}>
-                Распознать зону
-              </button>
-              <button className={mode === 'draw' ? 'btn-primary' : 'btn-outline'}
-                disabled={!page?.image_url}
-                title="Нарисовать рамку вручную"
-                onClick={() => setMode(mode === 'draw' ? 'pan' : 'draw')}>
-                Добавить рамку
+                Выделить область
               </button>
               {page && (
                 <select
@@ -747,9 +769,8 @@ export default function RecognitionPage() {
                 </select>
               )}
               <span className="recog-toolhint">
-                {mode === 'zone' ? 'Выделите зону мышкой — распознавание запустится автоматически'
-                  : mode === 'draw' ? 'Нарисуйте рамку вокруг элемента'
-                  : 'Колесо — масштаб · тянуть — перемещение · двойное нажатие + протянуть — выделить зону'}
+                {mode === 'zone' ? 'Обведите область мышкой — появятся действия'
+                  : 'Колесо — прокрутка · Ctrl+колесо — масштаб · тянуть — перемещение · двойное нажатие + протянуть — выделить область'}
               </span>
               <span className="recog-toolspacer" />
             </div>
@@ -767,11 +788,15 @@ export default function RecognitionPage() {
                   {page.image_url
                     ? <img className="recog-pageimg" src={imgUrl(page)} width={page.width} height={page.height} alt="" draggable={false} />
                     : <div className="recog-pageloading">Лист готовится…</div>}
-                  {/* рамки */}
+                  {/* рамки. Слой масштабируется CSS-трансформом, поэтому толщину
+                      границ/ярлыков/маркеров компенсируем на 1/zoom — иначе на
+                      зуме 400% граница 2px превращается в жирные 8px и давит схему */}
                   {page.width > 0 && pageElements.map((el) => {
                     const c = classColor(el);
                     const sel = el.id === selId;
-                    /* подтверждённая рамка «запечена»: не двигается и не тянется,
+                    const inv = 1 / view.z; // компенсация масштаба
+                    /* подтверждённая рамка «запечена»: невидима (не перекрывает
+                       схему), проявляется при наведении/выборе; не двигается,
                        пока в инспекторе не нажали «Редактировать» */
                     const locked = el.status !== 'auto' && el.id !== editingId;
                     return (
@@ -781,7 +806,9 @@ export default function RecognitionPage() {
                         style={{
                           left: el.bbox.x * page.width, top: el.bbox.y * page.height,
                           width: el.bbox.w * page.width, height: el.bbox.h * page.height,
-                          borderColor: c, background: locked ? 'transparent' : `${c}14`,
+                          borderWidth: Math.max(1, 1.5 * inv),
+                          ...(locked && !sel ? {} : { borderColor: c }),
+                          background: locked ? 'transparent' : `${c}14`,
                         }}
                         onPointerDown={(e) => {
                           e.stopPropagation();
@@ -794,12 +821,14 @@ export default function RecognitionPage() {
                         onPointerMove={onPointerMove}
                         onPointerUp={onPointerUp}
                       >
-                        <span className="recog-el-chip" style={{ color: c, borderColor: c }}>
+                        <span className="recog-el-chip"
+                          style={{ color: c, borderColor: c, transform: `scale(${inv})`, transformOrigin: 'left bottom' }}>
                           {el.klass} {Math.round((el.confidence || 0) * 100)}%
                         </span>
                         {sel && !locked && ['nw','n','ne','e','se','s','sw','w'].map((h) => (
                           <span
                             key={h} className={`recog-handle rh-${h}`}
+                            style={{ width: 10 * inv, height: 10 * inv, borderWidth: Math.max(1, 2 * inv) }}
                             onPointerDown={(e) => {
                               e.stopPropagation();
                               (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -828,7 +857,7 @@ export default function RecognitionPage() {
                 <div className="recog-nopage">Нет видимых листов</div>
               )}
 
-              {/* кнопка подтверждения выделенной зоны */}
+              {/* действия над выделенной областью: распознать или создать рамку */}
               {pendingZone && page && (
                 <div
                   className="recog-zone-confirm"
@@ -839,9 +868,14 @@ export default function RecognitionPage() {
                   }}
                 >
                   <button className="btn-primary" disabled={detecting || !configured}
-                    title={configured ? 'Распознать оборудование в выделенной области' : 'Распознавание не настроено'}
+                    title={configured ? 'ИИ найдёт оборудование в выделенной области' : 'Распознавание не настроено'}
                     onClick={() => { const z = pendingZone; setPendingZone(null); runDetect(z); }}>
                     Распознать
+                  </button>
+                  <button className="btn-outline"
+                    title="Создать рамку элемента по этой области (ручная разметка)"
+                    onClick={() => { const z = pendingZone; setPendingZone(null); createManual(z); }}>
+                    Создать рамку
                   </button>
                   <button className="btn-outline" onClick={() => setPendingZone(null)} title="Отменить выделение"><Icon.cross /></button>
                 </div>
@@ -1014,6 +1048,38 @@ export default function RecognitionPage() {
           onClose={() => setPickerElId(null)}
           onPick={(p) => applyProduct(pickerElId, p)}
         />
+      )}
+
+      {/* добавление листа — то же меню, что при входе */}
+      {addOpen && doc && (
+        <div className="recog-overlay" onClick={(e) => { if (e.target === e.currentTarget) setAddOpen(false); }}>
+          <div className="recog-modal recog-addmodal">
+            <div className="recog-modal-head">
+              <b>Добавить лист в «{doc.filename}»</b>
+              <button className="recog-modal-x" onClick={() => setAddOpen(false)}><Icon.cross /></button>
+            </div>
+            <div
+              className="recog-drop recog-drop-inmodal"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                const f = e.dataTransfer.files?.[0];
+                if (f) { setAddOpen(false); addPagesFile(f); }
+              }}
+              onClick={() => document.getElementById('recog-addpage-input')?.click()}
+            >
+              <input id="recog-addpage-input" type="file" accept=".pdf,image/png,image/jpeg,image/webp" hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) { setAddOpen(false); addPagesFile(f); }
+                  (e.target as HTMLInputElement).value = '';
+                }} />
+              <div className="recog-drop-title">{uploading ? 'Загружаем…' : 'Перетащите PDF или изображение схемы'}</div>
+              <div className="recog-drop-sub">или нажмите, чтобы выбрать файл · можно вставить через Ctrl+V · листы добавятся в конец</div>
+              <button className="btn-primary" disabled={uploading}>Выбрать файл</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
