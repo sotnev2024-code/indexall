@@ -159,8 +159,11 @@ def main():
             shutil.copy2(img, out / 'images' / split / img.name)
             (out / 'labels' / split / (img.stem + '.txt')).write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
+    # ВАЖНО: `path` не пишем — ultralytics резолвит относительный path от CWD,
+    # а без него корректно берёт корнем папку самого data.yaml (переносимо
+    # и локально, и в Colab).
     yaml = ['# INDEXALL — датасет из Label Studio (нумерация классов = category)',
-            'path: .', 'train: images/train', f"val: images/{'val' if n_val else 'train'}",
+            'train: images/train', f"val: images/{'val' if n_val else 'train'}",
             f'nc: {len(names)}', 'names:']
     yaml += [f'  {i}: {n}' for i, n in enumerate(names)]
     (out / 'data.yaml').write_text('\n'.join(yaml) + '\n', encoding='utf-8')
