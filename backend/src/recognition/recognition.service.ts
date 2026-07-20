@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   BadRequestException,
   ServiceUnavailableException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, IsNull } from 'typeorm';
@@ -69,7 +70,7 @@ export const RECOGNITION_MODES = ['llm', 'shadow', 'cascade', 'yolo'] as const;
 type Bbox = { x: number; y: number; w: number; h: number };
 
 @Injectable()
-export class RecognitionService {
+export class RecognitionService implements OnModuleInit {
   private readonly logger = new Logger(RecognitionService.name);
   /** Рендер строго по одной странице за раз — на VPS 2 CPU/4 ГБ параллельный
    *  poppler легко душит основное приложение. */
@@ -90,6 +91,43 @@ export class RecognitionService {
 
   isConfigured(): boolean {
     return !!(process.env.RECOGNITION_API_URL?.trim() && process.env.RECOGNITION_API_KEY?.trim());
+  }
+
+  /** Очередь рендера живёт в памяти процесса — рестарт backend (деплой)
+   *  обрывал её, и документ навсегда застревал в «Готовим листы…».
+   *  При старте дорисовываем всё недорендеренное. */
+  async onModuleInit() {
+    try {
+      const stuck = await this.docsRepo.find({ where: { status: 'rendering' } });
+      for (const doc of stuck) {
+        const pages = await this.pagesRepo.find({
+          where: { document_id: doc.id },
+          order: { page_index: 'ASC' },
+        });
+        const pending = pages.filter((p) => !p.image_file);
+        if (!pending.length) {
+          await this.docsRepo.update(doc.id, { status: 'ready' });
+          continue;
+        }
+        const src = doc.source_file ? join(UPLOAD_DIR, doc.source_file) : '';
+        if (!src || !fs.existsSync(src)) {
+          await this.docsRepo.update(doc.id, {
+            status: 'error',
+            error_message: 'Исходный файл не найден — загрузите документ заново',
+          });
+          continue;
+        }
+        this.logger.log(`Возобновляю рендер документа ${doc.id} («${doc.filename}»): страниц ${pending.length}`);
+        this.enqueueRender(
+          doc,
+          src,
+          /\.pdf$/i.test(doc.source_file),
+          pending.map((p) => ({ pageId: p.id, fileNo: p.page_index })),
+        );
+      }
+    } catch (e: any) {
+      this.logger.warn(`Восстановление рендера не удалось: ${e?.message || e}`);
+    }
   }
 
   // ── Классы (таксономия из конфига Label Studio) ───────────────
