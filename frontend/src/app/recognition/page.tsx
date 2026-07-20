@@ -112,6 +112,9 @@ export default function RecognitionPage() {
   const [zoneDraft, setZoneDraft] = useState<Zone | null>(null);
   /* зона, выделенная двойным нажатием — ждёт кнопки «Распознать» */
   const [pendingZone, setPendingZone] = useState<Zone | null>(null);
+  /* результат последнего распознавания зоны: id рамок + зона — для
+     кнопок «Подтвердить все» / «Удалить» */
+  const [batch, setBatch] = useState<{ ids: number[]; zone: Zone } | null>(null);
   /* подтверждённая рамка «запекается»; редактируется только этот id */
   const [editingId, setEditingId] = useState<number | null>(null);
   const lastDownRef = useRef({ t: 0, x: 0, y: 0 });
@@ -225,7 +228,7 @@ export default function RecognitionPage() {
     setView({ x: (r.width - pg.width * z) / 2, y: (r.height - pg.height * z) / 2, z });
   }, [page]);
 
-  useEffect(() => { fitPage(); /* eslint-disable-next-line */ }, [page?.id, page?.width, isFs]);
+  useEffect(() => { fitPage(); setBatch(null); /* eslint-disable-next-line */ }, [page?.id, page?.width, isFs]);
 
   /* ── загрузка файла ── */
   const uploadFile = useCallback(async (file: File) => {
@@ -303,6 +306,7 @@ export default function RecognitionPage() {
       const p = toPagePoint(e.clientX, e.clientY);
       drag.current = { kind: 'zone', start: p, viaDouble: isDouble && mode === 'pan' };
       setPendingZone(null);
+      setBatch(null);
       setZoneDraft({ x: p.x, y: p.y, w: 0, h: 0 });
     } else {
       drag.current = { kind: 'pan', start, view: { ...viewRef.current } };
@@ -374,16 +378,51 @@ export default function RecognitionPage() {
   async function runDetect(zone: Zone) {
     if (!page) return;
     setDetecting(true);
+    setBatch(null);
     try {
       const { data } = await recognitionApi.detect(page.id, zone);
       setDoc((d) => d ? { ...d, elements: [...d.elements, ...data.elements] } : d);
       if (data.elements.length === 0) toast('В выбранной зоне ничего не нашлось — попробуйте другую область');
-      else toast.success(`Распознано элементов: ${data.elements.length}`);
+      else {
+        toast.success(`Распознано элементов: ${data.elements.length}`);
+        setBatch({ ids: data.elements.map((e) => e.id), zone });
+      }
     } catch (e: any) {
       toast.error(e?.response?.data?.message || 'Распознавание не удалось, попробуйте ещё раз');
     } finally {
       setDetecting(false);
     }
+  }
+
+  /** «Подтвердить все» для рамок последнего распознавания */
+  async function confirmBatch() {
+    if (!batch || !page) return;
+    const ids = batch.ids;
+    setBatch(null);
+    const results = await Promise.all(ids.map((id) =>
+      recognitionApi.updateElement(id, { status: 'confirmed' } as any).then((r) => r.data).catch(() => null)));
+    setDoc((d) => d ? {
+      ...d,
+      elements: d.elements.map((e) => {
+        const u: any = results.find((r: any) => r && r.id === e.id);
+        return u ? { ...e, ...u } : e;
+      }),
+    } : d);
+    const ok = results.filter(Boolean).length;
+    toast.success(page.sheet_id ? `Подтверждено: ${ok} — лист обновлён` : `Подтверждено: ${ok}`);
+    if (page.sheet_id) recognitionApi.createSheetForPage(page.id).catch(() => {});
+  }
+
+  /** «Удалить» — убрать все рамки последнего распознавания */
+  async function deleteBatch() {
+    if (!batch) return;
+    const ids = new Set(batch.ids);
+    setBatch(null);
+    await Promise.all([...ids].map((id) => recognitionApi.removeElement(id).catch(() => {})));
+    setDoc((d) => d ? { ...d, elements: d.elements.filter((e) => !ids.has(e.id)) } : d);
+    setSelId((cur) => (cur !== null && ids.has(cur) ? null : cur));
+    toast.success('Результат распознавания удалён');
+    if (page?.sheet_id) recognitionApi.createSheetForPage(page.id).catch(() => {});
   }
 
   async function createManual(zone: Zone) {
@@ -805,6 +844,29 @@ export default function RecognitionPage() {
                     Распознать
                   </button>
                   <button className="btn-outline" onClick={() => setPendingZone(null)} title="Отменить выделение"><Icon.cross /></button>
+                </div>
+              )}
+
+              {/* действия над результатом распознавания зоны */}
+              {batch && page && !detecting && (
+                <div
+                  className="recog-zone-confirm"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  style={{
+                    left: view.x + (batch.zone.x + batch.zone.w / 2) * page.width * view.z,
+                    top: view.y + (batch.zone.y + batch.zone.h) * page.height * view.z + 10,
+                  }}
+                >
+                  <span className="recog-batch-t">Найдено: {batch.ids.length}</span>
+                  <button className="btn-primary" onClick={confirmBatch}
+                    title="Подтвердить все распознанные рамки — попадут в лист спецификации">
+                    Подтвердить все
+                  </button>
+                  <button className="btn-outline" onClick={deleteBatch}
+                    title="Удалить все рамки этого распознавания">
+                    Удалить
+                  </button>
+                  <button className="btn-outline" onClick={() => setBatch(null)} title="Закрыть (оставить как есть)"><Icon.cross /></button>
                 </div>
               )}
 
