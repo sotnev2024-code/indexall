@@ -403,19 +403,31 @@ export class RecognitionService implements OnModuleInit {
       throw new BadRequestException('Страница ещё готовится — подождите пару секунд');
     }
     const z = this.clampZone(zone);
-    if (z.w < 0.02 || z.h < 0.02) throw new BadRequestException('Зона слишком маленькая — выделите область побольше');
-
-    // Кроп зоны из рендера страницы
-    const sharp = require('sharp');
+    // Порог в ПИКСЕЛЯХ листа, а не в долях: на чертеже 6600px одиночный
+    // автомат занимает <2% — процентный порог не давал выделить один элемент
     const left = Math.round(z.x * page.width);
     const top = Math.round(z.y * page.height);
     const width = Math.min(Math.round(z.w * page.width), page.width - left);
     const height = Math.min(Math.round(z.h * page.height), page.height - top);
+    if (width < 16 || height < 16) {
+      throw new BadRequestException('Зона слишком маленькая — растяните её чуть больше');
+    }
+
+    // Кроп зоны из рендера страницы
+    const sharp = require('sharp');
     let pipeline = sharp(join(UPLOAD_DIR, page.image_file)).extract({ left, top, width, height });
-    if (Math.max(width, height) > DETECT_MAX_EDGE) {
+    const maxEdge = Math.max(width, height);
+    if (maxEdge > DETECT_MAX_EDGE) {
       pipeline = pipeline.resize({
         width: width >= height ? DETECT_MAX_EDGE : undefined,
         height: height > width ? DETECT_MAX_EDGE : undefined,
+      });
+    } else if (maxEdge < 640) {
+      // Крошечная зона (один элемент): увеличиваем, чтобы модель читала подписи
+      pipeline = pipeline.resize({
+        width: width >= height ? 640 : undefined,
+        height: height > width ? 640 : undefined,
+        kernel: 'lanczos3',
       });
     }
     const buf: Buffer = await pipeline.jpeg({ quality: 85 }).toBuffer();

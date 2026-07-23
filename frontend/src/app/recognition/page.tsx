@@ -382,7 +382,9 @@ export default function RecognitionPage() {
       };
       setZoneDraft(null);
       setMode('pan');
-      if (z.w < 0.01 || z.h < 0.01) return;
+      // порог в пикселях листа: отсекает случайный клик, но позволяет
+      // выделить одиночный элемент на большом чертеже
+      if (z.w * page.width < 14 || z.h * page.height < 14) return;
       setPendingZone(z); // у зоны появятся действия: Распознать / Создать рамку
     } else if ((d.kind === 'move' || d.kind === 'resize') && selEl) {
       try { await recognitionApi.updateElement(selEl.id, { bbox: selEl.bbox }); } catch {}
