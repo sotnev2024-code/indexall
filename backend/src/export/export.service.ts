@@ -106,9 +106,14 @@ export class ExportService {
       // Autofilter on header row
       ws['!autofilter'] = { ref: `A3:${lastColLetter}3` };
 
-      // Excel sheet names: max 31 chars, must be unique, cannot be empty
+      // Excel sheet names: max 31 chars, must be unique, cannot be empty,
+      // and cannot contain : \ / ? * [ ] — а имена листов у нас бывают
+      // «КДУ-ДП2/1» (лист из распознанной схемы), поэтому чистим
       const usedNames = new Set(workbook.SheetNames);
-      let sheetName = (sheet.name || `Лист${data.sheets.indexOf(sheet) + 1}`).slice(0, 28);
+      let sheetName = (sheet.name || `Лист${data.sheets.indexOf(sheet) + 1}`)
+        .replace(/[:\\/?*\[\]]/g, '-')
+        .trim()
+        .slice(0, 28) || `Лист${data.sheets.indexOf(sheet) + 1}`;
       let attempt = sheetName;
       let n = 2;
       while (usedNames.has(attempt)) { attempt = `${sheetName.slice(0, 25)} (${n++})`; }
