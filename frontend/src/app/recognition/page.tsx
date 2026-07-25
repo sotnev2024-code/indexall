@@ -1389,10 +1389,10 @@ function productAttrs(p: any): { fields: Record<string, string>; product_class: 
   return { fields, product_class };
 }
 
-/** Характеристики товара для карточки: до 5 значимых строк */
-function productSpecLines(p: any): string[] {
+/** Характеристики товара парами [ключ, значение] — для карточки каталога */
+function productSpecList(p: any): [string, string][] {
   const { fields } = productAttrs(p);
-  return Object.entries(fields).slice(0, 5).map(([k, v]) => `${k}: ${v}`);
+  return Object.entries(fields) as [string, string][];
 }
 
 function CatalogPanel({ onClose, onPick }: {
@@ -1407,6 +1407,8 @@ function CatalogPanel({ onClose, onPick }: {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [openFilters, setOpenFilters] = useState<Record<string, boolean>>({});
+  /** раскрытая карточка товара (подробности как в подборе) */
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   /** цены ЭТМ по ключу article||etmCode — подтягиваются для показанных товаров */
   const [etmData, setEtmData] = useState<Record<string, { price: number | null; term: string | null }>>({});
   const etmRef = useRef(etmData); etmRef.current = etmData;
@@ -1521,28 +1523,64 @@ function CatalogPanel({ onClose, onPick }: {
         </div>
       )}
       {!loading && items.slice(0, 100).map((p, i) => {
+        const id = `${sv(p?.id) || sv(p?.article)}-${i}`;
         const etmKey = sv(p?.article) || sv(p?.etm_code) || sv(p?.etmCode);
         const etm = etmKey ? etmData[etmKey] : undefined;
         const img = sv(p?.image_url);
         const site = sv(p?.external_url);
+        const open = expandedId === id;
+        const specs = productSpecList(p);
         return (
-          <div key={`${sv(p?.id) || sv(p?.article)}-${i}`} className="recog-prodcard">
-            {img
-              ? <img className="recog-prodcard-img" src={img} alt="" loading="lazy"
-                  onError={(e) => { (e.target as HTMLImageElement).style.visibility = 'hidden'; }} />
-              : <div className="recog-prodcard-img recog-prodcard-noimg" />}
-            <div className="recog-prodcard-body">
-              <div className="recog-prodcard-name">{sv(p?.name) || '—'}</div>
-              <div className="recog-prodcard-meta">
-                {[sv(p?.article) && `Артикул ${sv(p.article)}`,
-                  sv(p?.brand) || sv(p?.manufacturer) || sv(p?.manufacturer?.name)]
-                  .filter(Boolean).join(' · ')}
+          <div key={id} className={`recog-prodcard ${open ? 'open' : ''}`}
+            onClick={() => setExpandedId(open ? null : id)}>
+            <div className="recog-prodcard-row">
+              {img
+                ? <img className={`recog-prodcard-img ${open ? 'big' : ''}`} src={img} alt="" loading="lazy"
+                    onError={(e) => { (e.target as HTMLImageElement).style.visibility = 'hidden'; }} />
+                : <div className={`recog-prodcard-img recog-prodcard-noimg ${open ? 'big' : ''}`} />}
+              <div className="recog-prodcard-body">
+                <div className="recog-prodcard-name">{sv(p?.name) || '—'}</div>
+                <div className="recog-prodcard-meta">
+                  {[sv(p?.article) && `Артикул ${sv(p.article)}`,
+                    sv(p?.brand) || sv(p?.manufacturer) || sv(p?.manufacturer?.name)]
+                    .filter(Boolean).join(' · ')}
+                </div>
+                {/* свёрнутая карточка — 3 характеристики, раскрытая — все */}
+                <div className="recog-prodcard-specs">
+                  {(open ? specs : specs.slice(0, 3)).map(([k, v]) => (
+                    <span key={k} className="recog-prodcard-spec">{k}: {v}</span>
+                  ))}
+                  {!open && specs.length > 3 && (
+                    <span className="recog-prodcard-more">ещё {specs.length - 3} — подробнее</span>
+                  )}
+                </div>
               </div>
-              <div className="recog-prodcard-specs">
-                {productSpecLines(p).map((line) => (
-                  <span key={line} className="recog-prodcard-spec">{line}</span>
-                ))}
+            </div>
+
+            {open && (
+              <div className="recog-prodcard-details" onClick={(e) => e.stopPropagation()}>
+                <div className="recog-prodcard-prices">
+                  {sv(p?.price) && <span>Цена каталога: <b>{sv(p.price)} ₽</b></span>}
+                  {etm?.price
+                    ? <span className="recog-prodcard-etm">Цена ЭТМ: {Number(etm.price).toLocaleString('ru-RU')} ₽{etm.term ? ` · срок ${etm.term}` : ''}</span>
+                    : etmKey ? <span className="recog-prodcard-etmwait">Цена ЭТМ загружается…</span> : null}
+                </div>
+                {Array.isArray(p?.accessories) && p.accessories.length > 0 && (
+                  <div className="recog-prodcard-acc">Аксессуаров в каталоге: {p.accessories.length}</div>
+                )}
+                <div className="recog-prodcard-foot">
+                  {site && (
+                    <a className="btn-outline recog-picker-pick" href={site} target="_blank" rel="noreferrer">
+                      Открыть на сайте
+                    </a>
+                  )}
+                  <span className="recog-prodcard-spacer" />
+                  <button className="btn-primary recog-picker-pick" onClick={() => pick(p)}>Выбрать</button>
+                </div>
               </div>
+            )}
+
+            {!open && (
               <div className="recog-prodcard-foot">
                 {sv(p?.price) && <span className="recog-prodcard-price">{sv(p.price)} ₽</span>}
                 {etm?.price ? (
@@ -1551,13 +1589,10 @@ function CatalogPanel({ onClose, onPick }: {
                   </span>
                 ) : null}
                 <span className="recog-prodcard-spacer" />
-                {site && (
-                  <a className="btn-outline recog-picker-pick" href={site} target="_blank" rel="noreferrer"
-                    onClick={(e) => e.stopPropagation()}>Сайт</a>
-                )}
-                <button className="btn-primary recog-picker-pick" onClick={() => pick(p)}>Выбрать</button>
+                <button className="btn-primary recog-picker-pick"
+                  onClick={(e) => { e.stopPropagation(); pick(p); }}>Выбрать</button>
               </div>
-            </div>
+            )}
           </div>
         );
       })}

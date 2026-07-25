@@ -1804,10 +1804,9 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-catalog-search { flex: 1; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
 .recog-catalog-t { font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
 
-/* экран категорий — те же плитки, что в подборе по категориям */
-.recog-catalog-tiles { flex: 1; overflow-y: auto; }
-.recog-tiles-grid { grid-template-columns: repeat(3, 1fr); grid-auto-rows: 132px; }
-@media (max-width: 1200px) { .recog-tiles-grid { grid-template-columns: repeat(2, 1fr); } }
+/* экран категорий — те же плитки, что в подборе, но компактнее (2 столбца) */
+.recog-catalog-tiles { flex: 1; overflow-y: auto; background: #e3e3e3; }
+.recog-tiles-grid { grid-template-columns: repeat(2, 1fr); grid-auto-rows: 104px; gap: 8px; padding: 10px; }
 
 /* категория открыта: фильтры слева, оборудование справа */
 .recog-catalog-body { flex: 1; display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 0; }
@@ -1821,10 +1820,20 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-catalog-items { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 .recog-catalog-note { font-size: 11px; color: var(--muted); padding: 8px 14px 12px; line-height: 1.5; border-top: 1px solid var(--border); }
 
-/* карточка товара в панели каталога: фото + данные, как в подборе, компактно */
-.recog-prodcard { display: flex; gap: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; background: var(--white); }
+/* карточка товара в панели каталога: фото + данные, как в подборе, компактно;
+   по клику раскрывается с полными характеристиками и ценами */
+.recog-prodcard { border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; background: var(--white); cursor: pointer; }
 .recog-prodcard:hover { border-color: var(--yellow); }
+.recog-prodcard.open { border-color: var(--yellow); background: #fffdf5; box-shadow: 0 2px 10px rgba(0,0,0,.07); }
+.recog-prodcard-row { display: flex; gap: 10px; }
 .recog-prodcard-img { width: 66px; height: 66px; object-fit: contain; background: #f5f5f5; border-radius: 6px; flex-shrink: 0; }
+.recog-prodcard-img.big { width: 110px; height: 110px; }
+.recog-prodcard-more { font-size: 11px; color: var(--accent, #1976d2); }
+.recog-prodcard-details { border-top: 1px dashed var(--border); margin-top: 8px; padding-top: 8px; }
+.recog-prodcard-prices { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
+.recog-prodcard-prices b { color: var(--text); }
+.recog-prodcard-etmwait { font-size: 11.5px; color: var(--muted); font-style: italic; }
+.recog-prodcard-acc { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
 .recog-prodcard-noimg { background: #f5f5f5; }
 .recog-prodcard-body { flex: 1; min-width: 0; }
 .recog-prodcard-name { font-size: 12.5px; font-weight: 600; line-height: 1.35; }
