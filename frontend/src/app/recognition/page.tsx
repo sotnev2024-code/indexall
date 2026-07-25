@@ -133,6 +133,7 @@ export default function RecognitionPage() {
   const [pickerElId, setPickerElId] = useState<number | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [docsOpen, setDocsOpen] = useState(false);
   const [isFs, setIsFs] = useState(false);
   const workRef = useRef<HTMLDivElement>(null);
 
@@ -746,10 +747,35 @@ export default function RecognitionPage() {
           {/* левая колонка: схемы */}
           <aside className="recog-pages">
             <div className="recog-pages-head">
-              <button className="btn-outline recog-back" onClick={() => { setDoc(null); setSelId(null); }}>
-                <Icon.back /> Документы
+              <button className="btn-outline recog-back" onClick={() => { setDoc(null); setSelId(null); setDocsOpen(false); }}>
+                <Icon.back /> Все документы
               </button>
-              <div className="recog-doc-title" title={doc.filename}>{doc.filename}</div>
+              {/* быстрый переход между своими документами, не выходя из схемы */}
+              <div className="recog-docswitch">
+                <button className="recog-docswitch-btn" onClick={() => { setDocsOpen((v) => !v); loadDocs(); }}
+                  title="Мои документы — переключиться на другой">
+                  <span className="recog-doc-title" title={doc.filename}>{doc.filename}</span>
+                  <span className="recog-docswitch-caret">{docsOpen ? '▴' : '▾'}</span>
+                </button>
+                {docsOpen && (
+                  <div className="recog-docswitch-list">
+                    {(docs || []).length === 0 && <div className="recog-docswitch-empty">Других документов нет</div>}
+                    {(docs || []).map((d) => (
+                      <button key={d.id}
+                        className={`recog-docswitch-item ${d.id === doc.id ? 'on' : ''}`}
+                        onClick={() => {
+                          setDocsOpen(false);
+                          if (d.id === doc.id) return;
+                          setSelId(null); setPageId(null);
+                          reloadDoc(d.id).catch(() => toast.error('Не удалось открыть документ'));
+                        }}>
+                        <b>{d.filename}</b>
+                        <span>{d.page_count} стр. · {new Date(d.createdAt).toLocaleDateString('ru-RU')}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="recog-pages-title">Листы ({visiblePages.length})</div>
             {visiblePages.length === 0 && doc.status !== 'rendering' && (
@@ -1625,24 +1651,17 @@ function CatalogPanel({ onClose, onPick }: {
       {showCats ? (
         /* экран выбора категории — плитки с картинками, как в каталоге */
         <div className="recog-catalog-tiles">
-          {/* та же сетка плиток, что в подборе по категориям (учитывает размер плитки) */}
-          <div className="category-tiles-ref recog-tiles-grid">
-            {tiles.filter((t) => t?.slug).map((t) => {
-              const w = t.width ?? (t.is_large ? 2 : 1);
-              const h = t.height ?? 1;
-              return (
-                <div key={t.slug} className="category-tile-ref"
-                  style={{ gridColumn: `span ${w}`, gridRow: `span ${h}`, aspectRatio: 'auto' }}
-                  onClick={() => openCategory(t.slug)}>
-                  {t.image_path
-                    ? <img className="category-tile-img" alt={sv(t.name)}
-                        src={`${process.env.NEXT_PUBLIC_API_URL}/uploads/${String(t.image_path).split(/[\\/]/).pop()}`} />
-                    : <div className="category-tile-icon" style={{ fontSize: 34 }}>{sv(t.icon) || '▦'}</div>}
-                  <div className="category-tile-name-ref">{sv(t.name) || t.slug}</div>
-                </div>
-              );
-            })}
-          </div>
+          {/* плитки категорий: картинка целиком (contain) + подпись, 2 в ряд */}
+          {tiles.filter((t) => t?.slug).map((t) => (
+            <button key={t.slug} className="recog-cat-tile" onClick={() => openCategory(t.slug)}>
+              {t.image_path
+                ? <img alt="" loading="lazy"
+                    src={`${process.env.NEXT_PUBLIC_API_URL}/uploads/${String(t.image_path).split(/[\\/]/).pop()}`}
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                : <span className="recog-cat-tile-icon">{sv(t.icon) || '▦'}</span>}
+              <span className="recog-cat-tile-name">{sv(t.name) || t.slug}</span>
+            </button>
+          ))}
           {tiles.length === 0 && <div className="recog-picker-note">Категории не настроены — воспользуйтесь поиском</div>}
         </div>
       ) : (
