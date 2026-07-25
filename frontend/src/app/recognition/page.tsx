@@ -5,7 +5,7 @@ import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import SectionOnboarding from '@/components/SectionOnboarding';
 import {
-  authApi, catalogApi, recognitionApi,
+  authApi, catalogApi, recognitionApi, storesApi,
   RecogClass, RecogClassConfig, RecogDocument, RecogElement, RecogPage,
 } from '@/lib/api';
 
@@ -1407,6 +1407,9 @@ function CatalogPanel({ onClose, onPick }: {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [openFilters, setOpenFilters] = useState<Record<string, boolean>>({});
+  /** цены ЭТМ по ключу article||etmCode — подтягиваются для показанных товаров */
+  const [etmData, setEtmData] = useState<Record<string, { price: number | null; term: string | null }>>({});
+  const etmRef = useRef(etmData); etmRef.current = etmData;
   const debounceRef = useRef<any>(null);
 
   useEffect(() => {
@@ -1467,6 +1470,30 @@ function CatalogPanel({ onClose, onPick }: {
     applyFilters(next);
   }
 
+  /* цены ЭТМ для первых показанных товаров (как в каталоге — пачкой, с паузой) */
+  useEffect(() => {
+    const wanted = items.slice(0, 30)
+      .map((p) => ({ article: sv(p?.article) || undefined, etmCode: (sv(p?.etm_code) || sv(p?.etmCode)) || undefined }))
+      .filter((it) => it.article || it.etmCode);
+    if (!wanted.length) return;
+    const t = setTimeout(async () => {
+      const have = etmRef.current;
+      const need = wanted.filter((it) => have[(it.article || it.etmCode) as string] === undefined);
+      if (!need.length) return;
+      try {
+        const { data } = await storesApi.getEtmPricesByItems(need);
+        setEtmData((prev) => {
+          const next = { ...prev };
+          for (const [k, price] of Object.entries(data || {})) {
+            next[k] = { price: price as number | null, term: next[k]?.term ?? null };
+          }
+          return next;
+        });
+      } catch { /* ЭТМ может быть недоступен — не мешаем работе */ }
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [items]);
+
   function pick(p: any) {
     const { fields, product_class } = productAttrs(p);
     onPick({
@@ -1493,23 +1520,47 @@ function CatalogPanel({ onClose, onPick }: {
           {searching ? 'Ничего не нашлось — попробуйте другой запрос' : 'Нет товаров по выбранным фильтрам'}
         </div>
       )}
-      {!loading && items.slice(0, 100).map((p, i) => (
-        <div key={`${sv(p?.id) || sv(p?.article)}-${i}`} className="recog-prodcard">
-          <div className="recog-prodcard-name">{sv(p?.name) || '—'}</div>
-          <div className="recog-prodcard-meta">
-            {[sv(p?.article) && `Артикул ${sv(p.article)}`,
-              sv(p?.brand) || sv(p?.manufacturer) || sv(p?.manufacturer?.name)]
-              .filter(Boolean).join(' · ')}
+      {!loading && items.slice(0, 100).map((p, i) => {
+        const etmKey = sv(p?.article) || sv(p?.etm_code) || sv(p?.etmCode);
+        const etm = etmKey ? etmData[etmKey] : undefined;
+        const img = sv(p?.image_url);
+        const site = sv(p?.external_url);
+        return (
+          <div key={`${sv(p?.id) || sv(p?.article)}-${i}`} className="recog-prodcard">
+            {img
+              ? <img className="recog-prodcard-img" src={img} alt="" loading="lazy"
+                  onError={(e) => { (e.target as HTMLImageElement).style.visibility = 'hidden'; }} />
+              : <div className="recog-prodcard-img recog-prodcard-noimg" />}
+            <div className="recog-prodcard-body">
+              <div className="recog-prodcard-name">{sv(p?.name) || '—'}</div>
+              <div className="recog-prodcard-meta">
+                {[sv(p?.article) && `Артикул ${sv(p.article)}`,
+                  sv(p?.brand) || sv(p?.manufacturer) || sv(p?.manufacturer?.name)]
+                  .filter(Boolean).join(' · ')}
+              </div>
+              <div className="recog-prodcard-specs">
+                {productSpecLines(p).map((line) => (
+                  <span key={line} className="recog-prodcard-spec">{line}</span>
+                ))}
+              </div>
+              <div className="recog-prodcard-foot">
+                {sv(p?.price) && <span className="recog-prodcard-price">{sv(p.price)} ₽</span>}
+                {etm?.price ? (
+                  <span className="recog-prodcard-etm">
+                    ЭТМ: {Number(etm.price).toLocaleString('ru-RU')} ₽{etm.term ? ` · ${etm.term}` : ''}
+                  </span>
+                ) : null}
+                <span className="recog-prodcard-spacer" />
+                {site && (
+                  <a className="btn-outline recog-picker-pick" href={site} target="_blank" rel="noreferrer"
+                    onClick={(e) => e.stopPropagation()}>Сайт</a>
+                )}
+                <button className="btn-primary recog-picker-pick" onClick={() => pick(p)}>Выбрать</button>
+              </div>
+            </div>
           </div>
-          {productSpecLines(p).map((line) => (
-            <div key={line} className="recog-prodcard-spec">{line}</div>
-          ))}
-          <div className="recog-prodcard-foot">
-            {sv(p?.price) && <span className="recog-prodcard-price">{sv(p.price)} ₽</span>}
-            <button className="btn-primary recog-picker-pick" onClick={() => pick(p)}>Выбрать</button>
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 
@@ -1539,14 +1590,24 @@ function CatalogPanel({ onClose, onPick }: {
       {showCats ? (
         /* экран выбора категории — плитки с картинками, как в каталоге */
         <div className="recog-catalog-tiles">
-          {tiles.filter((t) => t?.slug).map((t) => (
-            <button key={t.slug} className="recog-cat-tile" onClick={() => openCategory(t.slug)}>
-              {t.image_path
-                ? <img src={`${API_ORIGIN}/api/uploads/${String(t.image_path).split(/[\\/]/).pop()}`} alt="" />
-                : <span className="recog-cat-tile-icon">{sv(t.icon) || '▦'}</span>}
-              <span className="recog-cat-tile-name">{sv(t.name) || t.slug}</span>
-            </button>
-          ))}
+          {/* та же сетка плиток, что в подборе по категориям (учитывает размер плитки) */}
+          <div className="category-tiles-ref recog-tiles-grid">
+            {tiles.filter((t) => t?.slug).map((t) => {
+              const w = t.width ?? (t.is_large ? 2 : 1);
+              const h = t.height ?? 1;
+              return (
+                <div key={t.slug} className="category-tile-ref"
+                  style={{ gridColumn: `span ${w}`, gridRow: `span ${h}`, aspectRatio: 'auto' }}
+                  onClick={() => openCategory(t.slug)}>
+                  {t.image_path
+                    ? <img className="category-tile-img" alt={sv(t.name)}
+                        src={`${process.env.NEXT_PUBLIC_API_URL}/uploads/${String(t.image_path).split(/[\\/]/).pop()}`} />
+                    : <div className="category-tile-icon" style={{ fontSize: 34 }}>{sv(t.icon) || '▦'}</div>}
+                  <div className="category-tile-name-ref">{sv(t.name) || t.slug}</div>
+                </div>
+              );
+            })}
+          </div>
           {tiles.length === 0 && <div className="recog-picker-note">Категории не настроены — воспользуйтесь поиском</div>}
         </div>
       ) : (
