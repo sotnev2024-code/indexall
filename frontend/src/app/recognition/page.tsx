@@ -709,7 +709,10 @@ export default function RecognitionPage() {
             {(docs || []).map((d) => (
                 <div key={d.id} className="recog-docitem" onClick={() => reloadDoc(d.id).then(() => { setPageId(null); setSelId(null); })}>
                   <span className="recog-docname">{d.filename}</span>
-                  <span className="recog-docmeta">{d.page_count} стр. · {new Date(d.createdAt).toLocaleDateString('ru-RU')}</span>
+                  <span className="recog-docmeta">
+                    {d.page_count} стр. · {new Date(d.createdAt).toLocaleDateString('ru-RU')}
+                    {d.owner_email ? ` · ${d.owner_email}` : ''}
+                  </span>
                   <button
                     className="recog-docdel" title="Удалить документ"
                     onClick={async (e) => {
@@ -770,7 +773,10 @@ export default function RecognitionPage() {
                           reloadDoc(d.id).catch(() => toast.error('Не удалось открыть документ'));
                         }}>
                         <b>{d.filename}</b>
-                        <span>{d.page_count} стр. · {new Date(d.createdAt).toLocaleDateString('ru-RU')}</span>
+                        <span>
+                          {d.page_count} стр. · {new Date(d.createdAt).toLocaleDateString('ru-RU')}
+                          {d.owner_email ? ` · ${d.owner_email}` : ''}
+                        </span>
                       </button>
                     ))}
                   </div>

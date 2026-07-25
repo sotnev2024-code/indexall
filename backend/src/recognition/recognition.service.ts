@@ -324,12 +324,43 @@ export class RecognitionService implements OnModuleInit {
     await this.docsRepo.update(doc.id, { status: 'ready' });
   }
 
+  /** Админ? Кэш на минуту — используется для доступа к чужим схемам:
+   *  модуль общий, датасет один на всех, документы грузят несколько человек. */
+  private adminCache = new Map<number, { v: boolean; at: number }>();
+  private async isAdminUser(userId: number): Promise<boolean> {
+    const c = this.adminCache.get(userId);
+    if (c && Date.now() - c.at < 60_000) return c.v;
+    let v = false;
+    try {
+      const rows = await this.docsRepo.query(`SELECT plan FROM users WHERE id = $1`, [userId]);
+      v = String(rows?.[0]?.plan || '') === 'admin';
+    } catch { /* не смогли определить — считаем обычным пользователем */ }
+    this.adminCache.set(userId, { v, at: Date.now() });
+    return v;
+  }
+
+  /** Список документов. Админу видны все схемы (с пометкой владельца). */
   async listDocuments(userId: number) {
+    const isAdmin = await this.isAdminUser(userId);
     const docs = await this.docsRepo.find({
-      where: { owner_id: userId },
+      ...(isAdmin ? {} : { where: { owner_id: userId } }),
       order: { id: 'DESC' },
     });
-    return docs;
+    if (!isAdmin || !docs.length) return docs.map((d) => ({ ...d, owner_email: '', own: true }));
+    // подписываем владельца, чтобы было видно, чья схема
+    const ids = [...new Set(docs.map((d) => d.owner_id))];
+    let emails = new Map<number, string>();
+    try {
+      const rows = await this.docsRepo.query(
+        `SELECT id, email FROM users WHERE id = ANY($1)`, [ids],
+      );
+      emails = new Map(rows.map((r: any) => [Number(r.id), String(r.email || '')]));
+    } catch { /* без email — не критично */ }
+    return docs.map((d) => ({
+      ...d,
+      owner_email: d.owner_id === userId ? '' : (emails.get(d.owner_id) || `id ${d.owner_id}`),
+      own: d.owner_id === userId,
+    }));
   }
 
   async getDocument(id: number, userId: number) {
@@ -941,7 +972,7 @@ export class RecognitionService implements OnModuleInit {
     const page = await this.pagesRepo.findOne({ where: { sheet_id: sheetId } });
     if (!page) return { found: false };
     const doc = await this.docsRepo.findOne({ where: { id: page.document_id } });
-    if (!doc || doc.owner_id !== userId) return { found: false };
+    if (!doc || (doc.owner_id !== userId && !(await this.isAdminUser(userId)))) return { found: false };
     return {
       found: true,
       documentId: doc.id,
@@ -1320,7 +1351,10 @@ export class RecognitionService implements OnModuleInit {
   private async checkDocOwner(id: number, userId: number) {
     const doc = await this.docsRepo.findOne({ where: { id } });
     if (!doc) throw new NotFoundException('Документ не найден');
-    if (doc.owner_id !== userId) throw new ForbiddenException('Нет доступа');
+    // админы работают с общим набором схем (общий датасет для обучения)
+    if (doc.owner_id !== userId && !(await this.isAdminUser(userId))) {
+      throw new ForbiddenException('Нет доступа');
+    }
     return doc;
   }
 

@@ -137,6 +137,7 @@ export class RecognitionController {
 
   @Get('documents')
   list(@Request() req) {
+    // админам видны все схемы (чужие — с пометкой владельца)
     return this.service.listDocuments(req.user.userId);
   }
 
