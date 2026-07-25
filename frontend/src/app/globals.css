@@ -1556,11 +1556,8 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-docdel:hover { color: #dc3545; }
 
 /* — рабочее пространство — */
-.recog-work { flex: 1; display: grid; grid-template-columns: 224px minmax(0, 1fr) 272px; min-height: 0; }
-/* открыта панель каталога — четвёртая колонка справа, канвас сужается */
-.recog-work.with-catalog { grid-template-columns: 224px minmax(0, 1fr) 272px 400px; }
-@media (max-width: 1500px) { .recog-work.with-catalog { grid-template-columns: 200px minmax(0, 1fr) 260px 360px; } }
-@media (max-width: 900px) { .recog-work, .recog-work.with-catalog { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; overflow: auto; } }
+.recog-work { position: relative; flex: 1; display: grid; grid-template-columns: 224px minmax(0, 1fr) 272px; min-height: 0; }
+@media (max-width: 900px) { .recog-work { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; overflow: auto; } }
 
 /* левая колонка: страницы */
 .recog-pages { background: var(--white); border-right: 1px solid var(--border); overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
@@ -1795,20 +1792,34 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-spectab-dot { width: 7px; height: 7px; border-radius: 50%; background: #1e7e34; display: inline-block; }
 .recog-specwrap { padding: 0 6px; }
 
-/* панель каталога справа (вместо модалки) */
-.recog-catalog { background: var(--white); border-left: 1px solid var(--border); display: flex; flex-direction: column;
-  min-height: 0; overflow: hidden; }
+/* панель каталога — перекрывает инспектор справа */
+.recog-catalog { position: absolute; top: 0; right: 0; bottom: 0; width: min(820px, 66%); z-index: 40;
+  background: var(--white); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(0,0,0,.12);
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+@media (max-width: 900px) { .recog-catalog { position: fixed; width: 100%; } }
 .recog-catalog-head { display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 12px 14px 8px; border-bottom: 1px solid var(--border); }
-.recog-catalog-head b { font-size: 13.5px; }
-.recog-catalog-search { margin: 10px 14px 8px; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
-.recog-catalog-t { font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; padding: 2px 2px 4px; }
-.recog-catalog-cats { padding: 0 10px 8px; display: flex; flex-direction: column; gap: 3px; overflow-y: auto; }
-.recog-catalog-filters { padding: 0 10px 8px; border-bottom: 1px solid var(--border); max-height: 42%; overflow-y: auto; flex-shrink: 0; }
-.recog-catalog-crumbs { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.recog-catalog-head b { font-size: 14px; }
+.recog-catalog-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.recog-catalog-search { flex: 1; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
+.recog-catalog-t { font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+
+/* экран категорий — плитки с картинками */
+.recog-catalog-tiles { flex: 1; overflow-y: auto; padding: 14px; display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); align-content: start; }
+.recog-cat-tile { display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer;
+  background: var(--white); border: 1px solid var(--border); border-radius: 10px; padding: 12px 10px; transition: border-color .15s, box-shadow .15s; }
+.recog-cat-tile:hover { border-color: var(--yellow); box-shadow: 0 3px 12px rgba(0,0,0,.08); }
+.recog-cat-tile img { width: 100%; height: 92px; object-fit: contain; }
+.recog-cat-tile-icon { font-size: 34px; height: 92px; display: flex; align-items: center; }
+.recog-cat-tile-name { font-size: 12.5px; font-weight: 600; text-align: center; line-height: 1.3; }
+
+/* категория открыта: фильтры слева, оборудование справа */
+.recog-catalog-body { flex: 1; display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 0; }
+.recog-catalog-filters { border-right: 1px solid var(--border); padding: 10px; overflow-y: auto; }
+.recog-catalog-crumbs { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 .recog-catalog-reset { background: none; border: none; font-size: 11.5px; color: var(--muted); cursor: pointer; text-decoration: underline; }
 .recog-catalog-reset:hover { color: var(--text); }
-.recog-catalog-cat { font-size: 12.5px; font-weight: 700; background: var(--yellow); border-radius: 6px; padding: 7px 9px; margin-bottom: 8px; }
 .recog-catalog-filter-h { display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%;
   background: none; border: none; padding: 4px 2px; font-size: 11.5px; font-weight: 700; color: var(--text); cursor: pointer; }
 .recog-catalog-filter-h span { color: var(--muted); font-weight: 400; }
@@ -1829,14 +1840,11 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-picker-backbtn { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--white);
   border-radius: 6px; padding: 7px 9px; font-size: 12.5px; cursor: pointer; color: var(--text); }
 .recog-picker-backbtn:hover { border-color: var(--text); }
-.recog-picker-current { background: var(--yellow); border-radius: 6px; padding: 8px 10px; font-size: 12.5px; font-weight: 700; }
 .recog-picker-filter { border-top: 1px solid #eee; padding-top: 8px; margin-top: 6px; }
 .recog-picker-filter-t { font-size: 11px; font-weight: 700; margin-bottom: 4px; }
 .recog-picker-opts { display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; }
 .recog-picker-opt { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; padding: 2px 2px; }
 .recog-picker-opt input { accent-color: #1a1a1a; }
-.recog-picker-main { overflow: auto; min-height: 0; display: flex; flex-direction: column; }
-.recog-picker-tablewrap { padding: 0 6px; }
 .recog-picker-note { padding: 30px; color: var(--muted); font-size: 13px; text-align: center; }
 .recog-picker-pick { padding: 4px 10px; font-size: 11.5px; }
 .recog-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); }

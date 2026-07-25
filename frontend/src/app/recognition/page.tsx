@@ -742,7 +742,7 @@ export default function RecognitionPage() {
         </div>
       ) : (
         /* ── рабочее пространство документа ── */
-        <div className={`recog-work ${pickerElId != null ? 'with-catalog' : ''}`} ref={workRef}>
+        <div className="recog-work" ref={workRef}>
           {/* левая колонка: схемы */}
           <aside className="recog-pages">
             <div className="recog-pages-head">
@@ -1481,105 +1481,118 @@ function CatalogPanel({ onClose, onPick }: {
   }
 
   const catName = sv(tiles.find((t) => t.slug === slug)?.name) || slug;
+  const searching = q.trim().length >= 2;
+  /** экран категорий (плитки с картинками) — пока категория не выбрана и нет поиска */
+  const showCats = !slug && !searching;
+
+  const productList = (
+    <div className="recog-catalog-items">
+      {loading && <div className="recog-picker-note">Загрузка…</div>}
+      {!loading && items.length === 0 && (
+        <div className="recog-picker-note">
+          {searching ? 'Ничего не нашлось — попробуйте другой запрос' : 'Нет товаров по выбранным фильтрам'}
+        </div>
+      )}
+      {!loading && items.slice(0, 100).map((p, i) => (
+        <div key={`${sv(p?.id) || sv(p?.article)}-${i}`} className="recog-prodcard">
+          <div className="recog-prodcard-name">{sv(p?.name) || '—'}</div>
+          <div className="recog-prodcard-meta">
+            {[sv(p?.article) && `Артикул ${sv(p.article)}`,
+              sv(p?.brand) || sv(p?.manufacturer) || sv(p?.manufacturer?.name)]
+              .filter(Boolean).join(' · ')}
+          </div>
+          {productSpecLines(p).map((line) => (
+            <div key={line} className="recog-prodcard-spec">{line}</div>
+          ))}
+          <div className="recog-prodcard-foot">
+            {sv(p?.price) && <span className="recog-prodcard-price">{sv(p.price)} ₽</span>}
+            <button className="btn-primary recog-picker-pick" onClick={() => pick(p)}>Выбрать</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 
   return (
-    <aside className="recog-catalog">
+    <aside className="recog-catalog" onPointerDown={(e) => e.stopPropagation()}>
       <div className="recog-catalog-head">
-        <b>Добавить из базы</b>
-        <button className="recog-modal-x" onClick={onClose} title="Закрыть панель"><Icon.cross /></button>
+        <b>{showCats ? 'Добавить из базы' : searching ? 'Поиск по базе' : catName}</b>
+        <button className="recog-modal-x" onClick={onClose} title="Закрыть"><Icon.cross /></button>
       </div>
 
-      <input
-        className="recog-catalog-search"
-        placeholder="Поиск по названию или артикулу…"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        autoFocus
-      />
+      <div className="recog-catalog-bar">
+        {!showCats && (
+          <button className="recog-picker-backbtn"
+            onClick={() => { setSlug(''); setQ(''); setFilters([]); setSel({}); setItems([]); }}>
+            <Icon.back /> Категории
+          </button>
+        )}
+        <input
+          className="recog-catalog-search"
+          placeholder="Поиск по названию или артикулу…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          autoFocus
+        />
+      </div>
 
-      {/* категории / фильтры выбранной категории */}
-      {!slug && !q.trim() && (
-        <div className="recog-catalog-cats">
-          <div className="recog-catalog-t">Категории</div>
+      {showCats ? (
+        /* экран выбора категории — плитки с картинками, как в каталоге */
+        <div className="recog-catalog-tiles">
           {tiles.filter((t) => t?.slug).map((t) => (
-            <button key={t.slug} className="recog-picker-cat" onClick={() => openCategory(t.slug)}>
-              {sv(t.name) || t.slug}
+            <button key={t.slug} className="recog-cat-tile" onClick={() => openCategory(t.slug)}>
+              {t.image_path
+                ? <img src={`${API_ORIGIN}/api/uploads/${String(t.image_path).split(/[\\/]/).pop()}`} alt="" />
+                : <span className="recog-cat-tile-icon">{sv(t.icon) || '▦'}</span>}
+              <span className="recog-cat-tile-name">{sv(t.name) || t.slug}</span>
             </button>
           ))}
+          {tiles.length === 0 && <div className="recog-picker-note">Категории не настроены — воспользуйтесь поиском</div>}
         </div>
-      )}
-
-      {slug && (
-        <div className="recog-catalog-filters">
-          <div className="recog-catalog-crumbs">
-            <button className="recog-picker-backbtn"
-              onClick={() => { setSlug(''); setFilters([]); setSel({}); setItems([]); }}>
-              <Icon.back /> Категории
-            </button>
-            {Object.keys(sel).length > 0 && (
-              <button className="recog-catalog-reset" onClick={() => applyFilters({})}>Сбросить все</button>
-            )}
-          </div>
-          <div className="recog-catalog-cat">{catName}</div>
-          {filters.map((f, fi) => {
-            const label = filterLabel(f);
-            const opts = filterOpts(f);
-            if (!label || !opts.length) return null;
-            const open = openFilters[label] ?? fi < 2;
-            return (
-              <div key={`${label}-${fi}`} className="recog-picker-filter">
-                <button className="recog-catalog-filter-h"
-                  onClick={() => setOpenFilters((s) => ({ ...s, [label]: !open }))}>
-                  {label}
-                  {(sel[label]?.length ? ` (${sel[label].length})` : '')}
-                  <span>{open ? '−' : '+'}</span>
-                </button>
-                {open && (
-                  <div className="recog-picker-opts">
-                    {opts.slice(0, 40).map((o) => (
-                      <label key={o} className="recog-picker-opt">
-                        <input type="checkbox"
-                          checked={(sel[label] || []).includes(o)}
-                          onChange={() => toggleOpt(label, o)} />
-                        <span>{o}</span>
-                      </label>
-                    ))}
-                  </div>
+      ) : (
+        /* категория открыта: слева фильтры, справа оборудование */
+        <div className="recog-catalog-body">
+          {!searching && (
+            <aside className="recog-catalog-filters">
+              <div className="recog-catalog-crumbs">
+                <span className="recog-catalog-t">Фильтры</span>
+                {Object.keys(sel).length > 0 && (
+                  <button className="recog-catalog-reset" onClick={() => applyFilters({})}>Сбросить все</button>
                 )}
               </div>
-            );
-          })}
+              {filters.map((f, fi) => {
+                const label = filterLabel(f);
+                const opts = filterOpts(f);
+                if (!label || !opts.length) return null;
+                const open = openFilters[label] ?? fi < 3;
+                return (
+                  <div key={`${label}-${fi}`} className="recog-picker-filter">
+                    <button className="recog-catalog-filter-h"
+                      onClick={() => setOpenFilters((s) => ({ ...s, [label]: !open }))}>
+                      {label}{sel[label]?.length ? ` (${sel[label].length})` : ''}
+                      <span>{open ? '−' : '+'}</span>
+                    </button>
+                    {open && (
+                      <div className="recog-picker-opts">
+                        {opts.slice(0, 40).map((o) => (
+                          <label key={o} className="recog-picker-opt">
+                            <input type="checkbox"
+                              checked={(sel[label] || []).includes(o)}
+                              onChange={() => toggleOpt(label, o)} />
+                            <span>{o}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {filters.length === 0 && <div className="recog-picker-note">Фильтров нет</div>}
+            </aside>
+          )}
+          {productList}
         </div>
       )}
-
-      {/* товары карточками */}
-      <div className="recog-catalog-items">
-        {loading && <div className="recog-picker-note">Загрузка…</div>}
-        {!loading && items.length === 0 && (
-          <div className="recog-picker-note">
-            {q.trim().length >= 2 ? 'Ничего не нашлось — попробуйте другой запрос'
-              : slug ? 'Нет товаров по выбранным фильтрам'
-              : 'Введите запрос или выберите категорию'}
-          </div>
-        )}
-        {!loading && items.slice(0, 100).map((p, i) => (
-          <div key={`${sv(p?.id) || sv(p?.article)}-${i}`} className="recog-prodcard">
-            <div className="recog-prodcard-name">{sv(p?.name) || '—'}</div>
-            <div className="recog-prodcard-meta">
-              {[sv(p?.article) && `Артикул ${sv(p.article)}`,
-                sv(p?.brand) || sv(p?.manufacturer) || sv(p?.manufacturer?.name)]
-                .filter(Boolean).join(' · ')}
-            </div>
-            {productSpecLines(p).map((line) => (
-              <div key={line} className="recog-prodcard-spec">{line}</div>
-            ))}
-            <div className="recog-prodcard-foot">
-              {sv(p?.price) && <span className="recog-prodcard-price">{sv(p.price)} ₽</span>}
-              <button className="btn-primary recog-picker-pick" onClick={() => pick(p)}>Выбрать</button>
-            </div>
-          </div>
-        ))}
-      </div>
 
       <p className="recog-catalog-note">
         Выбранный товар привяжется к рамке: наименование, бренд, артикул и параметры уйдут в лист спецификации.
