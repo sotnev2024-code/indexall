@@ -935,6 +935,22 @@ export class RecognitionService implements OnModuleInit {
     }
   }
 
+  /** По листу спецификации найти схему, из которой он собран — для кнопки
+   *  «К схеме» на странице листа. */
+  async findBySheet(sheetId: number, userId: number) {
+    const page = await this.pagesRepo.findOne({ where: { sheet_id: sheetId } });
+    if (!page) return { found: false };
+    const doc = await this.docsRepo.findOne({ where: { id: page.document_id } });
+    if (!doc || doc.owner_id !== userId) return { found: false };
+    return {
+      found: true,
+      documentId: doc.id,
+      pageId: page.id,
+      title: page.title || `Схема ${page.page_index}`,
+      filename: doc.filename,
+    };
+  }
+
   /** Лист удалён целиком — отвязываем схему (разметку не трогаем). */
   async onSheetRemoved(sheetId: number) {
     try {

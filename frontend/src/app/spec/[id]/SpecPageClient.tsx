@@ -6,7 +6,7 @@ import Header from '@/components/layout/Header';
 import ImportModal from '@/components/ImportModal';
 import WelcomeModal from '@/components/WelcomeModal';
 import SectionOnboarding from '@/components/SectionOnboarding';
-import { sheetsApi, projectsApi, foldersApi, catalogApi, exportApi, storesApi, templatesApi, activityApi } from '@/lib/api';
+import { sheetsApi, projectsApi, foldersApi, catalogApi, exportApi, storesApi, templatesApi, activityApi, recognitionApi } from '@/lib/api';
 import { usePageTracker } from '@/hooks/usePageTracker';
 import { useAppStore } from '@/store/app.store';
 
@@ -323,6 +323,8 @@ export default function SpecPageClient() {
   }, [_setUnsaved, queueSaveRows]);
 
   const [sheet, setSheet] = useState<any>(null);
+  /** схема-источник листа (если лист собран распознаванием) — кнопка «К схеме» */
+  const [recogLink, setRecogLink] = useState<{ documentId?: number; pageId?: number; title?: string } | null>(null);
   const [project, setProject] = useState<any>(null);
   const [rows, setRows] = useState<any[]>([]);
   const [customColumns, setCustomColumns] = useState<{ key: string; label: string }[]>([]);
@@ -560,6 +562,10 @@ export default function SpecPageClient() {
       const { data: s } = await sheetsApi.getOne(currentIdRef.current);
       setSheet(s);
       setCustomColumns(s.custom_columns || []);
+      // если лист собран из распознанной схемы — покажем кнопку «К схеме»
+      recognitionApi.findBySheet(s.id)
+        .then(({ data: r }) => setRecogLink(r?.found ? r : null))
+        .catch(() => setRecogLink(null));
       const dbRows = s.rows || [];
       const cleanNum = (v: any, fallback = '') => {
         if (v === null || v === undefined || v === '') return fallback;
@@ -2152,6 +2158,18 @@ export default function SpecPageClient() {
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             Вставить шаблон
           </button>
+          {recogLink?.documentId && (
+            <button
+              className="btn-outline"
+              title={`Вернуться к распознаванию схемы «${recogLink.title || ''}»`}
+              onClick={() => router.push(`/recognition?doc=${recogLink.documentId}&page=${recogLink.pageId}`)}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+              К схеме
+            </button>
+          )}
           <div style={{ flex: 1 }} />
           <div className="spec-summary">
             <span className="spec-summary-item">

@@ -1557,7 +1557,10 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 
 /* — рабочее пространство — */
 .recog-work { flex: 1; display: grid; grid-template-columns: 224px minmax(0, 1fr) 272px; min-height: 0; }
-@media (max-width: 900px) { .recog-work { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; overflow: auto; } }
+/* открыта панель каталога — четвёртая колонка справа, канвас сужается */
+.recog-work.with-catalog { grid-template-columns: 224px minmax(0, 1fr) 272px 400px; }
+@media (max-width: 1500px) { .recog-work.with-catalog { grid-template-columns: 200px minmax(0, 1fr) 260px 360px; } }
+@media (max-width: 900px) { .recog-work, .recog-work.with-catalog { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; overflow: auto; } }
 
 /* левая колонка: страницы */
 .recog-pages { background: var(--white); border-right: 1px solid var(--border); overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
@@ -1573,14 +1576,27 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-pageinfo { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; color: var(--muted); flex: 1; min-width: 0; }
 .recog-pageinfo b { font-size: 12.5px; color: var(--text); }
 .recog-pageok { color: #1e7e34; font-weight: 600; }
-.recog-pageacts { display: flex; flex-direction: column; gap: 4px; }
-.recog-pageacts button { width: 22px; height: 22px; border: 1px solid var(--border); background: var(--white); border-radius: 5px; cursor: pointer; font-size: 12px; line-height: 1; color: var(--muted); }
+.recog-pageacts { display: flex; flex-direction: column; gap: 4px; align-self: center; flex-shrink: 0; }
+.recog-pageacts button { width: 22px; height: 22px; border: 1px solid var(--border); background: var(--white); border-radius: 5px;
+  cursor: pointer; font-size: 12px; line-height: 1; color: var(--muted); display: flex; align-items: center; justify-content: center; padding: 0; }
 .recog-pageacts button:hover { border-color: var(--text); color: var(--text); }
 .recog-pageacts button.ok { background: #e6f4ea; border-color: #1e7e34; color: #1e7e34; }
 .recog-render-note { font-size: 12px; color: var(--muted); text-align: center; padding: 8px 0; }
 .recog-pages-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; padding: 2px 2px 0; }
-.recog-hidden-note { border: 1px dashed var(--border); background: none; border-radius: 8px; padding: 8px; font-size: 12px; color: var(--muted); cursor: pointer; }
-.recog-hidden-note:hover { border-color: var(--text); color: var(--text); }
+/* корзина листов */
+.recog-trash { border: 1px dashed var(--border); border-radius: 8px; padding: 6px; display: flex; flex-direction: column; gap: 4px; }
+.recog-trash-head { display: flex; align-items: center; gap: 6px; background: none; border: none; padding: 4px 2px;
+  font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer; width: 100%; }
+.recog-trash-head:hover { color: var(--text); }
+.recog-trash-toggle { margin-left: auto; font-weight: 400; font-size: 11.5px; }
+.recog-trash-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted);
+  background: var(--white); border: 1px solid var(--border); border-radius: 6px; padding: 5px 6px 5px 8px; }
+.recog-trash-item span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recog-trash-item button { width: 22px; height: 22px; border: 1px solid var(--border); background: var(--white); border-radius: 5px;
+  cursor: pointer; color: var(--muted); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.recog-trash-item button:hover { border-color: #1e7e34; color: #1e7e34; }
+.recog-trash-all { background: none; border: none; font-size: 11.5px; color: var(--muted); cursor: pointer; text-decoration: underline; padding: 2px; }
+.recog-trash-all:hover { color: var(--text); }
 
 /* зум-виджет на канвасе */
 .recog-zoomctl { position: absolute; top: 10px; right: 10px; z-index: 15; display: flex; align-items: center;
@@ -1606,13 +1622,22 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-viewport.crosshair:active { cursor: crosshair; }
 .recog-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .recog-pageimg { display: block; background: #fff; box-shadow: 0 2px 14px rgba(0,0,0,.14); user-select: none; }
-.recog-pageloading, .recog-nopage { padding: 60px; color: var(--muted); font-size: 14px; }
-.recog-nopage { position: absolute; left: 50%; top: 40%; transform: translate(-50%,-50%); }
+.recog-pageloading { padding: 60px; color: var(--muted); font-size: 14px; }
+/* пустой канвас — сразу активная зона добавления листа */
+.recog-nopage-drop { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+  width: min(560px, 82%); background: var(--white); border: 2px dashed var(--border); border-radius: 14px;
+  padding: 40px 24px; display: flex; flex-direction: column; align-items: center; gap: 10px; cursor: pointer;
+  transition: border-color .15s; }
+.recog-nopage-drop:hover { border-color: var(--yellow); }
+
+/* бейдж активного режима распознавания */
+.recog-modebadge { font-size: 11.5px; font-weight: 700; color: var(--warn, #b45309); background: #fdf0dd;
+  border: 1px solid #e8c88a; border-radius: 12px; padding: 4px 10px; white-space: nowrap; cursor: help; }
 
 /* рамки элементов */
 .recog-el { position: absolute; border: 2px solid; border-radius: 3px; cursor: pointer; }
 .recog-el.auto { border-style: dashed; }
-.recog-el.sel { box-shadow: 0 0 0 2px rgba(245, 200, 0, .8); z-index: 5; cursor: move; }
+.recog-el.sel { z-index: 5; cursor: move; }
 .recog-el-chip { position: absolute; top: -20px; left: -2px; font-size: 10.5px; font-weight: 700; background: #fff;
   border: 1px solid; border-radius: 8px; padding: 1px 7px; white-space: nowrap; pointer-events: none; }
 .recog-handle { position: absolute; width: 10px; height: 10px; background: #fff; border: 2px solid var(--black); border-radius: 2px; z-index: 6; }
@@ -1620,16 +1645,15 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .rh-ne { right: -6px; top: -6px; cursor: nesw-resize; } .rh-e { right: -6px; top: calc(50% - 5px); cursor: ew-resize; }
 .rh-se { right: -6px; bottom: -6px; cursor: nwse-resize; } .rh-s { left: calc(50% - 5px); bottom: -6px; cursor: ns-resize; }
 .rh-sw { left: -6px; bottom: -6px; cursor: nesw-resize; } .rh-w { left: -6px; top: calc(50% - 5px); cursor: ew-resize; }
-.recog-zonedraft { position: absolute; border: 2px dashed var(--black); background: rgba(245, 200, 0, .12); pointer-events: none; }
-.recog-zone-pending { position: absolute; border: 2px dashed var(--black); background: rgba(245, 200, 0, .10); pointer-events: none; }
+.recog-zonedraft { position: absolute; border: 2px solid var(--yellow); border-radius: 4px;
+  background: rgba(245, 200, 0, .14); pointer-events: none; }
 .recog-zone-confirm { position: absolute; z-index: 16; transform: translateX(-50%); display: flex; gap: 6px; align-items: center;
   background: var(--white); border: 1px solid var(--border); border-radius: 8px; padding: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.16); }
 .recog-batch-t { font-size: 12px; font-weight: 600; color: var(--muted); padding: 0 4px; white-space: nowrap; }
 
-/* «запечённые» подтверждённые рамки: невидимы, чтобы не перекрывать схему;
-   проявляются при наведении, выбранная — цветом класса (inline) */
-.recog-el.locked { border-style: solid; border-color: transparent; cursor: pointer; }
-.recog-el.locked:hover { border-color: rgba(100, 116, 139, .45); }
+/* подтверждённые рамки: сплошная тонкая рамка + полупрозрачная заливка
+   цвета класса (как в Label Studio); не двигаются до «Редактировать» */
+.recog-el.locked { border-style: solid; cursor: pointer; }
 .recog-el.locked .recog-el-chip { display: none; }
 .recog-el.locked:hover .recog-el-chip { display: inline-block; }
 .recog-el.locked.sel .recog-el-chip { display: inline-block; }
@@ -1771,11 +1795,34 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-spectab-dot { width: 7px; height: 7px; border-radius: 50%; background: #1e7e34; display: inline-block; }
 .recog-specwrap { padding: 0 6px; }
 
-/* пикер каталога */
-.recog-picker-search { flex: 1; margin: 0 12px; border: 1px solid var(--border); border-radius: 6px; padding: 8px 11px; font-size: 13px; }
-.recog-picker-body { flex: 1; display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 0; }
-.recog-picker-side { border-right: 1px solid var(--border); overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 4px; }
-.recog-picker-side-t { font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; padding: 2px; }
+/* панель каталога справа (вместо модалки) */
+.recog-catalog { background: var(--white); border-left: 1px solid var(--border); display: flex; flex-direction: column;
+  min-height: 0; overflow: hidden; }
+.recog-catalog-head { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 12px 14px 8px; border-bottom: 1px solid var(--border); }
+.recog-catalog-head b { font-size: 13.5px; }
+.recog-catalog-search { margin: 10px 14px 8px; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
+.recog-catalog-t { font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; padding: 2px 2px 4px; }
+.recog-catalog-cats { padding: 0 10px 8px; display: flex; flex-direction: column; gap: 3px; overflow-y: auto; }
+.recog-catalog-filters { padding: 0 10px 8px; border-bottom: 1px solid var(--border); max-height: 42%; overflow-y: auto; flex-shrink: 0; }
+.recog-catalog-crumbs { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.recog-catalog-reset { background: none; border: none; font-size: 11.5px; color: var(--muted); cursor: pointer; text-decoration: underline; }
+.recog-catalog-reset:hover { color: var(--text); }
+.recog-catalog-cat { font-size: 12.5px; font-weight: 700; background: var(--yellow); border-radius: 6px; padding: 7px 9px; margin-bottom: 8px; }
+.recog-catalog-filter-h { display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%;
+  background: none; border: none; padding: 4px 2px; font-size: 11.5px; font-weight: 700; color: var(--text); cursor: pointer; }
+.recog-catalog-filter-h span { color: var(--muted); font-weight: 400; }
+.recog-catalog-items { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.recog-catalog-note { font-size: 11px; color: var(--muted); padding: 8px 14px 12px; line-height: 1.5; border-top: 1px solid var(--border); }
+
+/* карточка товара в панели каталога */
+.recog-prodcard { border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; background: var(--white); }
+.recog-prodcard:hover { border-color: var(--yellow); }
+.recog-prodcard-name { font-size: 12.5px; font-weight: 600; line-height: 1.35; }
+.recog-prodcard-meta { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+.recog-prodcard-spec { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.recog-prodcard-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.recog-prodcard-price { font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .recog-picker-cat { text-align: left; border: 1px solid transparent; background: none; border-radius: 6px; padding: 7px 9px; font-size: 12.5px; cursor: pointer; color: var(--text); }
 .recog-picker-cat:hover { background: var(--selected); }
 .recog-picker-cat.on { background: var(--yellow); font-weight: 700; }

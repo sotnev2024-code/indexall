@@ -387,6 +387,10 @@ export const recognitionApi = {
   },
   createSheetForPage: (pageId: number) =>
     api.post<{ sheetId: number; rowCount: number; updated: boolean }>(`/recognition/pages/${pageId}/create-sheet`),
+  /** Схема, из которой собран лист спецификации (для кнопки «К схеме») */
+  findBySheet: (sheetId: number) =>
+    api.get<{ found: boolean; documentId?: number; pageId?: number; title?: string; filename?: string }>(
+      `/recognition/by-sheet/${sheetId}`),
   getClasses: () => api.get<RecogClassConfig>('/recognition/classes'),
   saveLsConfig: (xml: string) => api.put<RecogClassConfig>('/recognition/classes/ls-config', { xml }),
   datasetStats: () => api.get('/recognition/dataset/stats'),

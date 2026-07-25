@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import SectionOnboarding from '@/components/SectionOnboarding';
@@ -33,6 +33,25 @@ const FUN_PHRASES = [
   'Ну почти получилось…',
   'Ща-ща…',
 ];
+
+/** Допустимые значения параметров — редактирование выпадающим списком
+ *  вместо свободного текста (просьба Максима). Ключи совпадают с полями,
+ *  которые заполняют LLM и пикер каталога. */
+const PARAM_OPTIONS: Record<string, string[]> = {
+  'Полюса': ['1P', '1P+N', '2P', '3P', '3P+N', '4P'],
+  'Хар-ка': ['B', 'C', 'D', 'K', 'Z'],
+  'Номинал, А': ['0,5', '1', '1,6', '2', '3', '4', '5', '6', '8', '10', '13', '16', '20', '25', '32', '40',
+    '50', '63', '80', '100', '125', '160', '200', '250', '315', '400', '500', '630'],
+  'Утечка, мА': ['10', '30', '100', '300', '500'],
+  'Тип расцепителя': ['AC', 'A', 'B', 'F', 'S'],
+  'Откл. способность, кА': ['4,5', '6', '10', '15', '20', '25', '36', '50'],
+  'Катушка, В': ['12', '24', '110', '230', '400'],
+  'Марка': ['ВВГнг(А)-LS', 'ВВГнг(А)-FRLS', 'ВВГнг(А)-LSLTx', 'ПвПГнг(А)-FRHF', 'ПуГВ', 'ПуВ', 'КГтп-ХЛ'],
+  'Жилы×сечение': ['2×1,5', '3×1,5', '3×2,5', '3×4', '3×6', '4×2,5', '4×4', '5×2,5', '5×4', '5×6',
+    '5×10', '5×16', '5×25', '5×35', '5×50'],
+};
+/** Значение-переключатель на ручной ввод */
+const CUSTOM_OPT = '__custom__';
 
 /* 15 популярных цветов рамок (пункт 7) */
 const SWATCHES = [
@@ -67,6 +86,13 @@ const Icon = {
   up: () => (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
       <polyline points="18 15 12 9 6 15" /></svg>),
+  trash: () => (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>),
+  restore: () => (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M3 12a9 9 0 1 0 3-6.7" /><polyline points="3 4 3 9 8 9" /></svg>),
 };
 
 const API_ORIGIN = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api').replace(/\/api\/?$/, '');
@@ -74,7 +100,8 @@ const imgUrl = (p: RecogPage) => (p.image_url ? `${API_ORIGIN}${p.image_url}` : 
 const pageTitle = (p: RecogPage) => p.title || `Схема ${p.page_index}`;
 
 type Zone = { x: number; y: number; w: number; h: number };
-type Mode = 'pan' | 'zone';
+/** pan — перемещение; detect — обвести область для ИИ; manual — обвести элемент вручную */
+type Mode = 'pan' | 'detect' | 'manual';
 type PickedProduct = {
   product_name: string; brand: string; article: string; etm_code: string; price: string;
   /** параметры из атрибутов товара — заполняют поля инспектора */
@@ -85,6 +112,7 @@ type PickedProduct = {
 
 export default function RecognitionPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   /* null — ещё грузится; [] — пусто */
   const [docs, setDocs] = useState<any[] | null>(null);
   const [docsError, setDocsError] = useState(false);
@@ -100,8 +128,11 @@ export default function RecognitionPage() {
   const [specTab, setSpecTab] = useState<number | null>(null);
   const [creatingSheet, setCreatingSheet] = useState(false);
   const [configured, setConfigured] = useState(true);
+  /** активный режим распознавания (llm/shadow/cascade/yolo) — для бейджа в тулбаре */
+  const [recogMode, setRecogMode] = useState('llm');
   const [pickerElId, setPickerElId] = useState<number | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
   const [isFs, setIsFs] = useState(false);
   const workRef = useRef<HTMLDivElement>(null);
 
@@ -111,8 +142,6 @@ export default function RecognitionPage() {
   const vpRef = useRef<HTMLDivElement>(null);
   const drag = useRef<any>(null);
   const [zoneDraft, setZoneDraft] = useState<Zone | null>(null);
-  /* зона, выделенная двойным нажатием — ждёт кнопки «Распознать» */
-  const [pendingZone, setPendingZone] = useState<Zone | null>(null);
   /* результат последнего распознавания зоны: id рамок + зона — для
      кнопок «Подтвердить все» / «Удалить» */
   const [batch, setBatch] = useState<{ ids: number[]; zone: Zone } | null>(null);
@@ -152,7 +181,17 @@ export default function RecognitionPage() {
         loadDocs();
         recognitionApi.status().then(({ data: d }) => setConfigured(d.configured)).catch(() => {});
         recognitionApi.getClasses().then(({ data: d }) => { if (d?.classes?.length) setClsCfg(d); }).catch(() => {});
-        // F5 не сбрасывает открытую схему: восстанавливаем документ и лист
+        recognitionApi.listModels().then(({ data: d }) => { if (d?.mode) setRecogMode(d.mode); }).catch(() => {});
+        // Приоритет: ?doc=&page= (переход с листа спецификации), иначе —
+        // восстановление после F5 из sessionStorage
+        const qDoc = Number(searchParams.get('doc'));
+        const qPage = Number(searchParams.get('page'));
+        if (qDoc) {
+          reloadDoc(qDoc)
+            .then(() => { if (qPage) setPageId(qPage); })
+            .catch(() => toast.error('Схема не найдена'));
+          return;
+        }
         try {
           const saved = JSON.parse(sessionStorage.getItem('recogState') || 'null');
           if (saved?.docId) {
@@ -207,14 +246,14 @@ export default function RecognitionPage() {
     setEditingId((cur) => (cur !== null && cur !== selId ? null : cur));
   }, [selId]);
 
-  /* Esc: отмена выделенной зоны / снятие выбора */
+  /* Esc: выход из режима выделения / снятие выбора рамки */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      setPendingZone((z) => {
-        if (z) return null;
+      setMode((m) => {
+        if (m !== 'pan') return 'pan';
         setSelId(null);
-        return z;
+        return m;
       });
     };
     window.addEventListener('keydown', onKey);
@@ -327,16 +366,16 @@ export default function RecognitionPage() {
     if ((e.target as HTMLElement).closest('.recog-el, .recog-handle, .recog-zone-confirm')) return;
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     const start = { x: e.clientX, y: e.clientY };
-    /* двойное нажатие (второе — удержать и тянуть) = выделение зоны из режима перемещения */
+    /* двойное нажатие (второе — удержать и тянуть) = распознавание из режима перемещения */
     const now = Date.now();
     const isDouble = now - lastDownRef.current.t < 450 &&
       Math.hypot(e.clientX - lastDownRef.current.x, e.clientY - lastDownRef.current.y) < 25;
     lastDownRef.current = { t: now, x: e.clientX, y: e.clientY };
 
-    if ((mode === 'zone' || (isDouble && mode === 'pan')) && page?.image_url) {
+    if ((mode !== 'pan' || isDouble) && page?.image_url) {
       const p = toPagePoint(e.clientX, e.clientY);
-      drag.current = { kind: 'zone', start: p };
-      setPendingZone(null);
+      // в режиме pan двойное нажатие означает распознавание
+      drag.current = { kind: 'zone', start: p, action: mode === 'manual' ? 'manual' : 'detect' };
       setBatch(null);
       setZoneDraft({ x: p.x, y: p.y, w: 0, h: 0 });
     } else {
@@ -385,7 +424,8 @@ export default function RecognitionPage() {
       // порог в пикселях листа: отсекает случайный клик, но позволяет
       // выделить одиночный элемент на большом чертеже
       if (z.w * page.width < 14 || z.h * page.height < 14) return;
-      setPendingZone(z); // у зоны появятся действия: Распознать / Создать рамку
+      if (d.action === 'manual') await createManual(z);
+      else await runDetect(z);
     } else if ((d.kind === 'move' || d.kind === 'resize') && selEl) {
       try { await recognitionApi.updateElement(selEl.id, { bbox: selEl.bbox }); } catch {}
     }
@@ -525,21 +565,27 @@ export default function RecognitionPage() {
     } catch { toast.error('Не удалось привязать товар'); }
   }
 
-  async function hidePage(p: RecogPage) {
-    if (!confirm(`Скрыть «${pageTitle(p)}»? Вернуть можно кнопкой «Показать скрытые» внизу списка.`)) return;
+  /** удаление листа = перенос в корзину (восстановимо до удаления документа) */
+  async function trashPage(p: RecogPage) {
+    if (!confirm(`Удалить «${pageTitle(p)}» в корзину? Восстановить можно из корзины внизу списка.`)) return;
     await recognitionApi.updatePage(p.id, { hidden: true });
     patchPageLocal(p.id, { hidden: true });
     if (page?.id === p.id) setPageId(null);
   }
 
-  async function restoreHiddenPages() {
+  async function restorePage(p: RecogPage) {
+    await recognitionApi.updatePage(p.id, { hidden: false });
+    patchPageLocal(p.id, { hidden: false });
+  }
+
+  async function restoreAllPages() {
     if (!doc) return;
-    const hidden = doc.pages.filter((p) => p.hidden);
-    for (const p of hidden) {
+    const trashed = doc.pages.filter((p) => p.hidden);
+    for (const p of trashed) {
       try { await recognitionApi.updatePage(p.id, { hidden: false }); } catch {}
     }
     setDoc((d) => d ? { ...d, pages: d.pages.map((x) => ({ ...x, hidden: false })) } : d);
-    toast.success(`Листов возвращено: ${hidden.length}`);
+    toast.success(`Восстановлено листов: ${trashed.length}`);
   }
 
   /** переименование схемы (пункт 4): лист спецификации переименуется на бэке */
@@ -696,7 +742,7 @@ export default function RecognitionPage() {
         </div>
       ) : (
         /* ── рабочее пространство документа ── */
-        <div className="recog-work" ref={workRef}>
+        <div className={`recog-work ${pickerElId != null ? 'with-catalog' : ''}`} ref={workRef}>
           {/* левая колонка: схемы */}
           <aside className="recog-pages">
             <div className="recog-pages-head">
@@ -708,7 +754,7 @@ export default function RecognitionPage() {
             <div className="recog-pages-title">Листы ({visiblePages.length})</div>
             {visiblePages.length === 0 && doc.status !== 'rendering' && (
               <div className="recog-render-note">
-                {hiddenPages.length ? 'Все листы скрыты' : 'Листов нет'}
+                {hiddenPages.length ? 'Все листы в корзине' : 'Листов нет — добавьте схему'}
               </div>
             )}
             {visiblePages.map((p) => (
@@ -730,17 +776,35 @@ export default function RecognitionPage() {
                   <button title={p.confirmed ? 'Снять отметку «проверена»' : 'Подтвердить лист (проверен целиком)'}
                     className={p.confirmed ? 'ok' : ''}
                     onClick={(e) => { e.stopPropagation(); togglePageConfirmed(p); }}><Icon.check /></button>
-                  <button title="Скрыть лист (лишний в проекте)"
-                    onClick={(e) => { e.stopPropagation(); hidePage(p); }}><Icon.cross /></button>
+                  <button title="Удалить лист в корзину"
+                    onClick={(e) => { e.stopPropagation(); trashPage(p); }}><Icon.trash /></button>
                 </div>
               </div>
             ))}
             {doc.status === 'rendering' && <div className="recog-render-note">Готовим листы… {visiblePages.filter((p) => p.image_url).length}/{doc.page_count}</div>}
+
+            {/* корзина листов: раскрывается, восстановление по одному */}
             {hiddenPages.length > 0 && (
-              <button className="recog-hidden-note" onClick={restoreHiddenPages}
-                title="Скрытые листы не участвуют в распознавании и спецификации">
-                Скрыто листов: {hiddenPages.length} — показать
-              </button>
+              <div className="recog-trash">
+                <button className="recog-trash-head" onClick={() => setTrashOpen((v) => !v)}
+                  title="Удалённые листы. Окончательно удаляются вместе с документом">
+                  <Icon.trash /> Корзина: {hiddenPages.length}
+                  <span className="recog-trash-toggle">{trashOpen ? 'скрыть' : 'показать'}</span>
+                </button>
+                {trashOpen && (
+                  <>
+                    {hiddenPages.map((p) => (
+                      <div key={p.id} className="recog-trash-item">
+                        <span title={pageTitle(p)}>{pageTitle(p)}</span>
+                        <button onClick={() => restorePage(p)} title="Восстановить лист"><Icon.restore /></button>
+                      </div>
+                    ))}
+                    {hiddenPages.length > 1 && (
+                      <button className="recog-trash-all" onClick={restoreAllPages}>Восстановить все</button>
+                    )}
+                  </>
+                )}
+              </div>
             )}
             <button className="recog-addpage" disabled={uploading} onClick={() => setAddOpen(true)}>
               <Icon.plus /> Добавить лист
@@ -750,31 +814,30 @@ export default function RecognitionPage() {
           {/* центр: канвас */}
           <div className="recog-canvas-wrap">
             <div className="recog-canvas-toolbar">
-              <button className={mode === 'zone' ? 'btn-primary' : 'btn-outline'}
-                disabled={!page?.image_url || detecting}
-                title="Выделите область — появятся действия: распознать или создать рамку"
-                onClick={() => setMode(mode === 'zone' ? 'pan' : 'zone')}>
-                Выделить область
+              <button className={mode === 'detect' ? 'btn-primary' : 'btn-outline'}
+                disabled={!page?.image_url || detecting || !configured}
+                title={configured ? 'Обведите область — ИИ найдёт в ней оборудование' : 'Распознавание не настроено (нет ключа API)'}
+                onClick={() => setMode(mode === 'detect' ? 'pan' : 'detect')}>
+                Распознать
               </button>
-              {page && (
-                <select
-                  className="recog-schematype"
-                  title="Тип схемы на этом листе (уходит в датасет)"
-                  value={page.schema_type || 'single_line'}
-                  onChange={async (e) => {
-                    const v = e.target.value;
-                    const { data } = await recognitionApi.updatePage(page.id, { schema_type: v });
-                    patchPageLocal(page.id, data as any);
-                  }}
-                >
-                  {clsCfg.schemaTypes.map((t) => <option key={t.value} value={t.value}>{t.nameRu}</option>)}
-                </select>
-              )}
+              <button className={mode === 'manual' ? 'btn-primary' : 'btn-outline'}
+                disabled={!page?.image_url}
+                title="Обведите элемент — откроется инспектор для ручного заполнения"
+                onClick={() => setMode(mode === 'manual' ? 'pan' : 'manual')}>
+                Выделить элемент
+              </button>
               <span className="recog-toolhint">
-                {mode === 'zone' ? 'Обведите область мышкой — появятся действия'
-                  : 'Колесо — прокрутка · Ctrl+колесо — масштаб · тянуть — перемещение · двойное нажатие + протянуть — выделить область'}
+                {mode === 'detect' ? 'Обведите область для распознавания'
+                  : mode === 'manual' ? 'Обведите элемент — заполните класс и параметры в инспекторе'
+                  : 'Колесо — прокрутка · Ctrl+колесо — масштаб · тянуть — перемещение · двойное нажатие + протянуть — распознать'}
               </span>
               <span className="recog-toolspacer" />
+              {recogMode !== 'llm' && (
+                <span className="recog-modebadge"
+                  title="Режим распознавания меняется в панели «Модель YOLO и режим распознавания» на экране документов">
+                  {recogMode === 'yolo' ? 'Только YOLO' : recogMode === 'cascade' ? 'Каскад YOLO→LLM' : 'Теневой режим'}
+                </span>
+              )}
             </div>
 
             <div
@@ -808,9 +871,12 @@ export default function RecognitionPage() {
                         style={{
                           left: el.bbox.x * page.width, top: el.bbox.y * page.height,
                           width: el.bbox.w * page.width, height: el.bbox.h * page.height,
-                          borderWidth: Math.max(1, 1.5 * inv),
-                          ...(locked && !sel ? {} : { borderColor: c }),
-                          background: locked ? 'transparent' : `${c}14`,
+                          // как в Label Studio: полупрозрачная заливка + тонкая рамка
+                          // цвета класса; без второго контура у выбранной рамки
+                          borderWidth: Math.max(1, (sel ? 2 : 1.5) * inv),
+                          borderColor: c,
+                          background: sel ? `${c}3d` : locked ? `${c}20` : `${c}14`,
+                          borderRadius: Math.max(2, 4 * inv),
                         }}
                         onPointerDown={(e) => {
                           e.stopPropagation();
@@ -843,43 +909,26 @@ export default function RecognitionPage() {
                       </div>
                     );
                   })}
-                  {/* зона выделения */}
+                  {/* зона выделения — жёлтая рамка, толщина не растёт с зумом */}
                   {zoneDraft && (
-                    <div className="recog-zonedraft" style={{ left: zoneDraft.x, top: zoneDraft.y, width: zoneDraft.w, height: zoneDraft.h }} />
-                  )}
-                  {/* зона от двойного нажатия — ждёт подтверждения */}
-                  {pendingZone && (
-                    <div className="recog-zone-pending" style={{
-                      left: pendingZone.x * page.width, top: pendingZone.y * page.height,
-                      width: pendingZone.w * page.width, height: pendingZone.h * page.height,
+                    <div className="recog-zonedraft" style={{
+                      left: zoneDraft.x, top: zoneDraft.y, width: zoneDraft.w, height: zoneDraft.h,
+                      borderWidth: Math.max(1, 2 / view.z),
                     }} />
                   )}
                 </div>
               ) : (
-                <div className="recog-nopage">Нет видимых листов</div>
-              )}
-
-              {/* действия над выделенной областью: распознать или создать рамку */}
-              {pendingZone && page && (
+                /* листов нет — сразу активная зона добавления */
                 <div
-                  className="recog-zone-confirm"
+                  className="recog-nopage-drop"
                   onPointerDown={(e) => e.stopPropagation()}
-                  style={{
-                    left: view.x + (pendingZone.x + pendingZone.w / 2) * page.width * view.z,
-                    top: view.y + (pendingZone.y + pendingZone.h) * page.height * view.z + 10,
-                  }}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) addPagesFile(f); }}
+                  onClick={() => setAddOpen(true)}
                 >
-                  <button className="btn-primary" disabled={detecting || !configured}
-                    title={configured ? 'ИИ найдёт оборудование в выделенной области' : 'Распознавание не настроено'}
-                    onClick={() => { const z = pendingZone; setPendingZone(null); runDetect(z); }}>
-                    Распознать
-                  </button>
-                  <button className="btn-outline"
-                    title="Создать рамку элемента по этой области (ручная разметка)"
-                    onClick={() => { const z = pendingZone; setPendingZone(null); createManual(z); }}>
-                    Создать рамку
-                  </button>
-                  <button className="btn-outline" onClick={() => setPendingZone(null)} title="Отменить выделение"><Icon.cross /></button>
+                  <div className="recog-drop-title">{uploading ? 'Загружаем…' : 'Добавьте схему'}</div>
+                  <div className="recog-drop-sub">перетащите PDF или изображение · нажмите, чтобы выбрать файл · Ctrl+V</div>
+                  <button className="btn-primary" disabled={uploading}>Добавить лист</button>
                 </div>
               )}
 
@@ -966,6 +1015,14 @@ export default function RecognitionPage() {
               />
             )}
           </aside>
+
+          {/* панель каталога — справа от инспектора, канвас остаётся видимым */}
+          {pickerElId != null && (
+            <CatalogPanel
+              onClose={() => setPickerElId(null)}
+              onPick={(p) => applyProduct(pickerElId, p)}
+            />
+          )}
         </div>
       )}
 
@@ -1037,19 +1094,11 @@ export default function RecognitionPage() {
               )}
               <button className="btn-primary" disabled={!specRows.length || creatingSheet}
                 onClick={() => createSheet(specTabPage)}>
-                {creatingSheet ? 'Сохраняем…' : specTabPage?.sheet_id ? 'Обновить лист' : 'Создать лист в ИНДЕКСАЛЛ'}
+                {creatingSheet ? 'Сохраняем…' : specTabPage?.sheet_id ? 'Обновить лист' : 'Создать лист в INDEXALL'}
               </button>
             </div>
           </div>
         </div>
-      )}
-
-      {/* пикер каталога (пункт 9) */}
-      {pickerElId != null && (
-        <CatalogPickerModal
-          onClose={() => setPickerElId(null)}
-          onPick={(p) => applyProduct(pickerElId, p)}
-        />
       )}
 
       {/* добавление листа — то же меню, что при входе */}
@@ -1104,6 +1153,14 @@ function InspectorPanel({ el, cfg, editing, onEdit, onClose, onSave, onDelete, o
   const [fields, setFields] = useState<Record<string, string>>({ ...(el.fields || {}) });
   const [color, setColor] = useState(el.color || '');
   const [newKey, setNewKey] = useState('');
+  /** параметры, переведённые на ручной ввод («Своё значение…») */
+  const [manualKeys, setManualKeys] = useState<Set<string>>(() => {
+    const s = new Set<string>();
+    for (const [k, v] of Object.entries(el.fields || {})) {
+      if (PARAM_OPTIONS[k] && v && !PARAM_OPTIONS[k].includes(v)) s.add(k);
+    }
+    return s;
+  });
 
   const byCode = new Map<string, RecogClass>(cfg.classes.map((c) => [c.code, c]));
   const collect = (): Partial<RecogElement> => ({ klass, designation, fields, color });
@@ -1202,15 +1259,39 @@ function InspectorPanel({ el, cfg, editing, onEdit, onClose, onSave, onDelete, o
       <label>Обозначение (QF1, Гр.2…)</label>
       <input value={designation} onChange={(e) => setDesignation(e.target.value)} />
 
-      {Object.entries(fields).map(([k, v]) => (
-        <div key={k} className="recog-fieldrow">
-          <label>{k}</label>
-          <div className="recog-fieldline">
-            <input value={v} onChange={(e) => setFields((f) => ({ ...f, [k]: e.target.value }))} />
-            <button title="Убрать параметр" onClick={() => setFields((f) => { const n = { ...f }; delete n[k]; return n; })}><Icon.cross /></button>
+      {Object.entries(fields).map(([k, v]) => {
+        const opts = PARAM_OPTIONS[k];
+        // известный параметр → выпадающий список допустимых значений;
+        // «Своё значение…» переключает поле на свободный ввод
+        const asSelect = !!opts && !manualKeys.has(k);
+        return (
+          <div key={k} className="recog-fieldrow">
+            <label>{k}</label>
+            <div className="recog-fieldline">
+              {asSelect ? (
+                <select
+                  value={opts.includes(v) ? v : (v ? CUSTOM_OPT : '')}
+                  onChange={(e) => {
+                    if (e.target.value === CUSTOM_OPT) {
+                      setManualKeys((s) => new Set(s).add(k));
+                      return;
+                    }
+                    setFields((f) => ({ ...f, [k]: e.target.value }));
+                  }}
+                >
+                  <option value="">— не указано —</option>
+                  {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+                  <option value={CUSTOM_OPT}>Своё значение…</option>
+                </select>
+              ) : (
+                <input value={v} autoFocus={manualKeys.has(k)}
+                  onChange={(e) => setFields((f) => ({ ...f, [k]: e.target.value }))} />
+              )}
+              <button title="Убрать параметр" onClick={() => setFields((f) => { const n = { ...f }; delete n[k]; return n; })}><Icon.cross /></button>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
       <div className="recog-addfield">
         <input placeholder="Новый параметр (напр. Номинал, А)" value={newKey} onChange={(e) => setNewKey(e.target.value)} />
         <button className="btn-outline" disabled={!newKey.trim()}
@@ -1308,7 +1389,13 @@ function productAttrs(p: any): { fields: Record<string, string>; product_class: 
   return { fields, product_class };
 }
 
-function CatalogPickerModal({ onClose, onPick }: {
+/** Характеристики товара для карточки: до 5 значимых строк */
+function productSpecLines(p: any): string[] {
+  const { fields } = productAttrs(p);
+  return Object.entries(fields).slice(0, 5).map(([k, v]) => `${k}: ${v}`);
+}
+
+function CatalogPanel({ onClose, onPick }: {
   onClose: () => void;
   onPick: (p: PickedProduct) => void;
 }) {
@@ -1319,6 +1406,7 @@ function CatalogPickerModal({ onClose, onPick }: {
   const [sel, setSel] = useState<Record<string, string[]>>({});
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [openFilters, setOpenFilters] = useState<Record<string, boolean>>({});
   const debounceRef = useRef<any>(null);
 
   useEffect(() => {
@@ -1392,53 +1480,61 @@ function CatalogPickerModal({ onClose, onPick }: {
     });
   }
 
-  return (
-    <div className="recog-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="recog-modal recog-modal-big recog-picker">
-        <div className="recog-modal-head">
-          <b>Добавить из базы</b>
-          <input
-            className="recog-picker-search"
-            placeholder="Поиск по названию или артикулу (от 2 символов)…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            autoFocus
-          />
-          <button className="recog-modal-x" onClick={onClose}><Icon.cross /></button>
-        </div>
+  const catName = sv(tiles.find((t) => t.slug === slug)?.name) || slug;
 
-        <div className="recog-picker-body">
-          <aside className="recog-picker-side">
-            {!slug && (
-              <>
-                <div className="recog-picker-side-t">Категории</div>
-                {tiles.filter((t) => t?.slug).map((t) => (
-                  <button key={t.slug}
-                    className="recog-picker-cat"
-                    onClick={() => openCategory(t.slug)}>
-                    {sv(t.name) || t.slug}
-                  </button>
-                ))}
-              </>
+  return (
+    <aside className="recog-catalog">
+      <div className="recog-catalog-head">
+        <b>Добавить из базы</b>
+        <button className="recog-modal-x" onClick={onClose} title="Закрыть панель"><Icon.cross /></button>
+      </div>
+
+      <input
+        className="recog-catalog-search"
+        placeholder="Поиск по названию или артикулу…"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        autoFocus
+      />
+
+      {/* категории / фильтры выбранной категории */}
+      {!slug && !q.trim() && (
+        <div className="recog-catalog-cats">
+          <div className="recog-catalog-t">Категории</div>
+          {tiles.filter((t) => t?.slug).map((t) => (
+            <button key={t.slug} className="recog-picker-cat" onClick={() => openCategory(t.slug)}>
+              {sv(t.name) || t.slug}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {slug && (
+        <div className="recog-catalog-filters">
+          <div className="recog-catalog-crumbs">
+            <button className="recog-picker-backbtn"
+              onClick={() => { setSlug(''); setFilters([]); setSel({}); setItems([]); }}>
+              <Icon.back /> Категории
+            </button>
+            {Object.keys(sel).length > 0 && (
+              <button className="recog-catalog-reset" onClick={() => applyFilters({})}>Сбросить все</button>
             )}
-            {slug && (
-              <>
-                <button className="recog-picker-backbtn"
-                  onClick={() => { setSlug(''); setFilters([]); setSel({}); setItems([]); }}>
-                  <Icon.back /> Категории
+          </div>
+          <div className="recog-catalog-cat">{catName}</div>
+          {filters.map((f, fi) => {
+            const label = filterLabel(f);
+            const opts = filterOpts(f);
+            if (!label || !opts.length) return null;
+            const open = openFilters[label] ?? fi < 2;
+            return (
+              <div key={`${label}-${fi}`} className="recog-picker-filter">
+                <button className="recog-catalog-filter-h"
+                  onClick={() => setOpenFilters((s) => ({ ...s, [label]: !open }))}>
+                  {label}
+                  {(sel[label]?.length ? ` (${sel[label].length})` : '')}
+                  <span>{open ? '−' : '+'}</span>
                 </button>
-                <div className="recog-picker-current">
-                  {sv(tiles.find((t) => t.slug === slug)?.name) || slug}
-                </div>
-              </>
-            )}
-            {slug && filters.map((f, fi) => {
-              const label = filterLabel(f);
-              const opts = filterOpts(f);
-              if (!label || !opts.length) return null;
-              return (
-                <div key={`${label}-${fi}`} className="recog-picker-filter">
-                  <div className="recog-picker-filter-t">{label}</div>
+                {open && (
                   <div className="recog-picker-opts">
                     {opts.slice(0, 40).map((o) => (
                       <label key={o} className="recog-picker-opt">
@@ -1449,56 +1545,46 @@ function CatalogPickerModal({ onClose, onPick }: {
                       </label>
                     ))}
                   </div>
-                </div>
-              );
-            })}
-          </aside>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
-          <div className="recog-picker-main">
-            {loading && <div className="recog-picker-note">Загрузка…</div>}
-            {!loading && items.length === 0 && (
-              <div className="recog-picker-note">
-                {q.trim().length >= 2 ? 'Ничего не нашлось — попробуйте другой запрос'
-                  : slug ? 'В категории пусто по выбранным фильтрам'
-                  : 'Введите запрос или выберите категорию слева'}
-              </div>
-            )}
-            {!loading && items.length > 0 && (
-              <div className="spec-table-wrap recog-picker-tablewrap">
-                <table className="spec-table">
-                  <thead>
-                    <tr>
-                      <th className="col-name">Наименование</th>
-                      <th>Бренд</th>
-                      <th>Артикул</th>
-                      <th>Цена</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {items.slice(0, 200).map((p, i) => (
-                      <tr key={`${sv(p?.id) || sv(p?.article)}-${i}`}>
-                        <td className="col-name">{sv(p?.name) || '—'}</td>
-                        <td>{sv(p?.brand) || sv(p?.manufacturer) || sv(p?.manufacturer?.name) || '—'}</td>
-                        <td>{sv(p?.article) || '—'}</td>
-                        <td>{sv(p?.price) || '—'}</td>
-                        <td>
-                          <button className="btn-primary recog-picker-pick" onClick={() => pick(p)}>Выбрать</button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+      {/* товары карточками */}
+      <div className="recog-catalog-items">
+        {loading && <div className="recog-picker-note">Загрузка…</div>}
+        {!loading && items.length === 0 && (
+          <div className="recog-picker-note">
+            {q.trim().length >= 2 ? 'Ничего не нашлось — попробуйте другой запрос'
+              : slug ? 'Нет товаров по выбранным фильтрам'
+              : 'Введите запрос или выберите категорию'}
           </div>
-        </div>
-
-        <div className="recog-modal-note">
-          Выбранный товар привяжется к рамке: наименование, бренд, артикул и цена автоматически уйдут в лист спецификации.
-        </div>
+        )}
+        {!loading && items.slice(0, 100).map((p, i) => (
+          <div key={`${sv(p?.id) || sv(p?.article)}-${i}`} className="recog-prodcard">
+            <div className="recog-prodcard-name">{sv(p?.name) || '—'}</div>
+            <div className="recog-prodcard-meta">
+              {[sv(p?.article) && `Артикул ${sv(p.article)}`,
+                sv(p?.brand) || sv(p?.manufacturer) || sv(p?.manufacturer?.name)]
+                .filter(Boolean).join(' · ')}
+            </div>
+            {productSpecLines(p).map((line) => (
+              <div key={line} className="recog-prodcard-spec">{line}</div>
+            ))}
+            <div className="recog-prodcard-foot">
+              {sv(p?.price) && <span className="recog-prodcard-price">{sv(p.price)} ₽</span>}
+              <button className="btn-primary recog-picker-pick" onClick={() => pick(p)}>Выбрать</button>
+            </div>
+          </div>
+        ))}
       </div>
-    </div>
+
+      <p className="recog-catalog-note">
+        Выбранный товар привяжется к рамке: наименование, бренд, артикул и параметры уйдут в лист спецификации.
+      </p>
+    </aside>
   );
 }
 

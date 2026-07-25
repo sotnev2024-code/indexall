@@ -171,6 +171,12 @@ export class RecognitionController {
     return this.service.addPagesToDocument(id, req.user.userId, file);
   }
 
+  /** Схема, из которой собран лист спецификации (кнопка «К схеме») */
+  @Get('by-sheet/:sheetId')
+  findBySheet(@Param('sheetId', ParseIntPipe) sheetId: number, @Request() req) {
+    return this.service.findBySheet(sheetId, req.user.userId);
+  }
+
   // ── Страницы ──────────────────────────────────────────────────
 
   @Patch('pages/:id')
