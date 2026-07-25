@@ -1810,7 +1810,7 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-specwrap { padding: 0 6px; }
 
 /* панель каталога — перекрывает инспектор справа */
-.recog-catalog { position: absolute; top: 0; right: 0; bottom: 0; width: min(820px, 66%); z-index: 40;
+.recog-catalog { position: absolute; top: 0; right: 0; bottom: 0; width: min(1000px, 74%); z-index: 40;
   background: var(--white); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(0,0,0,.12);
   display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 @media (max-width: 900px) { .recog-catalog { position: fixed; width: 100%; } }
@@ -1821,16 +1821,9 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-catalog-search { flex: 1; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
 .recog-catalog-t { font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
 
-/* экран категорий: 2 столбца, картинка видна целиком, подпись снизу */
-.recog-catalog-tiles { flex: 1; overflow-y: auto; background: #ededed; padding: 10px;
-  display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; align-content: start; }
-.recog-cat-tile { display: flex; flex-direction: column; gap: 6px; cursor: pointer; text-align: center;
-  background: var(--white); border: 1px solid transparent; border-radius: 8px; padding: 8px;
-  box-shadow: 0 1px 2px rgba(0,0,0,.06); transition: transform .15s, box-shadow .15s, border-color .15s; }
-.recog-cat-tile:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,0,0,.12); border-color: var(--yellow); }
-.recog-cat-tile img { width: 100%; height: 88px; object-fit: contain; display: block; }
-.recog-cat-tile-icon { height: 88px; display: flex; align-items: center; justify-content: center; font-size: 32px; }
-.recog-cat-tile-name { font-size: 12px; font-weight: 600; line-height: 1.3; }
+/* экран категорий — мозаика как в подборе (4 колонки, картинка на всю плитку) */
+.recog-catalog-tiles { flex: 1; overflow-y: auto; background: #e3e3e3; }
+.recog-tiles-grid { grid-template-columns: repeat(4, 1fr); grid-auto-rows: 128px; }
 
 /* категория открыта: фильтры слева, оборудование справа */
 .recog-catalog-body { flex: 1; display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 0; }

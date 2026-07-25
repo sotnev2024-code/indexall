@@ -1651,17 +1651,24 @@ function CatalogPanel({ onClose, onPick }: {
       {showCats ? (
         /* экран выбора категории — плитки с картинками, как в каталоге */
         <div className="recog-catalog-tiles">
-          {/* плитки категорий: картинка целиком (contain) + подпись, 2 в ряд */}
-          {tiles.filter((t) => t?.slug).map((t) => (
-            <button key={t.slug} className="recog-cat-tile" onClick={() => openCategory(t.slug)}>
-              {t.image_path
-                ? <img alt="" loading="lazy"
-                    src={`${process.env.NEXT_PUBLIC_API_URL}/uploads/${String(t.image_path).split(/[\\/]/).pop()}`}
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                : <span className="recog-cat-tile-icon">{sv(t.icon) || '▦'}</span>}
-              <span className="recog-cat-tile-name">{sv(t.name) || t.slug}</span>
-            </button>
-          ))}
+          {/* мозаика плиток 1:1 как в подборе по категориям: 4 колонки,
+              размеры плиток из настроек, картинка заполняет плитку */}
+          <div className="category-tiles-ref recog-tiles-grid">
+            {tiles.filter((t) => t?.slug).map((t) => {
+              const w = t.width ?? (t.is_large ? 2 : 1);
+              const h = t.height ?? 1;
+              return (
+                <div key={t.slug} className="category-tile-ref"
+                  style={{ gridColumn: `span ${w}`, gridRow: `span ${h}` }}
+                  onClick={() => openCategory(t.slug)}>
+                  {t.image_path
+                    ? <img className="category-tile-img" alt={sv(t.name)} loading="lazy"
+                        src={`${process.env.NEXT_PUBLIC_API_URL}/uploads/${String(t.image_path).split(/[\\/]/).pop()}`} />
+                    : <div className="category-tile-icon" style={{ fontSize: 30 }}>{sv(t.icon) || '▦'}</div>}
+                </div>
+              );
+            })}
+          </div>
           {tiles.length === 0 && <div className="recog-picker-note">Категории не настроены — воспользуйтесь поиском</div>}
         </div>
       ) : (
