@@ -761,6 +761,12 @@ export class RecognitionService implements OnModuleInit {
       confidence: 1,
       status: 'corrected', // ручная разметка — сразу «правда» для датасета
       color: String(data.color || '').slice(0, 20),
+      // копия рамки переносит и привязанный товар каталога
+      product_name: String(data.product_name || '').slice(0, 300),
+      brand: String(data.brand || '').slice(0, 300),
+      article: String(data.article || '').slice(0, 300),
+      etm_code: String(data.etm_code || '').slice(0, 300),
+      price: String(data.price || '').slice(0, 300),
     });
     return el;
   }

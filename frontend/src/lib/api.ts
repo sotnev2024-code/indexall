@@ -418,8 +418,8 @@ export const recognitionApi = {
   activateModel: (id: number) => api.post(`/recognition/models/${id}/activate`),
   deleteModel: (id: number) => api.delete(`/recognition/models/${id}`),
   setMode: (mode: string) => api.put('/recognition/mode', { mode }),
-  detect: (pageId: number, zone: { x: number; y: number; w: number; h: number }) =>
-    api.post<{ elements: RecogElement[] }>(`/recognition/pages/${pageId}/detect`, { zone }, { timeout: 120000 }),
+  detect: (pageId: number, zone: { x: number; y: number; w: number; h: number }, signal?: AbortSignal) =>
+    api.post<{ elements: RecogElement[] }>(`/recognition/pages/${pageId}/detect`, { zone }, { timeout: 120000, signal }),
   createElement: (pageId: number, data: Partial<RecogElement>) =>
     api.post<RecogElement>(`/recognition/pages/${pageId}/elements`, data),
   updateElement: (id: number, patch: Partial<RecogElement>) =>

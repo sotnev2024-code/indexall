@@ -146,9 +146,11 @@ export default function RecognitionPage() {
   /* результат последнего распознавания зоны: id рамок + зона — для
      кнопок «Подтвердить все» / «Удалить» */
   const [batch, setBatch] = useState<{ ids: number[]; zone: Zone } | null>(null);
-  /* подтверждённая рамка «запекается»; редактируется только этот id */
-  const [editingId, setEditingId] = useState<number | null>(null);
   const lastDownRef = useRef({ t: 0, x: 0, y: 0 });
+  /** буфер копирования рамки (Ctrl+C → Ctrl+V) */
+  const clipRef = useRef<RecogElement | null>(null);
+  /** отмена текущего распознавания по Esc */
+  const detectAbortRef = useRef<AbortController | null>(null);
 
   const loadDocs = useCallback(() => {
     recognitionApi.list()
@@ -242,24 +244,49 @@ export default function RecognitionPage() {
   const visiblePages = useMemo(() => (doc?.pages || []).filter((p) => !p.hidden), [doc]);
   const hiddenPages = useMemo(() => (doc?.pages || []).filter((p) => p.hidden), [doc]);
 
-  /* выбрали другую рамку — режим редактирования прежней снимается */
-  useEffect(() => {
-    setEditingId((cur) => (cur !== null && cur !== selId ? null : cur));
-  }, [selId]);
-
-  /* Esc: выход из режима выделения / снятие выбора рамки */
+  /* Горячие клавиши: Esc — остановить распознавание / выйти из режима,
+     Ctrl+C / Ctrl+V — копия рамки, Delete — удалить рамку */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      setMode((m) => {
-        if (m !== 'pan') return 'pan';
-        setSelId(null);
-        return m;
-      });
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
+
+      if (e.key === 'Escape') {
+        if (detectAbortRef.current) {           // идёт распознавание — отменяем
+          detectAbortRef.current.abort();
+          detectAbortRef.current = null;
+          return;
+        }
+        setMode((m) => {
+          if (m !== 'pan') return 'pan';
+          setSelId(null);
+          return m;
+        });
+        return;
+      }
+      if (typing) return;
+
+      const el = selElRef.current;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && el) {
+        e.preventDefault();
+        clipRef.current = el;
+        toast.success('Рамка скопирована — Ctrl+V создаст копию');
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && clipRef.current) {
+        e.preventDefault();
+        duplicateElement(clipRef.current);
+        return;
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && el) {
+        e.preventDefault();
+        deleteElement(el);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, page]);
 
   /* полноэкранный режим рабочей области (пункт 8) */
   useEffect(() => {
@@ -275,6 +302,8 @@ export default function RecognitionPage() {
   const page = useMemo(() => visiblePages.find((p) => p.id === pageId) || visiblePages[0] || null, [visiblePages, pageId]);
   const pageElements = useMemo(() => (doc?.elements || []).filter((e) => page && e.page_id === page.id), [doc, page]);
   const selEl = useMemo(() => pageElements.find((e) => e.id === selId) || null, [pageElements, selId]);
+  /* зеркало выбранной рамки для обработчика горячих клавиш */
+  const selElRef = useRef<RecogElement | null>(null); selElRef.current = selEl;
 
   /* вписать страницу в окно (кнопка на проценте зума) */
   const fitPage = useCallback((p?: RecogPage | null) => {
@@ -326,10 +355,12 @@ export default function RecognitionPage() {
     }
   }, [doc, uploading]);
 
-  /* Ctrl+V вставка картинки: на стартовом экране — новый документ,
-     внутри документа — добавление листа */
+  /* Ctrl+V вставка картинки — только когда явно добавляем лист/документ:
+     на стартовом экране или в открытой модалке «Добавить лист». Внутри
+     работы со схемой Ctrl+V копирует рамку, а не создаёт лист. */
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
+      if (doc && !addOpen) return;
       const f = Array.from(e.clipboardData?.files || [])[0];
       if (!f || !/^(image\/|application\/pdf)/.test(f.type)) return;
       if (doc) addPagesFile(f);
@@ -337,7 +368,7 @@ export default function RecognitionPage() {
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
-  }, [uploadFile, addPagesFile, doc]);
+  }, [uploadFile, addPagesFile, doc, addOpen]);
 
   /* ── пан/зум/зона ── */
   const toPagePoint = (clientX: number, clientY: number) => {
@@ -451,8 +482,10 @@ export default function RecognitionPage() {
     if (!page) return;
     setDetecting(true);
     setBatch(null);
+    const ac = new AbortController();
+    detectAbortRef.current = ac;
     try {
-      const { data } = await recognitionApi.detect(page.id, zone);
+      const { data } = await recognitionApi.detect(page.id, zone, ac.signal);
       setDoc((d) => d ? { ...d, elements: [...d.elements, ...data.elements] } : d);
       if (data.elements.length === 0) toast('В выбранной зоне ничего не нашлось — попробуйте другую область');
       else {
@@ -460,8 +493,14 @@ export default function RecognitionPage() {
         setBatch({ ids: data.elements.map((e) => e.id), zone });
       }
     } catch (e: any) {
-      toast.error(e?.response?.data?.message || 'Распознавание не удалось, попробуйте ещё раз');
+      // отмена по Esc/кнопке — это не ошибка
+      if (e?.code === 'ERR_CANCELED' || e?.name === 'CanceledError' || ac.signal.aborted) {
+        toast('Распознавание остановлено');
+      } else {
+        toast.error(e?.response?.data?.message || 'Распознавание не удалось, попробуйте ещё раз');
+      }
     } finally {
+      detectAbortRef.current = null;
       setDetecting(false);
     }
   }
@@ -502,10 +541,7 @@ export default function RecognitionPage() {
     try {
       const { data } = await recognitionApi.createElement(page.id, { klass: 'other', bbox: zone, fields: {} });
       setDoc((d) => d ? { ...d, elements: [...d.elements, data] } : d);
-      // сразу в режим редактирования — иначе рамка «запечётся» и станет
-      // невидимой («рамка не фиксируется — исчезает»)
-      setSelId(data.id);
-      setEditingId(data.id);
+      setSelId(data.id); // сразу открываем в инспекторе
     } catch { toast.error('Не удалось добавить рамку'); }
   }
 
@@ -526,10 +562,7 @@ export default function RecognitionPage() {
       if (status === 'confirmed') {
         toast.success(pg?.sheet_id ? 'Подтверждено — лист спецификации обновлён' : 'Подтверждено — попадёт в лист спецификации');
       }
-      if (status === 'confirmed' || status === 'corrected') {
-        setEditingId(null); // рамка «запекается» обратно в схему
-        silentSheetSync(el);
-      }
+      if (status === 'confirmed' || status === 'corrected') silentSheetSync(el);
     } catch { toast.error('Не удалось сохранить'); }
   }
 
@@ -538,9 +571,37 @@ export default function RecognitionPage() {
       await recognitionApi.removeElement(el.id);
       setDoc((d) => d ? { ...d, elements: d.elements.filter((e) => e.id !== el.id) } : d);
       setSelId(null);
-      setEditingId(null);
       silentSheetSync(el);
     } catch { toast.error('Не удалось удалить'); }
+  }
+
+  /** Копия рамки со всеми параметрами — рядом, со сдвигом (Ctrl+V, «Дублировать»).
+   *  Типовой сценарий Максима: один автомат размечен, остальные отличаются
+   *  парой характеристик. */
+  async function duplicateElement(src: RecogElement, patch?: Partial<RecogElement>) {
+    const pg = (doc?.pages || []).find((p) => p.id === src.page_id) || page;
+    if (!pg) return;
+    const base = { ...src, ...(patch || {}) } as RecogElement;
+    const shift = 0.012;
+    const bbox = clampB({
+      x: Math.min(base.bbox.x + shift, 1 - base.bbox.w),
+      y: Math.min(base.bbox.y + shift, 1 - base.bbox.h),
+      w: base.bbox.w, h: base.bbox.h,
+    });
+    try {
+      const { data } = await recognitionApi.createElement(pg.id, {
+        klass: base.klass,
+        designation: base.designation,
+        fields: { ...(base.fields || {}) },
+        color: base.color,
+        bbox,
+        product_name: base.product_name, brand: base.brand, article: base.article,
+        etm_code: base.etm_code, price: base.price,
+      } as any);
+      setDoc((d) => d ? { ...d, elements: [...d.elements, data] } : d);
+      setSelId(data.id);
+      toast.success('Копия создана — поправьте характеристики и подтвердите');
+    } catch { toast.error('Не удалось скопировать рамку'); }
   }
 
   /** товар каталога выбран в пикере (пункт 9): привязка + автозаполнение параметров */
@@ -892,14 +953,11 @@ export default function RecognitionPage() {
                     const c = classColor(el);
                     const sel = el.id === selId;
                     const inv = 1 / view.z; // компенсация масштаба
-                    /* подтверждённая рамка «запечена»: невидима (не перекрывает
-                       схему), проявляется при наведении/выборе; не двигается,
-                       пока в инспекторе не нажали «Редактировать» */
-                    const locked = el.status !== 'auto' && el.id !== editingId;
+                    const done = el.status !== 'auto'; // подтверждена/исправлена
                     return (
                       <div
                         key={el.id}
-                        className={`recog-el ${sel ? 'sel' : ''} ${el.status === 'auto' ? 'auto' : ''} ${locked ? 'locked' : ''}`}
+                        className={`recog-el ${sel ? 'sel' : ''} ${el.status === 'auto' ? 'auto' : ''} ${done ? 'done' : ''}`}
                         style={{
                           left: el.bbox.x * page.width, top: el.bbox.y * page.height,
                           width: el.bbox.w * page.width, height: el.bbox.h * page.height,
@@ -907,13 +965,14 @@ export default function RecognitionPage() {
                           // цвета класса; без второго контура у выбранной рамки
                           borderWidth: Math.max(1, (sel ? 2 : 1.5) * inv),
                           borderColor: c,
-                          background: sel ? `${c}3d` : locked ? `${c}20` : `${c}14`,
+                          background: sel ? `${c}3d` : done ? `${c}20` : `${c}14`,
                           borderRadius: Math.max(2, 4 * inv),
                         }}
                         onPointerDown={(e) => {
                           e.stopPropagation();
                           setSelId(el.id);
-                          if (sel && !locked) {
+                          // рамка остаётся подвижной и после подтверждения
+                          if (sel) {
                             (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
                             drag.current = { kind: 'move', start: toPagePoint(e.clientX, e.clientY), bbox: { ...el.bbox } };
                           }
@@ -925,7 +984,14 @@ export default function RecognitionPage() {
                           style={{ color: c, borderColor: c, transform: `scale(${inv})`, transformOrigin: 'left bottom' }}>
                           {el.klass} {Math.round((el.confidence || 0) * 100)}%
                         </span>
-                        {sel && !locked && ['nw','n','ne','e','se','s','sw','w'].map((h) => (
+                        {/* подтверждена — галочка по центру нижнего края */}
+                        {done && (
+                          <span className="recog-el-check"
+                            style={{ transform: `translateX(-50%) scale(${inv})`, transformOrigin: 'center top', borderColor: c, color: c }}>
+                            <Icon.check />
+                          </span>
+                        )}
+                        {sel && ['nw','n','ne','e','se','s','sw','w'].map((h) => (
                           <span
                             key={h} className={`recog-handle rh-${h}`}
                             style={{ width: 10 * inv, height: 10 * inv, borderWidth: Math.max(1, 2 * inv) }}
@@ -1006,6 +1072,10 @@ export default function RecognitionPage() {
                   <div className="recog-progress-box">
                     <div className="recog-progress-bar"><i /></div>
                     <div className="recog-progress-phrase">{phrase}</div>
+                    <button className="btn-outline recog-progress-stop"
+                      onClick={() => { detectAbortRef.current?.abort(); detectAbortRef.current = null; }}>
+                      Остановить (Esc)
+                    </button>
                   </div>
                 </div>
               )}
@@ -1034,14 +1104,13 @@ export default function RecognitionPage() {
               </div>
             ) : (
               <InspectorPanel
-                key={`${selEl.id}-${selEl.id === editingId ? 'edit' : 'view'}-${selEl.product_name || ''}-${selEl.article || ''}`}
+                key={`${selEl.id}-${selEl.product_name || ''}-${selEl.article || ''}`}
                 el={selEl}
                 cfg={clsCfg}
-                editing={selEl.status === 'auto' || selEl.id === editingId}
-                onEdit={() => setEditingId(selEl.id)}
                 onClose={() => setSelId(null)}
                 onSave={(patch, status) => saveElement(selEl, patch, status)}
                 onDelete={() => deleteElement(selEl)}
+                onDuplicate={(patch) => duplicateElement(selEl, patch)}
                 onPickCatalog={() => setPickerElId(selEl.id)}
                 onClearProduct={() => applyProduct(selEl.id, { product_name: '', brand: '', article: '', etm_code: '', price: '' })}
               />
@@ -1169,14 +1238,13 @@ export default function RecognitionPage() {
 }
 
 /* ── Инспектор ── */
-function InspectorPanel({ el, cfg, editing, onEdit, onClose, onSave, onDelete, onPickCatalog, onClearProduct }: {
+function InspectorPanel({ el, cfg, onClose, onSave, onDelete, onDuplicate, onPickCatalog, onClearProduct }: {
   el: RecogElement;
   cfg: RecogClassConfig;
-  editing: boolean;
-  onEdit: () => void;
   onClose: () => void;
   onSave: (patch: Partial<RecogElement>, status?: string) => void;
   onDelete: () => void;
+  onDuplicate: (patch: Partial<RecogElement>) => void;
   onPickCatalog: () => void;
   onClearProduct: () => void;
 }) {
@@ -1206,51 +1274,12 @@ function InspectorPanel({ el, cfg, editing, onEdit, onClose, onSave, onDelete, o
         {[el.brand, el.article && `арт. ${el.article}`, el.price && el.price !== '0' && `${el.price} ₽`]
           .filter(Boolean).join(' · ')}
       </div>
-      {editing && (
-        <div className="recog-product-acts">
-          <button className="btn-outline" onClick={onPickCatalog}>Заменить</button>
-          <button className="btn-outline" onClick={onClearProduct}>Убрать</button>
-        </div>
-      )}
+      <div className="recog-product-acts">
+        <button className="btn-outline" onClick={onPickCatalog}>Заменить</button>
+        <button className="btn-outline" onClick={onClearProduct}>Убрать</button>
+      </div>
     </div>
   ) : null;
-
-  /* Подтверждённая рамка «уложена в схему» — просмотр без правок,
-     редактирование только после явной кнопки. */
-  if (!editing) {
-    return (
-      <div className="recog-insp">
-        <div className="recog-insp-head">
-          <b>{el.designation || byCode.get(el.klass)?.nameRu || 'Элемент'}</b>
-          <button onClick={onClose} title="Закрыть"><Icon.cross /></button>
-        </div>
-        <div className="recog-insp-status">
-          <span className={`recog-pill st-${el.status}`}>
-            {el.status === 'confirmed' ? 'Подтверждён' : 'Исправлен'}
-          </span>
-        </div>
-        {productBlock}
-        <div className="recog-insp-view">
-          <div className="recog-insp-viewrow">
-            <span>Класс</span><b>{el.klass} — {byCode.get(el.klass)?.nameRu || ''}</b>
-          </div>
-          {el.designation && (
-            <div className="recog-insp-viewrow"><span>Обозначение</span><b>{el.designation}</b></div>
-          )}
-          {Object.entries(el.fields || {}).map(([k, v]) => (
-            <div key={k} className="recog-insp-viewrow"><span>{k}</span><b>{v || '—'}</b></div>
-          ))}
-        </div>
-        <div className="recog-insp-btns">
-          <button className="btn-primary" onClick={onEdit}>Редактировать</button>
-        </div>
-        <p className="recog-insp-hint">
-          Рамка зафиксирована на схеме: перемещение и изменение размера отключены.
-          Нажмите «Редактировать», чтобы изменить класс, параметры или рамку.
-        </p>
-      </div>
-    );
-  }
 
   return (
     <div className="recog-insp">
@@ -1355,9 +1384,15 @@ function InspectorPanel({ el, cfg, editing, onEdit, onClose, onSave, onDelete, o
         <button className="btn-primary" onClick={() => onSave(collect(), 'confirmed')}>Подтвердить</button>
         <button className="btn-outline" onClick={() => onSave(collect(), 'corrected')}>Сохранить</button>
       </div>
-      <button className="recog-insp-del" onClick={onDelete}>Удалить элемент</button>
+      <div className="recog-insp-btns">
+        <button className="btn-outline" style={{ flex: 1 }} onClick={() => onDuplicate(collect())}
+          title="Создать копию рамки рядом (Ctrl+C / Ctrl+V)">Дублировать</button>
+        <button className="recog-insp-del" style={{ flex: 1, marginTop: 0 }} onClick={onDelete}
+          title="Удалить рамку (клавиша Delete)">Удалить</button>
+      </div>
       <p className="recog-insp-hint">
-        Подтверждённые и исправленные рамки попадают в лист спецификации и копятся в датасет для дообучения модели.
+        Рамку можно двигать, менять её размер и параметры в любой момент — в том числе после подтверждения.
+        Ctrl+C / Ctrl+V — копия рамки со всеми параметрами, Delete — удалить.
       </p>
     </div>
   );
