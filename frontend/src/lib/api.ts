@@ -373,7 +373,8 @@ export const recognitionApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
-  list: () => api.get('/recognition/documents'),
+  /** таймаут: без него упавший backend оставлял список в вечной «Загрузке» */
+  list: () => api.get('/recognition/documents', { timeout: 15000 }),
   getOne: (id: number) => api.get<RecogDocument>(`/recognition/documents/${id}`),
   remove: (id: number) => api.delete(`/recognition/documents/${id}`),
   updatePage: (id: number, patch: { hidden?: boolean; confirmed?: boolean; schema_type?: string; title?: string }) =>

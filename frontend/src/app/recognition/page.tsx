@@ -157,7 +157,10 @@ export default function RecognitionPage() {
       .catch((e) => {
         console.error('recognition: список документов не загрузился', e);
         setDocsError(true);
-        toast.error('Не удалось загрузить список документов');
+        const code = e?.response?.status;
+        toast.error(code
+          ? `Список документов не загрузился (ошибка ${code})`
+          : 'Сервер не отвечает — список документов не загрузился');
       });
   }, []);
 
