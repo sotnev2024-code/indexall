@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Header from '@/components/layout/Header';
 import SectionOnboarding from '@/components/SectionOnboarding';
@@ -112,7 +112,6 @@ type PickedProduct = {
 
 export default function RecognitionPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   /* null — ещё грузится; [] — пусто */
   const [docs, setDocs] = useState<any[] | null>(null);
   const [docsError, setDocsError] = useState(false);
@@ -186,9 +185,12 @@ export default function RecognitionPage() {
         recognitionApi.getClasses().then(({ data: d }) => { if (d?.classes?.length) setClsCfg(d); }).catch(() => {});
         recognitionApi.listModels().then(({ data: d }) => { if (d?.mode) setRecogMode(d.mode); }).catch(() => {});
         // Приоритет: ?doc=&page= (переход с листа спецификации), иначе —
-        // восстановление после F5 из sessionStorage
-        const qDoc = Number(searchParams.get('doc'));
-        const qPage = Number(searchParams.get('page'));
+        // восстановление после F5 из sessionStorage.
+        // Читаем из location, а не через useSearchParams: тот в Next 14
+        // требует Suspense и роняет страницу («client-side exception»).
+        const sp = new URLSearchParams(window.location.search);
+        const qDoc = Number(sp.get('doc'));
+        const qPage = Number(sp.get('page'));
         if (qDoc) {
           reloadDoc(qDoc)
             .then(() => { if (qPage) setPageId(qPage); })
