@@ -15,11 +15,9 @@
   </Choices>
 
   <RectangleLabels name="label" toName="image">
-    <Label value="MCB — модульный автомат" category="0" background="#E74C3C"/>
-    <Label value="MCCB — автомат в литом корпусе" category="1" background="#D35400"/>
+    <Label value="Circuit breaker — автоматический выключатель" category="41" background="#566573"/>
     <Label value="RCBO — дифавтомат" category="2" background="#F39C12"/>
     <Label value="RCCB — УЗО" category="3" background="#F1C40F"/>
-    <Label value="ACB — воздушный автомат" category="4" background="#2ECC71"/>
     <Label value="LBS — выключатель нагрузки" category="5" background="#1ABC9C"/>
     <Label value="CT — трансформатор тока" category="6" background="#3498DB"/>
     <Label value="Disconnector — рубильник" category="7" background="#5B6EE1"/>
@@ -28,7 +26,6 @@
     <Label value="Terminal — клемма" category="10" background="#7F8C8D"/>
     <Label value="Button — кнопка" category="11" background="#16A085"/>
     <Label value="Lamp — лампа" category="12" background="#F4D03F"/>
-    <Label value="Resistor — сопротивление" category="13" background="#AF7AC5"/>
     <Label value="Controller — контроллер" category="14" background="#2E86C1"/>
     <Label value="Fuse — предохранитель" category="15" background="#CA6F1E"/>
     <Label value="Power supply — блок питания" category="16" background="#7DCEA0"/>
@@ -37,24 +34,15 @@
     <Label value="Voltmeter — вольтметр" category="19" background="#BB8FCE"/>
     <Label value="Multimeter — мультиметр" category="20" background="#AAB7B8"/>
     <Label value="Switch — переключатель" category="21" background="#48C9B0"/>
-    <Label value="Contactor coil — катушка контактора" category="22" background="#5DADE2"/>
-    <Label value="Contactor contact — контакт контактора" category="23" background="#F5B041"/>
-    <Label value="Relay contact — контакт реле" category="24" background="#EC7063"/>
-    <Label value="Pushbutton NO momentary — замыкающая кнопка без фиксации" category="25" background="#58D68D"/>
-    <Label value="Pushbutton NC momentary — размыкающая кнопка без фиксации" category="26" background="#F5B7B1"/>
-    <Label value="Pushbutton NO latching — замыкающая кнопка с фиксацией" category="27" background="#5DADE2"/>
-    <Label value="Pushbutton NC latching — размыкающая кнопка с фиксацией" category="28" background="#AF7AC5"/>
     <Label value="Electricity meter — счётчик" category="29" background="#73C6B6"/>
     <Label value="Fuse link — плавкая вставка" category="30" background="#F0B27A"/>
     <Label value="SPD — УЗИП" category="31" background="#85C1E9"/>
     <Label value="AFDD — УЗДП" category="32" background="#A9DFBF"/>
     <Label value="Fuse switch disconnector — разъединитель-предохранитель" category="33" background="#D2B4DE"/>
-    <Label value="Fused terminal — клемма с предохранителем" category="34" background="#F7DC6F"/>
     <Label value="Test box — испытательная коробка" category="35" background="#8E44AD"/>
     <Label value="Noise suppression capacitor — конденсатор подавления помех" category="36" background="#6C3483"/>
     <Label value="Contactor-based ATS — АВР на контакторах" category="37" background="#27AE60"/>
-    <Label value="Dual power supply input with switch disconnectors — ввод на 2 источника питания на рубильниках" category="38" background="#34495E"/>
-  <Label value="Voltage transformer — трансформатор напряжения" category="39" background="#1F618D"/>
-  <Label value="Dual power supply input with MCCBs — ввод на 2 источника питания на литых автоматах" category="40" background="#884EA0"/>
+    <Label value="Voltage transformer — трансформатор напряжения" category="39" background="#1F618D"/>
+    <Label value="Contactor interlock mechanism — механизм взаимоблокировки контакторов" category="25" background="#58D68D"/>
   </RectangleLabels>
 </View>
