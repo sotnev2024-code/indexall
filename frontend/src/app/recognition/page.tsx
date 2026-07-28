@@ -246,8 +246,27 @@ export default function RecognitionPage() {
   const visiblePages = useMemo(() => (doc?.pages || []).filter((p) => !p.hidden), [doc]);
   const hiddenPages = useMemo(() => (doc?.pages || []).filter((p) => p.hidden), [doc]);
 
+  /* полноэкранный режим рабочей области (пункт 8) */
+  useEffect(() => {
+    const onFs = () => setIsFs(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onFs);
+    return () => document.removeEventListener('fullscreenchange', onFs);
+  }, []);
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else workRef.current?.requestFullscreen?.().catch(() => toast.error('Полноэкранный режим недоступен в этом браузере'));
+  };
+
+  const page = useMemo(() => visiblePages.find((p) => p.id === pageId) || visiblePages[0] || null, [visiblePages, pageId]);
+  const pageElements = useMemo(() => (doc?.elements || []).filter((e) => page && e.page_id === page.id), [doc, page]);
+  const selEl = useMemo(() => pageElements.find((e) => e.id === selId) || null, [pageElements, selId]);
+  /* зеркало выбранной рамки для обработчика горячих клавиш */
+  const selElRef = useRef<RecogElement | null>(null); selElRef.current = selEl;
+
   /* Горячие клавиши: Esc — остановить распознавание / выйти из режима,
-     Ctrl+C / Ctrl+V — копия рамки, Delete — удалить рамку */
+     Ctrl+C / Ctrl+V — копия рамки, Delete — удалить рамку.
+     ВАЖНО: объявлять после page/selEl — иначе обращение к ним в списке
+     зависимостей падает с «Cannot access before initialization». */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
@@ -289,23 +308,6 @@ export default function RecognitionPage() {
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, page]);
-
-  /* полноэкранный режим рабочей области (пункт 8) */
-  useEffect(() => {
-    const onFs = () => setIsFs(!!document.fullscreenElement);
-    document.addEventListener('fullscreenchange', onFs);
-    return () => document.removeEventListener('fullscreenchange', onFs);
-  }, []);
-  const toggleFullscreen = () => {
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-    else workRef.current?.requestFullscreen?.().catch(() => toast.error('Полноэкранный режим недоступен в этом браузере'));
-  };
-
-  const page = useMemo(() => visiblePages.find((p) => p.id === pageId) || visiblePages[0] || null, [visiblePages, pageId]);
-  const pageElements = useMemo(() => (doc?.elements || []).filter((e) => page && e.page_id === page.id), [doc, page]);
-  const selEl = useMemo(() => pageElements.find((e) => e.id === selId) || null, [pageElements, selId]);
-  /* зеркало выбранной рамки для обработчика горячих клавиш */
-  const selElRef = useRef<RecogElement | null>(null); selElRef.current = selEl;
 
   /* вписать страницу в окно (кнопка на проценте зума) */
   const fitPage = useCallback((p?: RecogPage | null) => {
