@@ -934,8 +934,8 @@ export default function RecognitionPage() {
               <span className="recog-toolspacer" />
               {recogMode !== 'llm' && (
                 <span className="recog-modebadge"
-                  title="Режим распознавания меняется в панели «Модель YOLO и режим распознавания» на экране документов">
-                  {recogMode === 'yolo' ? 'Только YOLO' : recogMode === 'cascade' ? 'Каскад YOLO→LLM' : 'Теневой режим'}
+                  title="Режим распознавания меняется в панели «Модель Zeus и режим распознавания» на экране документов">
+                  {recogMode === 'yolo' ? 'Только Zeus' : recogMode === 'cascade' ? 'Каскад Zeus→LLM' : 'Теневой режим'}
                 </span>
               )}
             </div>
@@ -1819,7 +1819,7 @@ function DatasetPanel({ cfg, onCfgSaved }: {
       a.download = `indexall-dataset-${new Date().toISOString().slice(0, 10)}.zip`;
       a.click();
       URL.revokeObjectURL(a.href);
-      toast.success('ZIP готов: images + labels (YOLO) + data.yaml + labelstudio.json');
+      toast.success('ZIP готов: images + labels (YOLO-формат) + data.yaml + labelstudio.json');
     } catch (e: any) {
       toast.error(e?.response?.data?.message || 'Не удалось собрать ZIP');
     } finally {
@@ -1863,31 +1863,50 @@ function DatasetPanel({ cfg, onCfgSaved }: {
   return (
     <div className="recog-dataset">
       <div className="recog-dataset-head">
-        <b>Датасет для обучения YOLO</b>
+        <b>Датасет для обучения Zeus</b>
         <span className="recog-dataset-sub">
           {stats ? `${stats.documents} докум. · ${stats.pages} страниц · подтверждено рамок: ${confirmedTotal}` : 'Загрузка…'}
         </span>
       </div>
 
-      {stats && confirmedTotal > 0 && (
-        <div className="recog-dataset-classes">
-          {Object.entries(stats.byClass as Record<string, { total: number; confirmed: number }>)
-            .filter(([, v]) => v.confirmed > 0)
-            .sort((a, b) => b[1].confirmed - a[1].confirmed)
-            .map(([k, v]) => (
-              <span key={k} className="recog-dataset-chip"
-                style={{ color: cfg.classes.find((c) => c.code === k)?.color || '#64748b' }}>
-                {k}: {v.confirmed}
-              </span>
-            ))}
-        </div>
-      )}
+      {stats && confirmedTotal > 0 && (() => {
+        // в датасет идут только классы текущего конфига Label Studio;
+        // служебные и коды старой разметки показываем отдельно
+        const inDataset = new Set(cfg.classes.filter((c) => !c.system && c.lsValue).map((c) => c.code));
+        const rows = Object.entries(stats.byClass as Record<string, { total: number; confirmed: number }>)
+          .filter(([, v]) => v.confirmed > 0)
+          .sort((a, b) => b[1].confirmed - a[1].confirmed);
+        const go = rows.filter(([k]) => inDataset.has(k));
+        const skip = rows.filter(([k]) => !inDataset.has(k));
+        const chip = ([k, v]: [string, { confirmed: number }], dim = false) => (
+          <span key={k} className={`recog-dataset-chip ${dim ? 'dim' : ''}`}
+            style={dim ? undefined : { color: cfg.classes.find((c) => c.code === k)?.color || '#64748b' }}>
+            {k}: {v.confirmed}
+          </span>
+        );
+        return (
+          <>
+            {go.length > 0 && (
+              <div className="recog-dataset-classes">
+                <span className="recog-dataset-grouplabel">в датасет:</span>
+                {go.map((r) => chip(r))}
+              </div>
+            )}
+            {skip.length > 0 && (
+              <div className="recog-dataset-classes">
+                <span className="recog-dataset-grouplabel">не выгружаются (служебные и старая разметка):</span>
+                {skip.map((r) => chip(r, true))}
+              </div>
+            )}
+          </>
+        );
+      })()}
 
       <div className="recog-dataset-actions">
         <label>с <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
         <label>по <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
         <button className="btn-primary" onClick={downloadZip} disabled={exporting}
-          title="Готовый датасет: картинки + YOLO-разметка + data.yaml + Label Studio JSON">
+          title="Готовый датасет: картинки + разметка в формате YOLO + data.yaml + Label Studio JSON">
           {exporting ? 'Выгружаем…' : 'Скачать датасет (ZIP)'}
         </button>
         <button className="btn-outline" onClick={download} disabled={exporting}
@@ -1923,7 +1942,7 @@ function DatasetPanel({ cfg, onCfgSaved }: {
 
       <p className="recog-dataset-note">
         В выгрузку попадают подтверждённые и исправленные рамки классов Label Studio (служебные cable/load/panel
-        в датасет YOLO не входят). ZIP готов и для импорта в Label Studio, и для обучения ultralytics
+        в датасет Zeus не входят). ZIP готов и для импорта в Label Studio, и для обучения ultralytics
         (yolo train data=data.yaml). Импорт принимает JSON-экспорт Label Studio: рамки матчатся с нашими по IoU,
         проверенные помечаются «verified» и не понижаются автоматикой.
       </p>
@@ -1931,12 +1950,12 @@ function DatasetPanel({ cfg, onCfgSaved }: {
   );
 }
 
-/* ── Модель YOLO: версии, режим распознавания, теневые прогоны ── */
+/* ── Модель Zeus: версии, режим распознавания, теневые прогоны ── */
 const MODE_INFO: Record<string, { label: string; hint: string }> = {
   llm: { label: 'LLM (Gemini)', hint: 'Рамки, классы и параметры читает языковая модель. Режим по умолчанию.' },
-  shadow: { label: 'Теневой (LLM + YOLO)', hint: 'Пользователь видит результат LLM, YOLO работает параллельно — сравнение копится ниже.' },
-  cascade: { label: 'Каскад (YOLO → LLM)', hint: 'YOLO находит рамки и классы, LLM дочитывает параметры. Целевая схема.' },
-  yolo: { label: 'Только YOLO', hint: 'Быстро и бесплатно, но без параметров (тип/номинал не читаются).' },
+  shadow: { label: 'Теневой (LLM + Zeus)', hint: 'Пользователь видит результат LLM, Zeus работает параллельно — сравнение копится ниже.' },
+  cascade: { label: 'Каскад (Zeus → LLM)', hint: 'Zeus находит рамки и классы, LLM дочитывает параметры. Целевая схема.' },
+  yolo: { label: 'Только Zeus', hint: 'Быстро и бесплатно, но без параметров (тип/номинал не читаются).' },
 };
 
 function ModelPanel() {
@@ -2000,7 +2019,7 @@ function ModelPanel() {
   return (
     <div className="recog-dataset">
       <div className="recog-dataset-head">
-        <b>Модель YOLO и режим распознавания</b>
+        <b>Модель Zeus и режим распознавания</b>
         <span className="recog-dataset-sub">
           {models.length ? `версий: ${models.length}${hasActive ? '' : ' · нет активной'}` : 'модель ещё не загружалась — работает LLM'}
         </span>
@@ -2065,13 +2084,13 @@ function ModelPanel() {
       {/* теневые прогоны */}
       {runs.length > 0 && (
         <div className="recog-shadow">
-          <div className="recog-dataset-sub" style={{ marginBottom: 6 }}>Теневые прогоны (последние {runs.length}) — сравнение LLM и YOLO:</div>
+          <div className="recog-dataset-sub" style={{ marginBottom: 6 }}>Теневые прогоны (последние {runs.length}) — сравнение LLM и Zeus:</div>
           {runs.map((r) => (
             <div key={r.id} className="recog-shadow-row">
               <span>{new Date(r.createdAt).toLocaleString('ru-RU')}</span>
               <span>LLM: <b>{r.llm_count}</b> рамок · {(r.llm_ms / 1000).toFixed(1)} c</span>
               <span className={r.yolo_error ? 'err' : ''}>
-                YOLO: <b>{r.yolo_count}</b> рамок · {(r.yolo_ms / 1000).toFixed(1)} c{r.yolo_error ? ` · ${r.yolo_error}` : ''}
+                Zeus: <b>{r.yolo_count}</b> рамок · {(r.yolo_ms / 1000).toFixed(1)} c{r.yolo_error ? ` · ${r.yolo_error}` : ''}
               </span>
             </div>
           ))}

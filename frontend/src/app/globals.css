@@ -1733,6 +1733,9 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-dataset-sub { font-size: 12px; color: var(--muted); }
 .recog-dataset-classes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .recog-dataset-chip { font-size: 11px; font-weight: 700; border: 1px solid currentColor; border-radius: 10px; padding: 3px 8px; }
+/* классы, которые не попадают в датасет (служебные и старая разметка) */
+.recog-dataset-chip.dim { color: var(--muted); border-color: var(--border); background: #fafafa; font-weight: 500; }
+.recog-dataset-grouplabel { font-size: 11px; color: var(--muted); align-self: center; margin-right: 2px; }
 .recog-dataset-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
 .recog-dataset-actions label { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 5px; }
 .recog-dataset-actions input[type="date"] { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12.5px; background: var(--white); color: var(--text); }
