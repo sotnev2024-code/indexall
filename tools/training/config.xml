@@ -16,6 +16,7 @@
 
   <RectangleLabels name="label" toName="image">
     <Label value="Circuit breaker — автоматический выключатель" category="41" background="#566573"/>
+    <Label value="Motor drive — мотор-привод" category="42" background="#48C9B0"/>
     <Label value="RCBO — дифавтомат" category="2" background="#F39C12"/>
     <Label value="RCCB — УЗО" category="3" background="#F1C40F"/>
     <Label value="LBS — выключатель нагрузки" category="5" background="#1ABC9C"/>

@@ -17,6 +17,25 @@
 
 ## Шаг 1. Собрать датасет
 
+### Вариант А — Максим прислал YOLO-экспорт (папки images/ + labels/ + notes.json)
+
+Так он присылает с конца июля. Конвертация не нужна, только склейка партий:
+
+```bash
+python tools/training/merge_yolo_export.py --out dataset "путь/к/partition_1" "путь/к/partition_2"
+```
+
+Номера классов в таком экспорте уже равны `category` из конфига разметки —
+ровно то, что ждёт сервер Zeus, перенумеровывать ничего не надо. Скрипт делает
+train/val split и `data.yaml` с именами классов из `notes.json`.
+
+**Важно:** если в `notes.json` появились категории, которых нет в
+`tools/training/config.xml`, добавьте их туда и обновите конфиг в системе
+(«Схемы» → «Датасет» → «Обновить классы»), иначе сервер вернёт такие элементы
+как «Прочее».
+
+### Вариант Б — прислан JSON-экспорт задач Label Studio
+
 ```bash
 python tools/training/convert_ls_to_yolo.py \
   --json export.json --images ./images --config config.xml --out ./dataset
