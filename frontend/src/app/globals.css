@@ -1654,12 +1654,15 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-el.sel { z-index: 5; cursor: move; }
 .recog-el-chip { position: absolute; top: -20px; left: -2px; font-size: 10.5px; font-weight: 700; background: #fff;
   border: 1px solid; border-radius: 8px; padding: 1px 7px; white-space: nowrap; pointer-events: none; }
-.recog-handle { position: absolute; width: 10px; height: 10px; background: #fff; border: 2px solid var(--black); border-radius: 2px; z-index: 6; }
-.rh-nw { left: -6px; top: -6px; cursor: nwse-resize; } .rh-n { left: calc(50% - 5px); top: -6px; cursor: ns-resize; }
-.rh-ne { right: -6px; top: -6px; cursor: nesw-resize; } .rh-e { right: -6px; top: calc(50% - 5px); cursor: ew-resize; }
-.rh-se { right: -6px; bottom: -6px; cursor: nwse-resize; } .rh-s { left: calc(50% - 5px); bottom: -6px; cursor: ns-resize; }
-.rh-sw { left: -6px; bottom: -6px; cursor: nesw-resize; } .rh-w { left: -6px; top: calc(50% - 5px); cursor: ew-resize; }
-.recog-zonedraft { position: absolute; border: 2px solid var(--yellow); border-radius: 4px;
+/* маркеры и углы — строго квадратные, «инженерный» вид */
+.recog-handle { position: absolute; width: 10px; height: 10px; background: #fff; border: 2px solid var(--black); border-radius: 0; z-index: 6; }
+.recog-el-corner { position: absolute; pointer-events: none; }
+/* позиции маркеров задаются inline (компенсация зума) — здесь только курсоры */
+.rh-nw, .rh-se { cursor: nwse-resize; }
+.rh-ne, .rh-sw { cursor: nesw-resize; }
+.rh-n, .rh-s { cursor: ns-resize; }
+.rh-e, .rh-w { cursor: ew-resize; }
+.recog-zonedraft { position: absolute; border: 2px solid var(--yellow); border-radius: 0;
   background: rgba(245, 200, 0, .14); pointer-events: none; }
 .recog-zone-confirm { position: absolute; z-index: 16; transform: translateX(-50%); display: flex; gap: 6px; align-items: center;
   background: var(--white); border: 1px solid var(--border); border-radius: 8px; padding: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.16); }

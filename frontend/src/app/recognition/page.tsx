@@ -973,7 +973,8 @@ export default function RecognitionPage() {
                           borderWidth: Math.max(1, (sel ? 2 : 1.5) * inv),
                           borderColor: c,
                           background: sel ? `${c}3d` : done ? `${c}20` : `${c}14`,
-                          borderRadius: Math.max(2, 4 * inv),
+                          // прямые углы — «инженерный» вид (просьба Максима)
+                          borderRadius: 0,
                         }}
                         onPointerDown={(e) => {
                           e.stopPropagation();
@@ -991,6 +992,17 @@ export default function RecognitionPage() {
                           style={{ color: c, borderColor: c, transform: `scale(${inv})`, transformOrigin: 'left bottom' }}>
                           {el.klass} {Math.round((el.confidence || 0) * 100)}%
                         </span>
+                        {/* угловые квадраты — как в чертёжных редакторах;
+                            у выбранной рамки вместо них активные маркеры */}
+                        {!sel && ['nw', 'ne', 'se', 'sw'].map((h) => (
+                          <span key={h} className={`recog-el-corner rc-${h}`}
+                            style={{
+                              width: 6 * inv, height: 6 * inv,
+                              background: c,
+                              [h.includes('n') ? 'top' : 'bottom']: -3 * inv,
+                              [h.includes('w') ? 'left' : 'right']: -3 * inv,
+                            }} />
+                        ))}
                         {/* подтверждена — галочка по центру нижнего края */}
                         {done && (
                           <span className="recog-el-check"
@@ -998,10 +1010,21 @@ export default function RecognitionPage() {
                             <Icon.check />
                           </span>
                         )}
-                        {sel && ['nw','n','ne','e','se','s','sw','w'].map((h) => (
+                        {sel && ['nw','n','ne','e','se','s','sw','w'].map((h) => {
+                          // размер и смещение маркеров тоже компенсируем зумом,
+                          // иначе на большом масштабе они «съезжают» с углов
+                          const size = 10 * inv, off = -size / 2;
+                          const pos: React.CSSProperties = { width: size, height: size, borderWidth: Math.max(1, 2 * inv) };
+                          if (h.includes('n')) pos.top = off;
+                          if (h.includes('s')) pos.bottom = off;
+                          if (h.includes('w')) pos.left = off;
+                          if (h.includes('e')) pos.right = off;
+                          if (h === 'n' || h === 's') pos.left = `calc(50% - ${size / 2}px)`;
+                          if (h === 'e' || h === 'w') pos.top = `calc(50% - ${size / 2}px)`;
+                          return (
                           <span
                             key={h} className={`recog-handle rh-${h}`}
-                            style={{ width: 10 * inv, height: 10 * inv, borderWidth: Math.max(1, 2 * inv) }}
+                            style={pos}
                             onPointerDown={(e) => {
                               e.stopPropagation();
                               (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -1010,7 +1033,8 @@ export default function RecognitionPage() {
                             onPointerMove={onPointerMove}
                             onPointerUp={onPointerUp}
                           />
-                        ))}
+                          );
+                        })}
                       </div>
                     );
                   })}
