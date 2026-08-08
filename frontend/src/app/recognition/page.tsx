@@ -266,6 +266,51 @@ export default function RecognitionPage() {
   /* зеркало выбранной рамки для обработчика горячих клавиш */
   const selElRef = useRef<RecogElement | null>(null); selElRef.current = selEl;
 
+  /* ── плавающий инспектор: позиция и перетаскивание за шапку ── */
+  const INSP_W = 300;
+  const [inspPos, setInspPos] = useState({ x: 24, y: 70 });
+  const inspDrag = useRef<{ dx: number; dy: number } | null>(null);
+  const inspPinned = useRef(false); // пользователь двигал окно — не переставляем
+
+  /* при выборе новой рамки окно встаёт рядом с ней (пока его не двигали) */
+  useEffect(() => {
+    if (!selEl || !page?.width || inspPinned.current) return;
+    const wrap = workRef.current?.getBoundingClientRect();
+    const vp = vpRef.current?.getBoundingClientRect();
+    if (!wrap || !vp) return;
+    const bx = vp.left - wrap.left + view.x + (selEl.bbox.x + selEl.bbox.w) * page.width * view.z;
+    const by = vp.top - wrap.top + view.y + selEl.bbox.y * page.height * view.z;
+    const maxX = wrap.width - INSP_W - 12;
+    const x = bx + 16 > maxX ? Math.max(12, bx - INSP_W - 24) : bx + 16;
+    setInspPos({ x: Math.max(12, Math.min(maxX, x)), y: Math.max(12, Math.min(wrap.height - 120, by)) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selEl?.id]);
+
+  const startInspDrag = (e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return; // крестик не тащит
+    const wrap = workRef.current?.getBoundingClientRect();
+    if (!wrap) return;
+    inspDrag.current = { dx: e.clientX - wrap.left - inspPos.x, dy: e.clientY - wrap.top - inspPos.y };
+    inspPinned.current = true;
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+  };
+
+  useEffect(() => {
+    const move = (e: PointerEvent) => {
+      const d = inspDrag.current;
+      const wrap = workRef.current?.getBoundingClientRect();
+      if (!d || !wrap) return;
+      setInspPos({
+        x: Math.max(0, Math.min(wrap.width - 80, e.clientX - wrap.left - d.dx)),
+        y: Math.max(0, Math.min(wrap.height - 40, e.clientY - wrap.top - d.dy)),
+      });
+    };
+    const up = () => { inspDrag.current = null; };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+  }, []);
+
   /* Горячие клавиши: Esc — остановить распознавание / выйти из режима,
      Ctrl+C / Ctrl+V — копия рамки, Delete — удалить рамку.
      ВАЖНО: объявлять после page/selEl — иначе обращение к ним в списке
@@ -384,22 +429,30 @@ export default function RecognitionPage() {
     return { x: (clientX - r.left - v.x) / v.z, y: (clientY - r.top - v.y) / v.z };
   };
 
-  /* «режим руки»: колесо — прокрутка (Shift — вбок), зум — только Ctrl+колесо */
-  const onWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const v = viewRef.current;
-    if (e.ctrlKey || e.metaKey) {
-      const r = vpRef.current!.getBoundingClientRect();
-      const k = Math.exp(-e.deltaY * 0.0013);
-      const z = Math.max(0.05, Math.min(4, v.z * k));
-      const mx = e.clientX - r.left, my = e.clientY - r.top;
-      setView({ x: mx - ((mx - v.x) / v.z) * z, y: my - ((my - v.y) / v.z) * z, z });
-    } else if (e.shiftKey) {
-      setView({ ...v, x: v.x - (e.deltaY || e.deltaX) });
-    } else {
-      setView({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY });
-    }
-  };
+  /* «режим руки»: колесо — прокрутка (Shift — вбок), зум — только Ctrl+колесо.
+     Слушатель вешаем вручную с passive:false — React ставит wheel пассивным,
+     из-за чего preventDefault не работал и Ctrl+колесо зумило весь сайт. */
+  useEffect(() => {
+    const vp = vpRef.current;
+    if (!vp) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const v = viewRef.current;
+      if (e.ctrlKey || e.metaKey) {
+        const r = vp.getBoundingClientRect();
+        const k = Math.exp(-e.deltaY * 0.0013);
+        const z = Math.max(0.05, Math.min(4, v.z * k));
+        const mx = e.clientX - r.left, my = e.clientY - r.top;
+        setView({ x: mx - ((mx - v.x) / v.z) * z, y: my - ((my - v.y) / v.z) * z, z });
+      } else if (e.shiftKey) {
+        setView({ ...v, x: v.x - (e.deltaY || e.deltaX) });
+      } else {
+        setView({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY });
+      }
+    };
+    vp.addEventListener('wheel', onWheel, { passive: false });
+    return () => vp.removeEventListener('wheel', onWheel);
+  }, [doc]);
 
   const onPointerDown = (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest('.recog-el, .recog-handle, .recog-zone-confirm')) return;
@@ -943,7 +996,6 @@ export default function RecognitionPage() {
             <div
               ref={vpRef}
               className={`recog-viewport ${mode !== 'pan' ? 'crosshair' : ''}`}
-              onWheel={onWheel}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
@@ -992,6 +1044,15 @@ export default function RecognitionPage() {
                           style={{ color: c, borderColor: c, transform: `scale(${inv})`, transformOrigin: 'left bottom' }}>
                           {el.klass} {Math.round((el.confidence || 0) * 100)}%
                         </span>
+                        {/* выбранная рамка: 4 квадрата бегут по периметру
+                            по часовой стрелке — видно, какой элемент открыт */}
+                        {sel && [0, 1, 2, 3].map((i) => (
+                          <span key={`run-${i}`} className="recog-el-runner"
+                            style={{
+                              width: 7 * inv, height: 7 * inv, background: c,
+                              animationDelay: `${-1.1 * i}s`,
+                            }} />
+                        ))}
                         {/* угловые квадраты — как в чертёжных редакторах;
                             у выбранной рамки вместо них активные маркеры */}
                         {!sel && ['nw', 'ne', 'se', 'sw'].map((h) => (
@@ -1125,19 +1186,14 @@ export default function RecognitionPage() {
             </div>
           </div>
 
-          {/* правая колонка: инспектор */}
-          <aside className="recog-inspector">
-            {!selEl ? (
-              <div className="recog-insp-empty">
-                <b>Инспектор элемента</b>
-                <p>Кликните рамку на схеме — здесь появятся класс и параметры.</p>
-                <p>«Распознать зону» — выделите область, ИИ разметит её автоматически.</p>
-              </div>
-            ) : (
+          {/* инспектор — плавающее окно поверх схемы, перемещается за шапку */}
+          {selEl && (
+            <div className="recog-float-insp" style={{ left: inspPos.x, top: inspPos.y }}>
               <InspectorPanel
                 key={`${selEl.id}-${selEl.product_name || ''}-${selEl.article || ''}`}
                 el={selEl}
                 cfg={clsCfg}
+                onHeadPointerDown={startInspDrag}
                 onClose={() => setSelId(null)}
                 onSave={(patch, status) => saveElement(selEl, patch, status)}
                 onDelete={() => deleteElement(selEl)}
@@ -1145,8 +1201,8 @@ export default function RecognitionPage() {
                 onPickCatalog={() => setPickerElId(selEl.id)}
                 onClearProduct={() => applyProduct(selEl.id, { product_name: '', brand: '', article: '', etm_code: '', price: '' })}
               />
-            )}
-          </aside>
+            </div>
+          )}
 
           {/* панель каталога — справа от инспектора, канвас остаётся видимым */}
           {pickerElId != null && (
@@ -1269,9 +1325,10 @@ export default function RecognitionPage() {
 }
 
 /* ── Инспектор ── */
-function InspectorPanel({ el, cfg, onClose, onSave, onDelete, onDuplicate, onPickCatalog, onClearProduct }: {
+function InspectorPanel({ el, cfg, onHeadPointerDown, onClose, onSave, onDelete, onDuplicate, onPickCatalog, onClearProduct }: {
   el: RecogElement;
   cfg: RecogClassConfig;
+  onHeadPointerDown?: (e: React.PointerEvent) => void;
   onClose: () => void;
   onSave: (patch: Partial<RecogElement>, status?: string) => void;
   onDelete: () => void;
@@ -1314,7 +1371,9 @@ function InspectorPanel({ el, cfg, onClose, onSave, onDelete, onDuplicate, onPic
 
   return (
     <div className="recog-insp">
-      <div className="recog-insp-head">
+      <div className="recog-insp-head" onPointerDown={onHeadPointerDown}
+        style={onHeadPointerDown ? { cursor: 'move' } : undefined}
+        title={onHeadPointerDown ? 'Перетащите окно за заголовок' : undefined}>
         <b>{designation || byCode.get(klass)?.nameRu || 'Элемент'}</b>
         <button onClick={onClose} title="Закрыть"><Icon.cross /></button>
       </div>
