@@ -142,6 +142,9 @@ export default function RecognitionPage() {
   const vpRef = useRef<HTMLDivElement>(null);
   const drag = useRef<any>(null);
   const [zoneDraft, setZoneDraft] = useState<Zone | null>(null);
+  /* зеркало выделяемой зоны: обработчик отпускания может прийти из
+     window-страховки, где значение из замыкания уже устарело */
+  const zoneDraftRef = useRef<Zone | null>(null); zoneDraftRef.current = zoneDraft;
   /* результат последнего распознавания зоны: id рамок + зона — для
      кнопок «Подтвердить все» / «Удалить» */
   const [batch, setBatch] = useState<{ ids: number[]; zone: Zone } | null>(null);
@@ -454,9 +457,30 @@ export default function RecognitionPage() {
     return () => vp.removeEventListener('wheel', onWheel);
   }, [doc]);
 
+  /* Страховка: ловим отпускание кнопки и на уровне окна. Если браузер
+     всё же перехватит жест (нативный drag, выход курсора за холст),
+     выделение всё равно завершится и распознавание запустится. */
+  useEffect(() => {
+    const finish = () => { if (drag.current) onPointerUp(); };
+    const cancelDrag = (e: Event) => e.preventDefault();
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+    window.addEventListener('dragstart', cancelDrag);
+    return () => {
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+      window.removeEventListener('dragstart', cancelDrag);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, page, mode]);
+
   const onPointerDown = (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest('.recog-el, .recog-handle, .recog-zone-confirm')) return;
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    if (e.button !== 0) return;                       // только левая кнопка
+    e.preventDefault();                               // гасим нативный drag картинки
+    // захват на самом холсте (не на <img>): иначе при перетаскивании
+    // изображения браузером терялось событие отпускания кнопки
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     const start = { x: e.clientX, y: e.clientY };
     /* двойное нажатие (второе — удержать и тянуть) = распознавание из режима перемещения */
     const now = Date.now();
@@ -506,10 +530,11 @@ export default function RecognitionPage() {
     const d = drag.current;
     drag.current = null;
     if (!d) return;
-    if (d.kind === 'zone' && zoneDraft && page) {
+    const draft = zoneDraftRef.current;
+    if (d.kind === 'zone' && draft && page) {
       const z: Zone = {
-        x: zoneDraft.x / page.width, y: zoneDraft.y / page.height,
-        w: zoneDraft.w / page.width, h: zoneDraft.h / page.height,
+        x: draft.x / page.width, y: draft.y / page.height,
+        w: draft.w / page.width, h: draft.h / page.height,
       };
       setZoneDraft(null);
       setMode('pan');
