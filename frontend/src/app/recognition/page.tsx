@@ -2189,6 +2189,23 @@ function ModelPanel() {
         </div>
       )}
 
+      {/* классы активной модели — сразу видно, знает ли их система */}
+      {Array.isArray(data?.modelClasses) && data.modelClasses.length > 0 && (
+        <div className="recog-shadow">
+          <div className="recog-dataset-sub" style={{ marginBottom: 6 }}>
+            Классы активной модели ({data.modelClasses.length}) — серые система не знает, они придут как «Прочее»:
+          </div>
+          <div className="recog-dataset-classes">
+            {data.modelClasses.map((c: any, i: number) => (
+              <span key={`${c.name}-${i}`} className={`recog-dataset-chip ${c.known ? '' : 'dim'}`}
+                title={c.known ? 'Класс есть в конфиге' : 'Класса нет в конфиге — добавьте его в «Обновить классы»'}>
+                {i}: {c.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* теневые прогоны */}
       {runs.length > 0 && (
         <div className="recog-shadow">

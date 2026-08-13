@@ -30,8 +30,9 @@ import {
   mergeWithSystem,
   parseLsConfig,
   RecognitionClass,
+  slugFromLsValue,
 } from './recognition-classes';
-import { yoloDetect, resetYoloSession, YoloBox } from './yolo';
+import { yoloDetect, resetYoloSession, readModelClassNames, YoloBox } from './yolo';
 
 const execFileAsync = promisify(execFile);
 
@@ -538,9 +539,14 @@ export class RecognitionService implements OnModuleInit {
       this.logger.warn(`YOLO-инференс упал: ${e?.message || e}`);
       throw new ServiceUnavailableException('Модель YOLO не смогла обработать зону (см. логи сервера)');
     }
+    // Класс определяем по ИМЕНИ из модели: у Максима нумерация идёт по
+    // порядку его classes.txt и не совпадает с category в конфиге.
+    // Номер используем только как запасной вариант (старые модели v1–v3).
+    const byCode = new Set(cfg.classes.map((c) => c.code));
     const byCategory = new Map(cfg.classes.filter((c) => c.category != null).map((c) => [c.category, c.code]));
     return boxes.map((b) => ({
-      klass: byCategory.get(b.classId) || 'other',
+      klass: (b.className && byCode.has(slugFromLsValue(b.className)) ? slugFromLsValue(b.className) : null)
+        || byCategory.get(b.classId) || 'other',
       designation: '',
       fields: {},
       bbox: [b.bbox.x, b.bbox.y, b.bbox.w, b.bbox.h] as [number, number, number, number],
@@ -1298,11 +1304,24 @@ export class RecognitionService implements OnModuleInit {
   async listModels() {
     const models = await this.modelsRepo.find({ order: { id: 'DESC' } });
     const shadowRuns = await this.shadowRepo.find({ order: { id: 'DESC' }, take: 20 });
+    const active = models.find((m) => m.active);
+    // Классы активной модели: сверяем с конфигом, чтобы рассинхрон
+    // («модель знает класс, а система — нет») был виден сразу в панели
+    let modelClasses: { name: string; known: boolean }[] = [];
+    if (active) {
+      try {
+        const names = readModelClassNames(join(UPLOAD_DIR, active.filename)) || [];
+        const cfg = await this.getClassConfig();
+        const codes = new Set(cfg.classes.map((c) => c.code));
+        modelClasses = names.filter(Boolean).map((n) => ({ name: n, known: codes.has(slugFromLsValue(n)) }));
+      } catch { /* метаданных нет — просто не показываем список */ }
+    }
     return {
       models,
-      activeId: models.find((m) => m.active)?.id || null,
+      activeId: active?.id || null,
       mode: await this.getMode(),
       shadowRuns,
+      modelClasses,
     };
   }
 
