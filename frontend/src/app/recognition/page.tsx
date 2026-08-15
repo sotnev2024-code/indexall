@@ -53,6 +53,84 @@ const PARAM_OPTIONS: Record<string, string[]> = {
 /** Значение-переключатель на ручной ввод */
 const CUSTOM_OPT = '__custom__';
 
+/** Набор параметров, закреплённый за типом оборудования (замечание 6:
+ *  «определяется тип и к нему сразу идёт набор параметров»). Список полей
+ *  в инспекторе задаётся ТОЛЬКО этой таблицей — руками параметры не
+ *  добавляются и не удаляются.
+ *
+ *  Ключи — коды классов из конфига Label Studio Максима (он их обновляет
+ *  без деплоя), поэтому таблица переживает переименования: для класса,
+ *  которого здесь нет, берётся DEFAULT_PARAM_SET. Старые коды (mcb/mccb/
+ *  acb — до объединения в circuit_breaker) оставлены намеренно: в базе
+ *  есть рамки, размеченные ещё ими. */
+const PARAM_SETS: Record<string, string[]> = {
+  // аппараты защиты
+  circuit_breaker: ['Тип', 'Полюса', 'Хар-ка', 'Номинал, А', 'Откл. способность, кА'],
+  mcb: ['Тип', 'Полюса', 'Хар-ка', 'Номинал, А', 'Откл. способность, кА'],
+  mccb: ['Тип', 'Полюса', 'Номинал, А', 'Откл. способность, кА'],
+  acb: ['Тип', 'Полюса', 'Номинал, А', 'Откл. способность, кА'],
+  rcbo: ['Тип', 'Полюса', 'Хар-ка', 'Номинал, А', 'Утечка, мА', 'Тип расцепителя'],
+  rccb: ['Тип', 'Полюса', 'Номинал, А', 'Утечка, мА', 'Тип расцепителя'],
+  rcd: ['Тип', 'Полюса', 'Номинал, А', 'Утечка, мА', 'Тип расцепителя'],
+  afdd: ['Тип', 'Полюса', 'Номинал, А'],
+  spd: ['Тип', 'Класс защиты', 'Полюса'],
+  fuse: ['Тип', 'Номинал, А'],
+  fuse_link: ['Тип', 'Номинал, А'],
+  fuse_switch_disconnector: ['Тип', 'Полюса', 'Номинал, А'],
+  // коммутация
+  disconnector: ['Тип', 'Полюса', 'Номинал, А'],
+  lbs: ['Тип', 'Полюса', 'Номинал, А'],
+  switch: ['Тип', 'Полюса'],
+  contactor: ['Тип', 'Номинал, А', 'Катушка, В'],
+  contactor_coil: ['Тип', 'Катушка, В'],
+  contactor_contact: ['Тип'],
+  relay: ['Тип', 'Катушка, В'],
+  relay_contact: ['Тип'],
+  ats: ['Тип', 'Номинал, А'],
+  // измерение и учёт
+  ct: ['Тип', 'Коэффициент трансформации'],
+  electricity_meter: ['Тип', 'Номинал, А', 'Класс точности'],
+  ammeter: ['Тип', 'Предел измерения'],
+  voltmeter: ['Тип', 'Предел измерения'],
+  multimeter: ['Тип', 'Предел измерения'],
+  // управление и вспомогательное
+  button: ['Тип', 'Цвет'],
+  pushbutton_no_momentary: ['Тип', 'Цвет'],
+  pushbutton_nc_momentary: ['Тип', 'Цвет'],
+  pushbutton_no_latching: ['Тип', 'Цвет'],
+  pushbutton_nc_latching: ['Тип', 'Цвет'],
+  lamp: ['Тип', 'Цвет', 'Напряжение, В'],
+  power_supply: ['Тип', 'Напряжение, В', 'Мощность, Вт'],
+  controller: ['Тип'],
+  resistor: ['Тип', 'Сопротивление, Ом'],
+  terminal: ['Тип', 'Сечение, мм²'],
+  fused_terminal: ['Тип', 'Сечение, мм²', 'Номинал, А'],
+  motor_drive: ['Тип', 'Мощность, кВт', 'Номинал, А'],
+  // системные классы (лист спецификации)
+  cable: ['Марка', 'Жилы×сечение', 'Длина, м'],
+  load: ['Наименование', 'Помещение', 'Мощность, кВт'],
+  panel: ['Тип', 'Наименование', 'Исполнение IP'],
+  busbar: ['Тип', 'Номинал, А'],
+  other: ['Тип'],
+};
+/** Класса нет в таблице (Максим добавил новый в конфиг) — показываем базовый набор */
+const DEFAULT_PARAM_SET = ['Тип'];
+
+/** Поля инспектора для класса: закреплённый набор + уже заполненные
+ *  параметры вне набора (пришли от ИИ или из карточки товара) — их не
+ *  прячем, чтобы распознанное не пропадало, но и добавить руками нельзя. */
+function paramKeysFor(klass: string, fields: Record<string, string>): string[] {
+  const base = PARAM_SETS[klass] || DEFAULT_PARAM_SET;
+  const extra = Object.keys(fields).filter((k) => !base.includes(k) && String(fields[k] ?? '').trim() !== '');
+  return [...base, ...extra];
+}
+
+/** Нижний предел размера рамки — в ПИКСЕЛЯХ листа, а не в долях.
+ *  Доля даёт тем более крупную рамку, чем больше лист: прежние 0,004
+ *  на чертеже 6600 px — это 26 px, поэтому на больших листах рамка
+ *  «упиралась» и оставалась визуально большой (замечания 2 и 3). */
+const MIN_BOX_PX = 4;
+
 /* 15 популярных цветов рамок (пункт 7) */
 const SWATCHES = [
   '#E74C3C', '#D35400', '#F39C12', '#F1C40F', '#2ECC71',
@@ -151,6 +229,8 @@ export default function RecognitionPage() {
   const lastDownRef = useRef({ t: 0, x: 0, y: 0 });
   /** буфер копирования рамки (Ctrl+C → Ctrl+V) */
   const clipRef = useRef<RecogElement | null>(null);
+  /** сколько раз вставляли из буфера — чтобы копии ложились ступенькой */
+  const pasteNRef = useRef(0);
   /** отмена текущего распознавания по Esc */
   const detectAbortRef = useRef<AbortController | null>(null);
 
@@ -342,12 +422,14 @@ export default function RecognitionPage() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && el) {
         e.preventDefault();
         clipRef.current = el;
+        pasteNRef.current = 0;                  // ступенька вставки — с начала
         toast.success('Рамка скопирована — Ctrl+V создаст копию');
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && clipRef.current) {
         e.preventDefault();
-        duplicateElement(clipRef.current);
+        pasteNRef.current += 1;
+        duplicateElement(clipRef.current, undefined, pasteNRef.current);
         return;
       }
       if ((e.key === 'Delete' || e.key === 'Backspace') && el) {
@@ -522,7 +604,8 @@ export default function RecognitionPage() {
       if (d.h.includes('s')) b.h = d.bbox.h + dy;
       if (d.h.includes('w')) { b.x = d.bbox.x + dx; b.w = d.bbox.w - dx; }
       if (d.h.includes('n')) { b.y = d.bbox.y + dy; b.h = d.bbox.h - dy; }
-      if (b.w > 0.004 && b.h > 0.004) patchElementLocal(selEl.id, { bbox: clampB(b) });
+      const m = minBox();
+      if (b.w > m.w && b.h > m.h) patchElementLocal(selEl.id, { bbox: clampB(b) });
     }
   };
 
@@ -548,12 +631,22 @@ export default function RecognitionPage() {
     }
   };
 
-  const clampB = (b: Zone): Zone => ({
-    x: Math.max(0, Math.min(0.999, b.x)),
-    y: Math.max(0, Math.min(0.999, b.y)),
-    w: Math.max(0.004, Math.min(1 - Math.max(0, b.x), b.w)),
-    h: Math.max(0.004, Math.min(1 - Math.max(0, b.y), b.h)),
+  /** Минимум держим в пикселях листа: на крупном чертеже рамка должна
+   *  уменьшаться так же мелко, как на маленьком. */
+  const minBox = (): { w: number; h: number } => ({
+    w: page?.width ? MIN_BOX_PX / page.width : 0.0005,
+    h: page?.height ? MIN_BOX_PX / page.height : 0.0005,
   });
+
+  const clampB = (b: Zone): Zone => {
+    const m = minBox();
+    return {
+      x: Math.max(0, Math.min(0.999, b.x)),
+      y: Math.max(0, Math.min(0.999, b.y)),
+      w: Math.max(m.w, Math.min(1 - Math.max(0, b.x), b.w)),
+      h: Math.max(m.h, Math.min(1 - Math.max(0, b.y), b.h)),
+    };
+  };
 
   const patchElementLocal = (id: number, patch: Partial<RecogElement>) => {
     setDoc((d) => d ? { ...d, elements: d.elements.map((e) => (e.id === id ? { ...e, ...patch } : e)) } : d);
@@ -651,6 +744,24 @@ export default function RecognitionPage() {
     } catch { toast.error('Не удалось сохранить'); }
   }
 
+  /** Галочка на рамке — тот же «Подтвердить», что и в инспекторе.
+   *  Повторное нажатие снимает подтверждение: иначе ошибочный клик нечем
+   *  откатить, а рамка уже уехала в лист спецификации. */
+  async function toggleConfirm(el: RecogElement) {
+    const next = el.status === 'auto' ? 'confirmed' : 'auto';
+    try {
+      const { data } = await recognitionApi.updateElement(el.id, { status: next } as any);
+      if (data) patchElementLocal(el.id, data as any);
+      const pg = (doc?.pages || []).find((p) => p.id === el.page_id);
+      toast.success(
+        next === 'confirmed'
+          ? (pg?.sheet_id ? 'Подтверждено — лист спецификации обновлён' : 'Подтверждено — попадёт в лист спецификации')
+          : 'Подтверждение снято',
+      );
+      silentSheetSync(el);
+    } catch { toast.error('Не удалось сохранить'); }
+  }
+
   async function deleteElement(el: RecogElement) {
     try {
       await recognitionApi.removeElement(el.id);
@@ -663,11 +774,15 @@ export default function RecognitionPage() {
   /** Копия рамки со всеми параметрами — рядом, со сдвигом (Ctrl+V, «Дублировать»).
    *  Типовой сценарий Максима: один автомат размечен, остальные отличаются
    *  парой характеристик. */
-  async function duplicateElement(src: RecogElement, patch?: Partial<RecogElement>) {
-    const pg = (doc?.pages || []).find((p) => p.id === src.page_id) || page;
+  async function duplicateElement(src: RecogElement, patch?: Partial<RecogElement>, step = 1) {
+    // Вставляем на ТЕКУЩИЙ лист: рамку могли скопировать на одной схеме,
+    // а вставлять на другой — иначе копия уходила на исходный лист и
+    // выглядела как «Ctrl+V ничего не сделал».
+    const pg = page || (doc?.pages || []).find((p) => p.id === src.page_id);
     if (!pg) return;
     const base = { ...src, ...(patch || {}) } as RecogElement;
-    const shift = 0.012;
+    // каждая следующая вставка ступенькой — иначе копии ложатся друг на друга
+    const shift = 0.012 * step;
     const bbox = clampB({
       x: Math.min(base.bbox.x + shift, 1 - base.bbox.w),
       y: Math.min(base.bbox.y + shift, 1 - base.bbox.h),
@@ -680,6 +795,9 @@ export default function RecognitionPage() {
         fields: { ...(base.fields || {}) },
         color: base.color,
         bbox,
+        // копию ещё никто не проверял — она приходит неподтверждённой,
+        // даже если оригинал был подтверждён
+        status: 'auto',
         product_name: base.product_name, brand: base.brand, article: base.article,
         etm_code: base.etm_code, price: base.price,
       } as any);
@@ -693,8 +811,16 @@ export default function RecognitionPage() {
   async function applyProduct(elId: number, p: PickedProduct) {
     try {
       const el = (doc?.elements || []).find((e) => e.id === elId);
-      // параметры товара дополняют/перезаписывают поля рамки
-      const merged = { ...(el?.fields || {}), ...(p.fields || {}) };
+      // Параметры товара дополняют/перезаписывают поля рамки, но только те,
+      // что входят в набор её типа: набор задаётся типом и руками не
+      // правится, поэтому иначе в рамке осели бы атрибуты каталога, которые
+      // пользователю уже нечем убрать.
+      const allowed = new Set(PARAM_SETS[el?.klass || ''] || DEFAULT_PARAM_SET);
+      const fromProduct: Record<string, string> = {};
+      for (const [k, v] of Object.entries(p.fields || {})) {
+        if (allowed.has(k)) fromProduct[k] = v;
+      }
+      const merged = { ...(el?.fields || {}), ...fromProduct };
       const { product_class, fields, ...productCols } = p;
       const { data } = await recognitionApi.updateElement(elId, { ...productCols, fields: merged } as any);
       if (data) patchElementLocal(elId, data as any);
@@ -1089,13 +1215,18 @@ export default function RecognitionPage() {
                               [h.includes('w') ? 'left' : 'right']: -3 * inv,
                             }} />
                         ))}
-                        {/* подтверждена — галочка по центру нижнего края */}
-                        {done && (
-                          <span className="recog-el-check"
-                            style={{ transform: `translateX(-50%) scale(${inv})`, transformOrigin: 'center top', borderColor: c, color: c }}>
-                            <Icon.check />
-                          </span>
-                        )}
+                        {/* Галочка статуса по центру нижнего края: серая —
+                            рамка не подтверждена, зелёная — подтверждена.
+                            Нажатие равнозначно кнопке «Подтвердить». */}
+                        <span
+                          className={`recog-el-check ${done ? 'on' : ''}`}
+                          style={{ transform: `translateX(-50%) scale(${inv})`, transformOrigin: 'center top' }}
+                          title={done ? 'Подтверждена — нажмите, чтобы снять' : 'Подтвердить рамку'}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => { e.stopPropagation(); toggleConfirm(el); }}
+                        >
+                          <Icon.check />
+                        </span>
                         {sel && ['nw','n','ne','e','se','s','sw','w'].map((h) => {
                           // размер и смещение маркеров тоже компенсируем зумом,
                           // иначе на большом масштабе они «съезжают» с углов
@@ -1211,9 +1342,12 @@ export default function RecognitionPage() {
             </div>
           </div>
 
-          {/* инспектор — плавающее окно поверх схемы, перемещается за шапку */}
+          {/* инспектор — плавающее окно поверх схемы, перемещается за шапку.
+              Пока открыт каталог, окно не загораживает его: уходит под панель
+              и прижимается к левому краю рабочей области. */}
           {selEl && (
-            <div className="recog-float-insp" style={{ left: inspPos.x, top: inspPos.y }}>
+            <div className={`recog-float-insp${pickerElId != null ? ' under-catalog' : ''}`}
+              style={{ left: pickerElId != null ? 12 : inspPos.x, top: inspPos.y }}>
               <InspectorPanel
                 key={`${selEl.id}-${selEl.product_name || ''}-${selEl.article || ''}`}
                 el={selEl}
@@ -1365,7 +1499,6 @@ function InspectorPanel({ el, cfg, onHeadPointerDown, onClose, onSave, onDelete,
   const [designation, setDesignation] = useState(el.designation || '');
   const [fields, setFields] = useState<Record<string, string>>({ ...(el.fields || {}) });
   const [color, setColor] = useState(el.color || '');
-  const [newKey, setNewKey] = useState('');
   /** параметры, переведённые на ручной ввод («Своё значение…») */
   const [manualKeys, setManualKeys] = useState<Set<string>>(() => {
     const s = new Set<string>();
@@ -1376,7 +1509,16 @@ function InspectorPanel({ el, cfg, onHeadPointerDown, onClose, onSave, onDelete,
   });
 
   const byCode = new Map<string, RecogClass>(cfg.classes.map((c) => [c.code, c]));
-  const collect = (): Partial<RecogElement> => ({ klass, designation, fields, color });
+  /* Список параметров определяется типом элемента и меняется вместе с ним. */
+  const paramKeys = paramKeysFor(klass, fields);
+  const collect = (): Partial<RecogElement> => {
+    const out: Record<string, string> = {};
+    for (const k of paramKeys) {
+      const v = String(fields[k] ?? '').trim();
+      if (v) out[k] = v;                     // пустые поля набора не храним
+    }
+    return { klass, designation, fields: out, color };
+  };
   const warn = el.confidence > 0 && el.confidence < 0.7 && el.status === 'auto';
 
   const productBlock = el.product_name ? (
@@ -1435,7 +1577,8 @@ function InspectorPanel({ el, cfg, onHeadPointerDown, onClose, onSave, onDelete,
       <label>Обозначение (QF1, Гр.2…)</label>
       <input value={designation} onChange={(e) => setDesignation(e.target.value)} />
 
-      {Object.entries(fields).map(([k, v]) => {
+      {paramKeys.map((k) => {
+        const v = fields[k] ?? '';
         const opts = PARAM_OPTIONS[k];
         // известный параметр → выпадающий список допустимых значений;
         // «Своё значение…» переключает поле на свободный ввод
@@ -1463,16 +1606,10 @@ function InspectorPanel({ el, cfg, onHeadPointerDown, onClose, onSave, onDelete,
                 <input value={v} autoFocus={manualKeys.has(k)}
                   onChange={(e) => setFields((f) => ({ ...f, [k]: e.target.value }))} />
               )}
-              <button title="Убрать параметр" onClick={() => setFields((f) => { const n = { ...f }; delete n[k]; return n; })}><Icon.cross /></button>
             </div>
           </div>
         );
       })}
-      <div className="recog-addfield">
-        <input placeholder="Новый параметр (напр. Номинал, А)" value={newKey} onChange={(e) => setNewKey(e.target.value)} />
-        <button className="btn-outline" disabled={!newKey.trim()}
-          onClick={() => { setFields((f) => ({ ...f, [newKey.trim()]: '' })); setNewKey(''); }}><Icon.plus /></button>
-      </div>
 
       {/* пункт 7: 15 популярных цветов + кнопка «добавить свой» */}
       <label>Цвет рамки</label>

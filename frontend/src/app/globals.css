@@ -1675,6 +1675,10 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-float-insp { position: absolute; z-index: 45; width: 300px; max-height: calc(100% - 24px);
   overflow: auto; background: var(--white); border: 1px solid var(--border); border-radius: 10px;
   box-shadow: 0 8px 28px rgba(0,0,0,.20); }
+/* пока открыт каталог («Добавить из базы») окно элемента не должно его
+   загораживать: уходит под панель (z-index ниже .recog-catalog) и живёт
+   в свободной полосе слева от неё */
+.recog-float-insp.under-catalog { z-index: 35; }
 .recog-float-insp .recog-insp { padding: 12px 14px 14px; }
 .recog-float-insp .recog-insp-head { position: sticky; top: 0; background: var(--white);
   padding: 2px 0 8px; margin: -2px 0 0; border-bottom: 1px solid var(--border); z-index: 2; }
@@ -1699,9 +1703,14 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-el.done .recog-el-chip { display: none; }
 .recog-el.done:hover .recog-el-chip, .recog-el.done.sel .recog-el-chip { display: inline-block; }
 /* галочка «подтверждено» по центру нижнего края рамки */
+/* галочка статуса рамки: она же кнопка «Подтвердить».
+   Серая — не подтверждена, зелёная — подтверждена. */
 .recog-el-check { position: absolute; left: 50%; bottom: -9px; width: 16px; height: 16px; border-radius: 50%;
-  background: var(--white); border: 1px solid; display: flex; align-items: center; justify-content: center;
-  pointer-events: none; }
+  background: var(--white); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center;
+  padding: 0; color: var(--muted); cursor: pointer; transition: background .12s, border-color .12s, color .12s; }
+.recog-el-check:hover { border-color: #1e7e34; color: #1e7e34; }
+.recog-el-check.on { background: #1e7e34; border-color: #1e7e34; color: #fff; }
+.recog-el-check.on:hover { background: #19692c; border-color: #19692c; color: #fff; }
 
 .recog-progress-stop { margin-top: 12px; }
 
@@ -1736,11 +1745,9 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-conf.warn { color: #b45309; font-weight: 600; }
 .recog-insp label { display: block; font-size: 11px; font-weight: 600; color: var(--muted); margin: 9px 0 3px; }
 .recog-insp select, .recog-insp input:not([type="color"]) { width: 100%; font-size: 13px; border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; background: var(--white); }
+/* набор параметров закреплён за типом элемента: ни крестика «убрать поле»,
+   ни строки «новый параметр» здесь больше нет (замечания 5 и 6) */
 .recog-fieldline { display: flex; gap: 6px; }
-.recog-fieldline button { border: 1px solid var(--border); background: var(--white); border-radius: 6px; width: 30px; cursor: pointer; color: var(--muted); flex-shrink: 0; }
-.recog-fieldline button:hover { color: #dc3545; border-color: #dc3545; }
-.recog-addfield { display: flex; gap: 6px; margin-top: 10px; }
-.recog-addfield input { flex: 1; }
 .recog-colorline { display: flex; align-items: center; gap: 8px; }
 .recog-colorline input[type="color"] { width: 44px; height: 30px; border: 1px solid var(--border); border-radius: 6px; background: var(--white); padding: 2px; cursor: pointer; }
 .recog-insp-btns { display: flex; gap: 8px; margin-top: 14px; }

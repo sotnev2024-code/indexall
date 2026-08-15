@@ -29,6 +29,17 @@ export interface YoloBox {
 
 /** Запасной размер входа, если модель не сообщает свой (yolo export imgsz=…) */
 const FALLBACK_INPUT = parseInt(process.env.RECOGNITION_YOLO_SIZE || '640', 10) || 640;
+/**
+ * Тайловый инференс — ТОЛЬКО для модели, обученной на тайлах.
+ *
+ * Тайлы режут зону в масштабе 1:1, тогда как letterbox вписывает её целиком
+ * во вход модели. Для модели, обученной на целых листах, это меняет масштаб
+ * объектов в разы: аппарат, который при обучении занимал десятки пикселей,
+ * приходит на вход огромным — и не находится вообще. Поэтому по умолчанию
+ * выключено; включать вместе с переходом на тайловую модель:
+ *   RECOGNITION_YOLO_TILES=1
+ */
+const TILES_ENABLED = /^(1|true|on|yes)$/i.test((process.env.RECOGNITION_YOLO_TILES || '').trim());
 /** Больше тайлов — точнее на крупных зонах, но дольше на CPU сервера */
 const MAX_TILES = parseInt(process.env.RECOGNITION_YOLO_MAX_TILES || '12', 10) || 12;
 const TILE_OVERLAP = 0.2;
@@ -41,6 +52,16 @@ let cached: { path: string; session: any; input: number; names: string[] | null 
 /** Сбрасывает закэшированную сессию (при смене активной версии модели). */
 export function resetYoloSession() {
   cached = null;
+}
+
+/** Действующие настройки инференса — показываются в самопроверке модуля. */
+export function yoloSettings() {
+  return {
+    tiles: TILES_ENABLED,
+    max_tiles: MAX_TILES,
+    fallback_input: FALLBACK_INPUT,
+    conf_threshold: CONF_THRESHOLD,
+  };
 }
 
 /**
@@ -167,7 +188,7 @@ export async function yoloDetect(imageJpeg: Buffer, modelPath: string): Promise<
   const step = Math.round(S * (1 - TILE_OVERLAP));
   let cols = Math.max(1, Math.ceil((srcW - S) / step) + 1);
   let rows = Math.max(1, Math.ceil((srcH - S) / step) + 1);
-  const tiled = (cols > 1 || rows > 1) && cols * rows <= MAX_TILES;
+  const tiled = TILES_ENABLED && (cols > 1 || rows > 1) && cols * rows <= MAX_TILES;
 
   const found: YoloBox[] = [];
 

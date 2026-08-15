@@ -32,7 +32,7 @@ import {
   RecognitionClass,
   slugFromLsValue,
 } from './recognition-classes';
-import { yoloDetect, resetYoloSession, readModelClassNames, YoloBox } from './yolo';
+import { yoloDetect, resetYoloSession, readModelClassNames, yoloSettings, YoloBox } from './yolo';
 
 const execFileAsync = promisify(execFile);
 
@@ -92,6 +92,66 @@ export class RecognitionService implements OnModuleInit {
 
   isConfigured(): boolean {
     return !!(process.env.RECOGNITION_API_URL?.trim() && process.env.RECOGNITION_API_KEY?.trim());
+  }
+
+  /** Самопроверка распознавания одним запросом: что настроено, какой режим,
+   *  какая модель активна и отвечает ли провайдер. Заведена под разбор
+   *  «элементы перестали обнаруживаться» — чтобы отделить протухший ключ или
+   *  сменившийся эндпоинт от ситуации «сервис жив, но ничего не находит». */
+  async diagnostics() {
+    const base = (process.env.RECOGNITION_API_URL || '').trim().replace(/\/+$/, '');
+    const key = (process.env.RECOGNITION_API_KEY || '').trim();
+    const model = (process.env.RECOGNITION_MODEL || 'gemini-3-5-flash').trim();
+    const mode = await this.getMode();
+    const cfg = await this.getClassConfig();
+    const active = await this.modelsRepo.findOne({ where: { active: true } });
+
+    const out: any = {
+      mode,
+      api: {
+        url: base || null,
+        endpoint: base ? `${base}/gemini/v1/models/${model}:streamGenerateContent` : null,
+        model,
+        key_set: !!key,
+        // хвост ключа — сверить с тем, что выдал агрегатор, не раскрывая сам ключ
+        key_tail: key ? `…${key.slice(-4)}` : null,
+      },
+      classes: cfg.classes.length,
+      yolo: {
+        active: active
+          ? {
+              id: active.id,
+              file: active.orig_name,
+              // «unused_N» здесь означает дыры в нумерации категорий конфига
+              // на момент выгрузки датасета — класс придёт как «Прочее»
+              classes: readModelClassNames(join(UPLOAD_DIR, active.filename)) || [],
+            }
+          : null,
+        settings: yoloSettings(),
+      },
+      probe: null as any,
+    };
+
+    if (!base || !key) {
+      out.probe = { ok: false, error: 'RECOGNITION_API_URL / RECOGNITION_API_KEY не заданы' };
+      return out;
+    }
+
+    // Пробный вызов минимальной картинкой: дёшево и однозначно отвечает,
+    // жив ли ключ и тот ли эндпоинт.
+    const sharp = require('sharp');
+    const probeJpeg: Buffer = await sharp({
+      create: { width: 64, height: 64, channels: 3, background: { r: 255, g: 255, b: 255 } },
+    }).jpeg().toBuffer();
+
+    const t0 = Date.now();
+    try {
+      const answer = await this.callGeminiJson(probeJpeg, 'Верни строго JSON без пояснений: {"ok":true}');
+      out.probe = { ok: answer != null, ms: Date.now() - t0, answer: answer ?? null };
+    } catch (e: any) {
+      out.probe = { ok: false, ms: Date.now() - t0, error: String(e?.message || e).slice(0, 300) };
+    }
+    return out;
   }
 
   /** Очередь рендера живёт в памяти процесса — рестарт backend (деплой)
@@ -472,15 +532,30 @@ export class RecognitionService implements OnModuleInit {
       bbox: [number, number, number, number]; confidence?: number;
     }>;
 
-    if (mode === 'yolo') {
-      found = await this.runYolo(buf, cfg);
-    } else if (mode === 'cascade') {
-      found = await this.runCascade(buf, cfg);
-    } else if (mode === 'shadow') {
-      found = await this.runShadow(buf, cfg, page.id, z);
-    } else {
-      found = await this.callVisionModel(buf, cfg);
+    const startedAt = Date.now();
+    const where = `режим ${mode}, страница ${page.id}, зона ${width}×${height} px`;
+    try {
+      if (mode === 'yolo') {
+        found = await this.runYolo(buf, cfg);
+      } else if (mode === 'cascade') {
+        found = await this.runCascade(buf, cfg);
+      } else if (mode === 'shadow') {
+        found = await this.runShadow(buf, cfg, page.id, z);
+      } else {
+        found = await this.callVisionModel(buf, cfg);
+      }
+    } catch (e: any) {
+      this.logger.warn(`Распознавание: ${where} — ошибка за ${Date.now() - startedAt} мс: ${e?.message || e}`);
+      throw e;
     }
+    // Пустой результат ошибкой не считается, но выглядит для пользователя
+    // ровно как «нейросеть перестала находить элементы». Без этой строки
+    // в логах его не отличить от неудачного вызова — а отличать нужно:
+    // пусто → вопрос к модели/промпту, ошибка → к интеграции.
+    this.logger.log(
+      `Распознавание: ${where}, найдено ${found.length} за ${Date.now() - startedAt} мс` +
+      (found.length ? ` (классы: ${[...new Set(found.map((f) => f.klass))].join(', ')})` : ''),
+    );
 
     // bbox кропа → bbox страницы
     const toSave = found.map((el) => ({
@@ -765,7 +840,12 @@ export class RecognitionService implements OnModuleInit {
       fields: this.sanitizeFields(data.fields),
       bbox: this.clampZone(data.bbox as Bbox),
       confidence: 1,
-      status: 'corrected', // ручная разметка — сразу «правда» для датасета
+      // Рамка, нарисованная руками, — сразу «правда» для датасета. Копия
+      // (Ctrl+V, «Дублировать») приходит со статусом 'auto': её ещё никто
+      // не проверял, даже если оригинал был подтверждён.
+      status: ['auto', 'confirmed', 'corrected'].includes(String(data.status || ''))
+        ? String(data.status)
+        : 'corrected',
       color: String(data.color || '').slice(0, 20),
       // копия рамки переносит и привязанный товар каталога
       product_name: String(data.product_name || '').slice(0, 300),
@@ -1363,13 +1443,16 @@ export class RecognitionService implements OnModuleInit {
 
   // ── Владение ──────────────────────────────────────────────────
 
+  /** Нижний предел в долях: на чертеже 6600 px прежние 0,001 — это 6,6 px,
+   *  и рамку было не уменьшить (замечания Максима 2 и 3; фронт держит
+   *  минимум в пикселях листа, здесь — только защита от нулевых значений). */
   private clampZone(z: Bbox): Bbox {
     const x = Math.max(0, Math.min(1, Number(z?.x) || 0));
     const y = Math.max(0, Math.min(1, Number(z?.y) || 0));
     return {
       x, y,
-      w: Math.max(0.001, Math.min(1 - x, Number(z?.w) || 0)),
-      h: Math.max(0.001, Math.min(1 - y, Number(z?.h) || 0)),
+      w: Math.max(0.0002, Math.min(1 - x, Number(z?.w) || 0)),
+      h: Math.max(0.0002, Math.min(1 - y, Number(z?.h) || 0)),
     };
   }
 

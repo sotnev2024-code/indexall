@@ -33,6 +33,13 @@ export class RecognitionController {
     return { configured: this.service.isConfigured() };
   }
 
+  /** Самопроверка интеграции: режим, эндпоинт, активная модель и живой ли
+   *  провайдер (пробный вызов). Открыт только админам — как весь контроллер. */
+  @Get('diagnostics')
+  diagnostics() {
+    return this.service.diagnostics();
+  }
+
   // ── Таксономия классов (из конфига Label Studio) ──────────────
 
   @Get('classes')
