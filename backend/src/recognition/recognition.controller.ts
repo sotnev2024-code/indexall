@@ -30,7 +30,7 @@ export class RecognitionController {
 
   @Get('status')
   status() {
-    return { configured: this.service.isConfigured() };
+    return this.service.status();
   }
 
   /** Самопроверка интеграции: режим, эндпоинт, активная модель и живой ли
@@ -104,14 +104,25 @@ export class RecognitionController {
   uploadModel(
     @UploadedFile() file: Express.Multer.File,
     @Body('note') note: string,
+    @Body('role') role: string,
+    @Body('tiled') tiled: string,
   ) {
     if (!file) throw new BadRequestException('Файл не загружен');
-    return this.service.uploadModel(file, note);
+    return this.service.uploadModel(file, note, role, tiled === 'true' || tiled === '1');
   }
 
   @Post('models/:id/activate')
   activateModel(@Param('id', ParseIntPipe) id: number) {
     return this.service.activateModel(id);
+  }
+
+  /** Роль модели в конвейере (детектор/классификатор) и нарезка на тайлы */
+  @Patch('models/:id')
+  updateModel(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { role?: string; tiled?: boolean; note?: string },
+  ) {
+    return this.service.updateModel(id, body);
   }
 
   @Delete('models/:id')

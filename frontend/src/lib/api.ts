@@ -410,13 +410,18 @@ export const recognitionApi = {
   },
   // Модель YOLO и режим распознавания
   listModels: () => api.get('/recognition/models'),
-  uploadModel: (file: File, note: string) => {
+  uploadModel: (file: File, note: string, role = 'single', tiled = false) => {
     const fd = new FormData();
     fd.append('file', file);
     fd.append('note', note);
+    fd.append('role', role);
+    fd.append('tiled', tiled ? 'true' : 'false');
     return api.post('/recognition/models', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600000 });
   },
   activateModel: (id: number) => api.post(`/recognition/models/${id}/activate`),
+  /** роль модели в конвейере и нарезка на тайлы */
+  updateModel: (id: number, patch: { role?: string; tiled?: boolean; note?: string }) =>
+    api.patch(`/recognition/models/${id}`, patch),
   deleteModel: (id: number) => api.delete(`/recognition/models/${id}`),
   setMode: (mode: string) => api.put('/recognition/mode', { mode }),
   detect: (pageId: number, zone: { x: number; y: number; w: number; h: number }, signal?: AbortSignal) =>

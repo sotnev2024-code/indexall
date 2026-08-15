@@ -1139,7 +1139,10 @@ export default function RecognitionPage() {
               {recogMode !== 'llm' && (
                 <span className="recog-modebadge"
                   title="Режим распознавания меняется в панели «Модель Zeus и режим распознавания» на экране документов">
-                  {recogMode === 'yolo' ? 'Только Zeus' : recogMode === 'cascade' ? 'Каскад Zeus→LLM' : 'Теневой режим'}
+                  {recogMode === 'yolo' ? 'Только Zeus'
+                    : recogMode === 'cascade' ? 'Каскад Zeus→LLM'
+                    : recogMode === 'twostage' ? 'Поочерёдно: детектор → классификатор'
+                    : 'Теневой режим'}
                 </span>
               )}
             </div>
@@ -2201,11 +2204,30 @@ const MODE_INFO: Record<string, { label: string; hint: string }> = {
   shadow: { label: 'Теневой (LLM + Zeus)', hint: 'Пользователь видит результат LLM, Zeus работает параллельно — сравнение копится ниже.' },
   cascade: { label: 'Каскад (Zeus → LLM)', hint: 'Zeus находит рамки и классы, LLM дочитывает параметры. Целевая схема.' },
   yolo: { label: 'Только Zeus', hint: 'Быстро и бесплатно, но без параметров (тип/номинал не читаются).' },
+  twostage: {
+    label: 'Двухступенчатый (детектор → классификатор)',
+    hint: 'Первая модель находит элементы, вторая определяет класс по каждой найденной области.',
+  },
+};
+
+/** Роль модели в конвейере */
+const ROLE_INFO: Record<string, string> = {
+  single: 'Одна модель (рамки + классы)',
+  detector: 'Детектор — ищет элементы',
+  classifier: 'Классификатор — определяет класс области',
+};
+/** то же коротко — для строк списка версий */
+const ROLE_SHORT: Record<string, string> = {
+  single: 'одна модель',
+  detector: 'детектор',
+  classifier: 'классификатор',
 };
 
 function ModelPanel() {
   const [data, setData] = useState<any>(null);
   const [note, setNote] = useState('');
+  const [role, setRole] = useState('single');
+  const [tiled, setTiled] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -2217,7 +2239,7 @@ function ModelPanel() {
   async function upload(f: File) {
     setUploading(true);
     try {
-      await recognitionApi.uploadModel(f, note);
+      await recognitionApi.uploadModel(f, note, role, tiled);
       setNote('');
       toast.success('Версия загружена — активируйте её, чтобы включить');
       reload();
@@ -2225,6 +2247,15 @@ function ModelPanel() {
       toast.error(e?.response?.data?.message || 'Не удалось загрузить модель');
     } finally {
       setUploading(false);
+    }
+  }
+  async function patchModel(id: number, patch: { role?: string; tiled?: boolean }) {
+    try {
+      const { data: d } = await recognitionApi.updateModel(id, patch);
+      setData(d);
+      if (patch.role) toast.success(`Роль: ${ROLE_INFO[patch.role] || patch.role}`);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Не удалось изменить модель');
     }
   }
   async function activate(id: number) {
@@ -2257,28 +2288,42 @@ function ModelPanel() {
   }
 
   const models: any[] = data?.models || [];
-  const hasActive = !!data?.activeId;
   const mode: string = data?.mode || 'llm';
   const runs: any[] = data?.shadowRuns || [];
+  /* какие роли активны — от этого зависит доступность режимов */
+  const activeRoles = new Set(models.filter((m) => m.active).map((m) => m.role || 'single'));
+  const hasSingle = activeRoles.has('single');
+  const hasDetector = activeRoles.has('detector');
+  const hasActive = models.some((m) => m.active);
+  /** режим недоступен, пока нет нужной модели */
+  const modeBlocked = (m: string) =>
+    m === 'twostage' ? !hasDetector : m !== 'llm' ? !hasSingle : false;
+  const blockedHint = (m: string) =>
+    m === 'twostage' ? 'Загрузите модель с ролью «Детектор» и активируйте её'
+      : 'Загрузите модель с ролью «Одна модель» и активируйте её';
 
   return (
     <div className="recog-dataset">
       <div className="recog-dataset-head">
         <b>Модель Zeus и режим распознавания</b>
         <span className="recog-dataset-sub">
-          {models.length ? `версий: ${models.length}${hasActive ? '' : ' · нет активной'}` : 'модель ещё не загружалась — работает LLM'}
+          {models.length
+            ? `версий: ${models.length}${hasActive
+                ? ` · активны: ${[...activeRoles].map((r) => ROLE_SHORT[r] || r).join(', ')}`
+                : ' · нет активной'}`
+            : 'модель ещё не загружалась — работает LLM'}
         </span>
       </div>
 
       {/* режим */}
       <div className="recog-mode">
         {Object.entries(MODE_INFO).map(([m, info]) => (
-          <label key={m} className={`recog-mode-opt ${mode === m ? 'on' : ''} ${m !== 'llm' && !hasActive ? 'dis' : ''}`}
-            title={m !== 'llm' && !hasActive ? 'Сначала загрузите и активируйте модель' : info.hint}>
+          <label key={m} className={`recog-mode-opt ${mode === m ? 'on' : ''} ${modeBlocked(m) ? 'dis' : ''}`}
+            title={modeBlocked(m) ? blockedHint(m) : info.hint}>
             <input
               type="radio" name="recog-mode" value={m}
               checked={mode === m}
-              disabled={m !== 'llm' && !hasActive}
+              disabled={modeBlocked(m)}
               onChange={() => changeMode(m)}
             />
             <span><b>{info.label}</b><small>{info.hint}</small></span>
@@ -2286,13 +2331,22 @@ function ModelPanel() {
         ))}
       </div>
 
-      {/* загрузка версии */}
+      {/* загрузка версии: роль в конвейере + нарезка на тайлы */}
       <div className="recog-dataset-actions">
         <input
-          placeholder="Заметка к версии (напр. v1 — 48 схем)"
+          placeholder="Заметка к версии (напр. Detector v1)"
           value={note} onChange={(e) => setNote(e.target.value)}
-          style={{ flex: 1, minWidth: 180, border: '1px solid var(--border)', borderRadius: 6, padding: '7px 9px', fontSize: 13 }}
+          style={{ flex: 1, minWidth: 160, border: '1px solid var(--border)', borderRadius: 6, padding: '7px 9px', fontSize: 13 }}
         />
+        <select value={role} onChange={(e) => setRole(e.target.value)}
+          title="Роль модели в конвейере распознавания"
+          style={{ border: '1px solid var(--border)', borderRadius: 6, padding: '7px 9px', fontSize: 13 }}>
+          {Object.entries(ROLE_INFO).map(([r, label]) => <option key={r} value={r}>{label}</option>)}
+        </select>
+        <label className="recog-tiles-check" title="Резать лист на квадраты размером со вход модели (Zeus 640, Vision 1280). Нужно моделям, обученным на тайлах">
+          <input type="checkbox" checked={tiled} onChange={(e) => setTiled(e.target.checked)} />
+          нарезка на тайлы
+        </label>
         <button className="btn-primary" disabled={uploading}
           onClick={() => document.getElementById('recog-model-input')?.click()}>
           {uploading ? 'Загружаем…' : 'Загрузить модель (.onnx)'}
@@ -2310,13 +2364,25 @@ function ModelPanel() {
                 {m.orig_name || m.filename}
                 {m.note && <small> — {m.note}</small>}
               </span>
+              <select className="recog-model-role" value={m.role || 'single'}
+                title="Роль модели в конвейере"
+                onChange={(e) => patchModel(m.id, { role: e.target.value })}>
+                {Object.entries(ROLE_SHORT).map(([r, label]) => (
+                  <option key={r} value={r} title={ROLE_INFO[r]}>{label}</option>
+                ))}
+              </select>
+              <label className="recog-tiles-check" title="Резать вход на тайлы размером со вход модели">
+                <input type="checkbox" checked={!!m.tiled}
+                  onChange={(e) => patchModel(m.id, { tiled: e.target.checked })} />
+                тайлы
+              </label>
               <span className="recog-model-date">{new Date(m.createdAt).toLocaleString('ru-RU')}</span>
               {m.active
                 ? <span className="recog-pill st-confirmed">активна</span>
                 : (
                   <>
                     <button className="btn-outline" disabled={busy} onClick={() => activate(m.id)}>
-                      {hasActive ? 'Откатиться на эту' : 'Активировать'}
+                      {activeRoles.has(m.role || 'single') ? 'Откатиться на эту' : 'Активировать'}
                     </button>
                     <button className="recog-docdel" title="Удалить версию" onClick={() => removeVersion(m.id)}><Icon.cross /></button>
                   </>

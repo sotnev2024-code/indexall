@@ -22,6 +22,19 @@ export class RecognitionModelVersion {
   @Column({ default: false })
   active: boolean;
 
+  /** Роль в конвейере (двухступенчатая схема Максима):
+   *  single — одна модель делает всё (рамки + классы, прежнее поведение);
+   *  detector — только находит элементы (класс игнорируется);
+   *  classifier — определяет класс по вырезанной области детектора.
+   *  Активной может быть по одной модели каждой роли. */
+  @Column({ default: 'single' })
+  role: string;
+
+  /** Резать вход на тайлы размером со вход модели (Zeus 640, Vision 1280).
+   *  Для моделей, обученных на целых листах, нарезку выключают. */
+  @Column({ default: false })
+  tiled: boolean;
+
   @CreateDateColumn()
   createdAt: Date;
 }

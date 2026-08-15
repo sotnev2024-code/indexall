@@ -61,12 +61,36 @@ const MAX_PAGES = 60;
 const RENDER_DPI = 200;
 /** Длинная сторона кропа, отправляемого в модель */
 const DETECT_MAX_EDGE = 2200;
+/** То же для тайловых моделей: масштаб 1:1 важнее размера картинки, а LLM
+ *  в этих режимах не участвует — ограничение провайдера не действует. */
+const DETECT_MAX_EDGE_TILED = parseInt(process.env.RECOGNITION_MAX_EDGE_TILED || '4400', 10) || 4400;
 
 /** Ключ настройки с XML-конфигом Label Studio (см. recognition-classes.ts) */
 const LS_CONFIG_KEY = 'recognition_ls_config';
-/** Режим распознавания: llm | shadow | cascade | yolo */
+/** Режим распознавания: llm | shadow | cascade | yolo | twostage */
 const MODE_KEY = 'recognition_mode';
-export const RECOGNITION_MODES = ['llm', 'shadow', 'cascade', 'yolo'] as const;
+export const RECOGNITION_MODES = ['llm', 'shadow', 'cascade', 'yolo', 'twostage'] as const;
+
+/** Один элемент на одну область: рамка, вложенная в другую (≥70% своей
+ *  площади внутри), отбрасывается — остаётся внешняя. */
+function dropNested<T extends { bbox: [number, number, number, number]; confidence?: number }>(items: T[]): T[] {
+  const area = (b: T['bbox']) => b[2] * b[3];
+  const inside = (inner: T['bbox'], outer: T['bbox']) => {
+    const x1 = Math.max(inner[0], outer[0]);
+    const y1 = Math.max(inner[1], outer[1]);
+    const x2 = Math.min(inner[0] + inner[2], outer[0] + outer[2]);
+    const y2 = Math.min(inner[1] + inner[3], outer[1] + outer[3]);
+    const overlap = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+    return area(inner) > 0 && overlap / area(inner) >= 0.7;
+  };
+  // от крупных к мелким: мелкая внутри уже принятой крупной — лишняя
+  const sorted = [...items].sort((a, b) => area(b.bbox) - area(a.bbox));
+  const keep: T[] = [];
+  for (const it of sorted) {
+    if (!keep.some((k) => inside(it.bbox, k.bbox))) keep.push(it);
+  }
+  return keep;
+}
 
 type Bbox = { x: number; y: number; w: number; h: number };
 
@@ -94,6 +118,18 @@ export class RecognitionService implements OnModuleInit {
     return !!(process.env.RECOGNITION_API_URL?.trim() && process.env.RECOGNITION_API_KEY?.trim());
   }
 
+  /** Доступно ли автораспознавание прямо сейчас: режимам с LLM нужен ключ
+   *  агрегатора, чисто модельным (Zeus, поочерёдный) — активная модель. */
+  async status() {
+    const mode = await this.getMode();
+    const llm = this.isConfigured();
+    const modelOnly = mode === 'yolo' || mode === 'twostage';
+    const model = modelOnly
+      ? !!(await this.activeModel(mode === 'twostage' ? 'detector' : 'single'))
+      : false;
+    return { configured: modelOnly ? model : llm, llm, mode };
+  }
+
   /** Самопроверка распознавания одним запросом: что настроено, какой режим,
    *  какая модель активна и отвечает ли провайдер. Заведена под разбор
    *  «элементы перестали обнаруживаться» — чтобы отделить протухший ключ или
@@ -104,7 +140,8 @@ export class RecognitionService implements OnModuleInit {
     const model = (process.env.RECOGNITION_MODEL || 'gemini-3-5-flash').trim();
     const mode = await this.getMode();
     const cfg = await this.getClassConfig();
-    const active = await this.modelsRepo.findOne({ where: { active: true } });
+    const activeAll = await this.modelsRepo.find({ where: { active: true } });
+    const active = activeAll.find((m) => !m.role || m.role === 'single') || activeAll[0];
 
     const out: any = {
       mode,
@@ -127,6 +164,10 @@ export class RecognitionService implements OnModuleInit {
               classes: readModelClassNames(join(UPLOAD_DIR, active.filename)) || [],
             }
           : null,
+        // роли активных моделей — видно, собран ли поочерёдный конвейер
+        roles: activeAll.map((m) => ({
+          role: m.role || 'single', file: m.orig_name, tiled: !!m.tiled,
+        })),
         settings: yoloSettings(),
       },
       probe: null as any,
@@ -485,11 +526,6 @@ export class RecognitionService implements OnModuleInit {
   // ── Распознавание зоны ────────────────────────────────────────
 
   async detectZone(pageId: number, userId: number, zone: Bbox) {
-    if (!this.isConfigured()) {
-      throw new ServiceUnavailableException(
-        'Распознавание не настроено: задайте RECOGNITION_API_URL и RECOGNITION_API_KEY на сервере',
-      );
-    }
     const page = await this.checkPageOwner(pageId, userId);
     if (!page.image_file || !page.width || !page.height) {
       throw new BadRequestException('Страница ещё готовится — подождите пару секунд');
@@ -505,14 +541,31 @@ export class RecognitionService implements OnModuleInit {
       throw new BadRequestException('Зона слишком маленькая — растяните её чуть больше');
     }
 
+    const cfg = await this.getClassConfig();
+    const mode = await this.getMode();
+    // Ключи агрегатора нужны только режимам с LLM: чисто модельные работают
+    // на сервере и без внешнего провайдера
+    if (mode !== 'yolo' && mode !== 'twostage' && !this.isConfigured()) {
+      throw new ServiceUnavailableException(
+        'Распознавание не настроено: задайте RECOGNITION_API_URL и RECOGNITION_API_KEY на сервере',
+      );
+    }
+    // Модели, обученной на тайлах, важен масштаб 1:1: сжатие зоны до 2200 px
+    // делает аппараты в разы мельче, чем на обучении, и они не находятся.
+    // В чисто модельных режимах отдаём зону крупнее; режимам с LLM — прежний
+    // размер (у агрегатора ограничение на картинку).
+    const tiledModel = (mode === 'yolo' || mode === 'twostage')
+      && !!(await this.activeModel(mode === 'twostage' ? 'detector' : 'single'))?.tiled;
+    const maxEdgeLimit = tiledModel ? DETECT_MAX_EDGE_TILED : DETECT_MAX_EDGE;
+
     // Кроп зоны из рендера страницы
     const sharp = require('sharp');
     let pipeline = sharp(join(UPLOAD_DIR, page.image_file)).extract({ left, top, width, height });
     const maxEdge = Math.max(width, height);
-    if (maxEdge > DETECT_MAX_EDGE) {
+    if (maxEdge > maxEdgeLimit) {
       pipeline = pipeline.resize({
-        width: width >= height ? DETECT_MAX_EDGE : undefined,
-        height: height > width ? DETECT_MAX_EDGE : undefined,
+        width: width >= height ? maxEdgeLimit : undefined,
+        height: height > width ? maxEdgeLimit : undefined,
       });
     } else if (maxEdge < 640) {
       // Крошечная зона (один элемент): увеличиваем, чтобы модель читала подписи
@@ -524,9 +577,6 @@ export class RecognitionService implements OnModuleInit {
     }
     const buf: Buffer = await pipeline.jpeg({ quality: 85 }).toBuffer();
 
-    const cfg = await this.getClassConfig();
-    const mode = await this.getMode();
-
     let found: Array<{
       klass: string; designation?: string; fields?: Record<string, string>;
       bbox: [number, number, number, number]; confidence?: number;
@@ -537,6 +587,8 @@ export class RecognitionService implements OnModuleInit {
     try {
       if (mode === 'yolo') {
         found = await this.runYolo(buf, cfg);
+      } else if (mode === 'twostage') {
+        found = await this.runTwoStage(buf, cfg);
       } else if (mode === 'cascade') {
         found = await this.runCascade(buf, cfg);
       } else if (mode === 'shadow') {
@@ -548,6 +600,10 @@ export class RecognitionService implements OnModuleInit {
       this.logger.warn(`Распознавание: ${where} — ошибка за ${Date.now() - startedAt} мс: ${e?.message || e}`);
       throw e;
     }
+    // На одной области — один элемент: убираем рамки, вложенные в другие
+    // (просьба Максима: если внутри найденного элемента найден ещё один,
+    // остаётся только внешний, самый уверенный)
+    found = dropNested(found);
     // Пустой результат ошибкой не считается, но выглядит для пользователя
     // ровно как «нейросеть перестала находить элементы». Без этой строки
     // в логах его не отличить от неудачного вызова — а отличать нужно:
@@ -590,43 +646,115 @@ export class RecognitionService implements OnModuleInit {
     if (!(RECOGNITION_MODES as readonly string[]).includes(mode)) {
       throw new BadRequestException('Неизвестный режим распознавания');
     }
-    if (mode !== 'llm') {
-      const active = await this.modelsRepo.findOne({ where: { active: true } });
-      if (!active) throw new BadRequestException('Сначала загрузите и активируйте модель YOLO');
+    if (mode === 'twostage') {
+      if (!(await this.activeModel('detector'))) {
+        throw new BadRequestException('Для поочерёдного режима нужна активная модель с ролью «Детектор»');
+      }
+    } else if (mode !== 'llm') {
+      if (!(await this.activeModel('single'))) {
+        throw new BadRequestException('Сначала загрузите и активируйте модель YOLO (роль «Одна модель»)');
+      }
     }
     await this.settingsRepo.save({ key: MODE_KEY, value: mode });
     return { mode };
   }
 
-  private async activeModelPath(): Promise<string> {
-    const active = await this.modelsRepo.findOne({ where: { active: true } });
-    if (!active) throw new ServiceUnavailableException('Нет активной модели YOLO — загрузите её в панели «Модель»');
-    return join(UPLOAD_DIR, active.filename);
+  /** Активная модель нужной роли. Для 'single' подходит и модель без роли
+   *  (загруженные до появления двухступенчатой схемы). */
+  private async activeModel(role: 'single' | 'detector' | 'classifier') {
+    const all = await this.modelsRepo.find({ where: { active: true } });
+    if (role === 'single') return all.find((m) => !m.role || m.role === 'single') || null;
+    return all.find((m) => m.role === role) || null;
   }
 
-  /** YOLO: рамки + классы (category → код класса из конфига), без параметров. */
-  private async runYolo(buf: Buffer, cfg: ClassConfig) {
-    const modelPath = await this.activeModelPath();
-    let boxes: YoloBox[];
-    try {
-      boxes = await yoloDetect(buf, modelPath);
-    } catch (e: any) {
-      this.logger.warn(`YOLO-инференс упал: ${e?.message || e}`);
-      throw new ServiceUnavailableException('Модель YOLO не смогла обработать зону (см. логи сервера)');
+  private async activeModelPath(role: 'single' | 'detector' | 'classifier' = 'single'): Promise<string> {
+    const m = await this.activeModel(role);
+    if (!m) {
+      const what = role === 'detector' ? 'детектора' : role === 'classifier' ? 'классификатора' : 'модели';
+      throw new ServiceUnavailableException(`Нет активной ${what} — загрузите и активируйте её в панели «Модель Zeus»`);
     }
-    // Класс определяем по ИМЕНИ из модели: у Максима нумерация идёт по
-    // порядку его classes.txt и не совпадает с category в конфиге.
-    // Номер используем только как запасной вариант (старые модели v1–v3).
+    return join(UPLOAD_DIR, m.filename);
+  }
+
+  /** Имя класса из модели → код класса конфига. Номер используется как
+   *  запасной вариант: у Максима нумерация идёт по его classes.txt и с
+   *  category конфига не совпадает. */
+  private mapKlass(b: YoloBox, cfg: ClassConfig): string {
     const byCode = new Set(cfg.classes.map((c) => c.code));
+    if (b.className) {
+      const slug = slugFromLsValue(b.className);
+      if (byCode.has(slug)) return slug;
+    }
     const byCategory = new Map(cfg.classes.filter((c) => c.category != null).map((c) => [c.category, c.code]));
+    return byCategory.get(b.classId) || 'other';
+  }
+
+  private async detectWith(role: 'single' | 'detector' | 'classifier', buf: Buffer): Promise<YoloBox[]> {
+    const model = await this.activeModel(role);
+    const modelPath = await this.activeModelPath(role);
+    try {
+      return await yoloDetect(buf, modelPath, { tiles: !!model?.tiled });
+    } catch (e: any) {
+      this.logger.warn(`Инференс (${role}) упал: ${e?.message || e}`);
+      throw new ServiceUnavailableException('Модель не смогла обработать зону (см. логи сервера)');
+    }
+  }
+
+  /** YOLO: рамки + классы одной моделью, без параметров. */
+  private async runYolo(buf: Buffer, cfg: ClassConfig) {
+    const boxes = await this.detectWith('single', buf);
     return boxes.map((b) => ({
-      klass: (b.className && byCode.has(slugFromLsValue(b.className)) ? slugFromLsValue(b.className) : null)
-        || byCategory.get(b.classId) || 'other',
+      klass: this.mapKlass(b, cfg),
       designation: '',
       fields: {},
       bbox: [b.bbox.x, b.bbox.y, b.bbox.w, b.bbox.h] as [number, number, number, number],
       confidence: b.conf,
     }));
+  }
+
+  /** Двухступенчатая схема Максима: первая модель ищет элементы, вторая
+   *  определяет класс по каждой найденной области. */
+  private async runTwoStage(buf: Buffer, cfg: ClassConfig) {
+    const sharp = require('sharp');
+    const found = await this.detectWith('detector', buf);
+    if (!found.length) return [];
+
+    const meta = await sharp(buf).metadata();
+    const W = meta.width || 1, H = meta.height || 1;
+    const classifier = await this.activeModel('classifier');
+
+    const out = found.map((b) => ({
+      klass: classifier ? 'other' : this.mapKlass(b, cfg),
+      designation: '',
+      fields: {} as Record<string, string>,
+      bbox: [b.bbox.x, b.bbox.y, b.bbox.w, b.bbox.h] as [number, number, number, number],
+      confidence: b.conf,
+    }));
+    if (!classifier) return out; // второй ступени нет — отдаём классы детектора
+
+    const modelPath = join(UPLOAD_DIR, classifier.filename);
+    // классифицируем каждую область отдельно; поле вокруг даёт контекст
+    for (let i = 0; i < found.length; i++) {
+      const b = found[i].bbox;
+      const padX = b.w * 0.15, padY = b.h * 0.15;
+      const left = Math.max(0, Math.round((b.x - padX) * W));
+      const top = Math.max(0, Math.round((b.y - padY) * H));
+      const width = Math.min(W - left, Math.max(8, Math.round((b.w + 2 * padX) * W)));
+      const height = Math.min(H - top, Math.max(8, Math.round((b.h + 2 * padY) * H)));
+      try {
+        const crop: Buffer = await sharp(buf).extract({ left, top, width, height }).jpeg({ quality: 90 }).toBuffer();
+        const res = await yoloDetect(crop, modelPath, { tiles: false });
+        // берём самый уверенный класс, найденный внутри области
+        const best = res.sort((a, c) => c.conf - a.conf)[0];
+        if (best) {
+          out[i].klass = this.mapKlass(best, cfg);
+          out[i].confidence = Math.max(out[i].confidence, best.conf);
+        }
+      } catch (e: any) {
+        this.logger.warn(`Классификатор не обработал область ${i}: ${e?.message || e}`);
+      }
+    }
+    return out;
   }
 
   /** Каскад Максима: YOLO находит рамки и классы, LLM одним вызовом
@@ -1384,7 +1512,11 @@ export class RecognitionService implements OnModuleInit {
   async listModels() {
     const models = await this.modelsRepo.find({ order: { id: 'DESC' } });
     const shadowRuns = await this.shadowRepo.find({ order: { id: 'DESC' }, take: 20 });
-    const active = models.find((m) => m.active);
+    const onlyActive = models.filter((m) => m.active);
+    // классы определяет классификатор, если он есть; иначе обычная модель
+    const active = onlyActive.find((m) => m.role === 'classifier')
+      || onlyActive.find((m) => !m.role || m.role === 'single')
+      || onlyActive[0];
     // Классы активной модели: сверяем с конфигом, чтобы рассинхрон
     // («модель знает класс, а система — нет») был виден сразу в панели
     let modelClasses: { name: string; known: boolean }[] = [];
@@ -1405,7 +1537,7 @@ export class RecognitionService implements OnModuleInit {
     };
   }
 
-  async uploadModel(file: Express.Multer.File, note: string) {
+  async uploadModel(file: Express.Multer.File, note: string, role?: string, tiled?: boolean) {
     if (!/\.onnx$/i.test(file.originalname)) {
       try { fs.unlinkSync(file.path); } catch {}
       throw new BadRequestException('Нужен файл .onnx (экспорт ultralytics: model.export(format="onnx"))');
@@ -1414,6 +1546,8 @@ export class RecognitionService implements OnModuleInit {
       filename: file.filename,
       orig_name: fixFileName(file.originalname),
       note: String(note || '').slice(0, 200),
+      role: role && ['single', 'detector', 'classifier'].includes(role) ? role : 'single',
+      tiled: tiled === undefined ? false : !!tiled,
       active: false,
     });
     return version;
@@ -1425,9 +1559,36 @@ export class RecognitionService implements OnModuleInit {
     if (!fs.existsSync(join(UPLOAD_DIR, model.filename))) {
       throw new BadRequestException('Файл модели отсутствует на диске — загрузите заново');
     }
-    // update с пустым criteria TypeORM запрещает — через QueryBuilder
-    await this.modelsRepo.createQueryBuilder().update().set({ active: false }).execute();
+    // активной может быть по одной модели каждой роли: снимаем только
+    // «конкурента» той же роли, а не все версии подряд
+    const role = model.role || 'single';
+    await this.modelsRepo.createQueryBuilder()
+      .update().set({ active: false })
+      .where('active = true')
+      .andWhere(role === 'single' ? "(role IS NULL OR role = 'single')" : 'role = :role', { role })
+      .execute();
     await this.modelsRepo.update(id, { active: true });
+    resetYoloSession();
+    return this.listModels();
+  }
+
+  /** Роль модели в конвейере и нужна ли ей нарезка на тайлы. */
+  async updateModel(id: number, patch: { role?: string; tiled?: boolean; note?: string }) {
+    const model = await this.modelsRepo.findOne({ where: { id } });
+    if (!model) throw new NotFoundException('Версия модели не найдена');
+    const safe: any = {};
+    if (patch.role && ['single', 'detector', 'classifier'].includes(patch.role)) safe.role = patch.role;
+    if (typeof patch.tiled === 'boolean') safe.tiled = patch.tiled;
+    if (patch.note != null) safe.note = String(patch.note).slice(0, 200);
+    await this.modelsRepo.update(id, safe);
+    // смена роли не должна оставлять две активные модели одной роли
+    if (safe.role && model.active) {
+      await this.modelsRepo.createQueryBuilder()
+        .update().set({ active: false })
+        .where('active = true').andWhere('id != :id', { id })
+        .andWhere(safe.role === 'single' ? "(role IS NULL OR role = 'single')" : 'role = :role', { role: safe.role })
+        .execute();
+    }
     resetYoloSession();
     return this.listModels();
   }

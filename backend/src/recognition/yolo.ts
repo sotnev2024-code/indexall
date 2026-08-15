@@ -40,18 +40,28 @@ const FALLBACK_INPUT = parseInt(process.env.RECOGNITION_YOLO_SIZE || '640', 10) 
  *   RECOGNITION_YOLO_TILES=1
  */
 const TILES_ENABLED = /^(1|true|on|yes)$/i.test((process.env.RECOGNITION_YOLO_TILES || '').trim());
-/** Больше тайлов — точнее на крупных зонах, но дольше на CPU сервера */
-const MAX_TILES = parseInt(process.env.RECOGNITION_YOLO_MAX_TILES || '12', 10) || 12;
+/**
+ * Потолок числа тайлов: больше — точнее на крупных зонах, но дольше на CPU.
+ * Раньше при превышении нарезка молча отключалась и модель получала лист
+ * целиком (не тот масштаб → «ничего не находится»). Теперь вместо отказа
+ * зона слегка уменьшается, чтобы уложиться в потолок.
+ */
+const MAX_TILES = parseInt(process.env.RECOGNITION_YOLO_MAX_TILES || '36', 10) || 36;
 const TILE_OVERLAP = 0.2;
 const CONF_THRESHOLD = 0.25;
 const IOU_THRESHOLD = 0.45;
 const MAX_DETECTIONS = 300;
 
-let cached: { path: string; session: any; input: number; names: string[] | null } | null = null;
+type Cached = { path: string; session: any; input: number; names: string[] | null };
+/** Сессии по пути к модели: в поочерёдном режиме за один запрос работают
+ *  сразу две модели (детектор и классификатор), одиночный кэш их выбивал бы
+ *  друг у друга и пересоздавал сессию на каждой области. */
+const sessions = new Map<string, Cached>();
+const MAX_SESSIONS = 3;
 
-/** Сбрасывает закэшированную сессию (при смене активной версии модели). */
+/** Сбрасывает закэшированные сессии (при смене активной версии модели). */
 export function resetYoloSession() {
-  cached = null;
+  sessions.clear();
 }
 
 /** Действующие настройки инференса — показываются в самопроверке модуля. */
@@ -90,8 +100,9 @@ export function readModelClassNames(modelPath: string): string[] | null {
   return null;
 }
 
-async function getSession(modelPath: string) {
-  if (cached && cached.path === modelPath) return cached;
+async function getSession(modelPath: string): Promise<Cached> {
+  const hit = sessions.get(modelPath);
+  if (hit) return hit;
   const ort = require('onnxruntime-node');
   const session = await ort.InferenceSession.create(modelPath, {
     // На VPS не съедаем все ядра — сайт должен дышать
@@ -105,8 +116,14 @@ async function getSession(modelPath: string) {
     const side = Array.isArray(dims) ? dims[dims.length - 1] : null;
     if (typeof side === 'number' && side >= 64) input = side;
   } catch { /* динамический вход — остаётся запасной размер */ }
-  cached = { path: modelPath, session, input, names: readModelClassNames(modelPath) };
-  return cached;
+  const entry: Cached = { path: modelPath, session, input, names: readModelClassNames(modelPath) };
+  // держим на VPS не больше трёх моделей в памяти
+  if (sessions.size >= MAX_SESSIONS) {
+    const oldest = sessions.keys().next().value;
+    if (oldest) sessions.delete(oldest);
+  }
+  sessions.set(modelPath, entry);
+  return entry;
 }
 
 /** Один прогон подготовленного квадрата inputSize×inputSize. */
@@ -175,20 +192,39 @@ async function runTile(
  * Крупные зоны режем на тайлы размером со вход модели с перекрытием —
  * иначе мелкие аппараты «схлопываются» при сжатии всей зоны до 640/1280.
  */
-export async function yoloDetect(imageJpeg: Buffer, modelPath: string): Promise<YoloBox[]> {
+export async function yoloDetect(
+  imageJpeg: Buffer, modelPath: string, opts?: { tiles?: boolean },
+): Promise<YoloBox[]> {
   const ort = require('onnxruntime-node');
   const sharp = require('sharp');
   const { session, input: S, names } = await getSession(modelPath);
+  // нарезка задаётся моделью (Zeus 640 / Vision 1280 обучены на тайлах),
+  // env-флаг остаётся общим значением по умолчанию
+  const tilesWanted = opts?.tiles ?? TILES_ENABLED;
 
   const meta = await sharp(imageJpeg).metadata();
-  const srcW = meta.width || 1;
-  const srcH = meta.height || 1;
+  let srcW = meta.width || 1;
+  let srcH = meta.height || 1;
+  let work = imageJpeg;
 
   // сколько тайлов нужно, чтобы держать масштаб 1:1
   const step = Math.round(S * (1 - TILE_OVERLAP));
-  let cols = Math.max(1, Math.ceil((srcW - S) / step) + 1);
-  let rows = Math.max(1, Math.ceil((srcH - S) / step) + 1);
-  const tiled = TILES_ENABLED && (cols > 1 || rows > 1) && cols * rows <= MAX_TILES;
+  const grid = (w: number, h: number) => ({
+    cols: Math.max(1, Math.ceil((w - S) / step) + 1),
+    rows: Math.max(1, Math.ceil((h - S) / step) + 1),
+  });
+  let { cols, rows } = grid(srcW, srcH);
+  const tiled = tilesWanted && (cols > 1 || rows > 1);
+
+  if (tiled && cols * rows > MAX_TILES) {
+    // зона слишком большая для потолка тайлов: не отказываемся от нарезки
+    // (это меняло бы масштаб объектов), а немного уменьшаем саму зону
+    const k = Math.sqrt(MAX_TILES / (cols * rows));
+    srcW = Math.max(S, Math.round(srcW * k));
+    srcH = Math.max(S, Math.round(srcH * k));
+    work = await sharp(imageJpeg).resize(srcW, srcH, { fit: 'fill' }).jpeg({ quality: 90 }).toBuffer();
+    ({ cols, rows } = grid(srcW, srcH));
+  }
 
   const found: YoloBox[] = [];
 
@@ -199,7 +235,7 @@ export async function yoloDetect(imageJpeg: Buffer, modelPath: string): Promise<
     const newH = Math.max(1, Math.round(srcH * scale));
     const padX = Math.floor((S - newW) / 2);
     const padY = Math.floor((S - newH) / 2);
-    const raw: Buffer = await sharp(imageJpeg)
+    const raw: Buffer = await sharp(work)
       .resize(newW, newH)
       .extend({ top: padY, bottom: S - newH - padY, left: padX, right: S - newW - padX,
         background: { r: 114, g: 114, b: 114 } })
@@ -219,7 +255,7 @@ export async function yoloDetect(imageJpeg: Buffer, modelPath: string): Promise<
         const w = Math.min(S, srcW - left);
         const h = Math.min(S, srcH - top);
         if (w < 8 || h < 8) continue;
-        const raw: Buffer = await sharp(imageJpeg)
+        const raw: Buffer = await sharp(work)
           .extract({ left, top, width: w, height: h })
           .extend({ top: 0, left: 0, bottom: S - h, right: S - w,
             background: { r: 114, g: 114, b: 114 } })
