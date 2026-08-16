@@ -188,6 +188,9 @@ type PickedProduct = {
   product_class?: string;
 };
 
+/** ширина плавающего окна элемента с раскрытой колонкой каталога */
+const INSP_W_CAT = 1010;
+
 export default function RecognitionPage() {
   const router = useRouter();
   /* null — ещё грузится; [] — пусто */
@@ -354,6 +357,7 @@ export default function RecognitionPage() {
   const [inspPos, setInspPos] = useState({ x: 24, y: 70 });
   const inspDrag = useRef<{ dx: number; dy: number } | null>(null);
   const inspPinned = useRef(false); // пользователь двигал окно — не переставляем
+  const inspWideRef = useRef(false); // открыт ли каталог внутри окна
 
   /* при выборе новой рамки окно встаёт рядом с ней (пока его не двигали) */
   useEffect(() => {
@@ -369,6 +373,21 @@ export default function RecognitionPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selEl?.id]);
 
+  /* каталог живёт внутри окна элемента — при переходе на другую рамку закрываем */
+  useEffect(() => { setPickerElId(null); }, [selEl?.id]);
+  inspWideRef.current = pickerElId != null;
+
+  /* окно с каталогом втрое шире обычного: подвигаем его, чтобы целиком
+     помещалось в рабочую область, иначе колонка товаров уедет за край */
+  useEffect(() => {
+    if (pickerElId == null) return;
+    const wrap = workRef.current?.getBoundingClientRect();
+    if (!wrap) return;
+    const w = Math.min(INSP_W_CAT, wrap.width - 24);
+    setInspPos((p) => ({ x: Math.max(12, Math.min(p.x, wrap.width - w - 12)), y: 12 }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickerElId]);
+
   const startInspDrag = (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest('button')) return; // крестик не тащит
     const wrap = workRef.current?.getBoundingClientRect();
@@ -383,9 +402,14 @@ export default function RecognitionPage() {
       const d = inspDrag.current;
       const wrap = workRef.current?.getBoundingClientRect();
       if (!d || !wrap) return;
+      // с раскрытым каталогом окно широкое — держим его целиком в области
+      const wide = inspWideRef.current;
+      const maxX = wide
+        ? Math.max(0, wrap.width - Math.min(INSP_W_CAT, wrap.width - 24) - 12)
+        : wrap.width - 80;
       setInspPos({
-        x: Math.max(0, Math.min(wrap.width - 80, e.clientX - wrap.left - d.dx)),
-        y: Math.max(0, Math.min(wrap.height - 40, e.clientY - wrap.top - d.dy)),
+        x: Math.max(0, Math.min(maxX, e.clientX - wrap.left - d.dx)),
+        y: Math.max(0, Math.min(wide ? 12 : wrap.height - 40, e.clientY - wrap.top - d.dy)),
       });
     };
     const up = () => { inspDrag.current = null; };
@@ -407,6 +431,10 @@ export default function RecognitionPage() {
         if (detectAbortRef.current) {           // идёт распознавание — отменяем
           detectAbortRef.current.abort();
           detectAbortRef.current = null;
+          return;
+        }
+        if (inspWideRef.current) {              // раскрыт каталог — сворачиваем его
+          setPickerElId(null);
           return;
         }
         setMode((m) => {
@@ -1346,32 +1374,31 @@ export default function RecognitionPage() {
           </div>
 
           {/* инспектор — плавающее окно поверх схемы, перемещается за шапку.
-              Пока открыт каталог, окно не загораживает его: уходит под панель
-              и прижимается к левому краю рабочей области. */}
+              Каталог открывается второй колонкой в этом же окне: параметры
+              рамки и выбор товара видны одновременно и переезжают вместе. */}
           {selEl && (
-            <div className={`recog-float-insp${pickerElId != null ? ' under-catalog' : ''}`}
-              style={{ left: pickerElId != null ? 12 : inspPos.x, top: inspPos.y }}>
+            <div className={`recog-float-insp${pickerElId != null ? ' with-catalog' : ''}`}
+              style={{ left: inspPos.x, top: inspPos.y }}>
               <InspectorPanel
                 key={`${selEl.id}-${selEl.product_name || ''}-${selEl.article || ''}`}
                 el={selEl}
                 cfg={clsCfg}
+                catalogOpen={pickerElId != null}
                 onHeadPointerDown={startInspDrag}
-                onClose={() => setSelId(null)}
+                onClose={() => { setPickerElId(null); setSelId(null); }}
                 onSave={(patch, status) => saveElement(selEl, patch, status)}
                 onDelete={() => deleteElement(selEl)}
                 onDuplicate={(patch) => duplicateElement(selEl, patch)}
-                onPickCatalog={() => setPickerElId(selEl.id)}
+                onPickCatalog={() => setPickerElId((v) => (v == null ? selEl.id : null))}
                 onClearProduct={() => applyProduct(selEl.id, { product_name: '', brand: '', article: '', etm_code: '', price: '' })}
               />
+              {pickerElId != null && (
+                <CatalogPanel
+                  onClose={() => setPickerElId(null)}
+                  onPick={(p) => applyProduct(pickerElId, p)}
+                />
+              )}
             </div>
-          )}
-
-          {/* панель каталога — справа от инспектора, канвас остаётся видимым */}
-          {pickerElId != null && (
-            <CatalogPanel
-              onClose={() => setPickerElId(null)}
-              onPick={(p) => applyProduct(pickerElId, p)}
-            />
           )}
         </div>
       )}
@@ -1487,9 +1514,11 @@ export default function RecognitionPage() {
 }
 
 /* ── Инспектор ── */
-function InspectorPanel({ el, cfg, onHeadPointerDown, onClose, onSave, onDelete, onDuplicate, onPickCatalog, onClearProduct }: {
+function InspectorPanel({ el, cfg, catalogOpen, onHeadPointerDown, onClose, onSave, onDelete, onDuplicate, onPickCatalog, onClearProduct }: {
   el: RecogElement;
   cfg: RecogClassConfig;
+  /** каталог раскрыт соседней колонкой в этом же окне */
+  catalogOpen?: boolean;
   onHeadPointerDown?: (e: React.PointerEvent) => void;
   onClose: () => void;
   onSave: (patch: Partial<RecogElement>, status?: string) => void;
@@ -1533,7 +1562,9 @@ function InspectorPanel({ el, cfg, onHeadPointerDown, onClose, onSave, onDelete,
           .filter(Boolean).join(' · ')}
       </div>
       <div className="recog-product-acts">
-        <button className="btn-outline" onClick={onPickCatalog}>Заменить</button>
+        <button className={`btn-outline${catalogOpen ? ' recog-frombase-on' : ''}`} onClick={onPickCatalog}>
+          {catalogOpen ? 'Скрыть каталог' : 'Заменить'}
+        </button>
         <button className="btn-outline" onClick={onClearProduct}>Убрать</button>
       </div>
     </div>
@@ -1558,9 +1589,10 @@ function InspectorPanel({ el, cfg, onHeadPointerDown, onClose, onSave, onDelete,
 
       {productBlock}
       {!el.product_name && (
-        <button className="btn-outline recog-frombase" onClick={onPickCatalog}
-          title="Выбрать оборудование из каталога — наименование, бренд и артикул подтянутся автоматически">
-          Добавить из базы
+        <button className={`btn-outline recog-frombase${catalogOpen ? ' recog-frombase-on' : ''}`}
+          onClick={onPickCatalog}
+          title="Каталог откроется рядом, в этом же окне: наименование, бренд и артикул подтянутся автоматически">
+          {catalogOpen ? 'Скрыть каталог' : 'Добавить из базы'}
         </button>
       )}
 
@@ -1925,7 +1957,7 @@ function CatalogPanel({ onClose, onPick }: {
     <aside className="recog-catalog" onPointerDown={(e) => e.stopPropagation()}>
       <div className="recog-catalog-head">
         <b>{showCats ? 'Добавить из базы' : searching ? 'Поиск по базе' : catName}</b>
-        <button className="recog-modal-x" onClick={onClose} title="Закрыть"><Icon.cross /></button>
+        <button className="recog-modal-x" onClick={onClose} title="Свернуть каталог (Esc)"><Icon.cross /></button>
       </div>
 
       <div className="recog-catalog-bar">

@@ -1675,10 +1675,15 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-float-insp { position: absolute; z-index: 45; width: 300px; max-height: calc(100% - 24px);
   overflow: auto; background: var(--white); border: 1px solid var(--border); border-radius: 10px;
   box-shadow: 0 8px 28px rgba(0,0,0,.20); }
-/* пока открыт каталог («Добавить из базы») окно элемента не должно его
-   загораживать: уходит под панель (z-index ниже .recog-catalog) и живёт
-   в свободной полосе слева от неё */
-.recog-float-insp.under-catalog { z-index: 35; }
+/* каталог («Добавить из базы») раскрывается второй колонкой в этом же окне:
+   параметры рамки и выбор товара перед глазами одновременно, окно двигается
+   целиком за ту же шапку */
+.recog-float-insp.with-catalog { display: flex; width: min(1010px, calc(100% - 24px));
+  height: calc(100% - 24px); overflow: hidden; }
+.recog-float-insp.with-catalog > .recog-insp { flex: 0 0 300px; width: 300px;
+  overflow-y: auto; min-height: 0; border-right: 1px solid var(--border); }
+.recog-float-insp.with-catalog .recog-catalog { position: static; flex: 1 1 auto;
+  width: auto; min-width: 0; border-left: none; box-shadow: none; }
 .recog-float-insp .recog-insp { padding: 12px 14px 14px; }
 .recog-float-insp .recog-insp-head { position: sticky; top: 0; background: var(--white);
   padding: 2px 0 8px; margin: -2px 0 0; border-bottom: 1px solid var(--border); z-index: 2; }
@@ -1849,7 +1854,7 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-spectab-dot { width: 7px; height: 7px; border-radius: 50%; background: #1e7e34; display: inline-block; }
 .recog-specwrap { padding: 0 6px; }
 
-/* панель каталога — перекрывает инспектор справа */
+/* панель каталога — колонка внутри окна инспектора (см. .with-catalog выше) */
 .recog-catalog { position: absolute; top: 0; right: 0; bottom: 0; width: min(1000px, 74%); z-index: 40;
   background: var(--white); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(0,0,0,.12);
   display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
@@ -1867,6 +1872,11 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 
 /* категория открыта: фильтры слева, оборудование справа */
 .recog-catalog-body { flex: 1; display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 0; }
+/* узкий экран: окно целиком уже — ужимаем колонку инспектора и фильтры */
+@media (max-width: 1100px) {
+  .recog-float-insp.with-catalog > .recog-insp { flex-basis: 260px; width: 260px; }
+  .recog-float-insp.with-catalog .recog-catalog-body { grid-template-columns: 176px minmax(0, 1fr); }
+}
 .recog-catalog-filters { border-right: 1px solid var(--border); padding: 10px; overflow-y: auto; }
 .recog-catalog-crumbs { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 .recog-catalog-reset { background: none; border: none; font-size: 11.5px; color: var(--muted); cursor: pointer; text-decoration: underline; }
@@ -1916,6 +1926,8 @@ a.recog-picker-pick { text-decoration: none; display: inline-flex; align-items: 
 .recog-picker-opt input { accent-color: #1a1a1a; }
 .recog-picker-note { padding: 30px; color: var(--muted); font-size: 13px; text-align: center; }
 .recog-picker-pick { padding: 4px 10px; font-size: 11.5px; }
+/* кнопка каталога в инспекторе, когда колонка каталога уже раскрыта */
+.recog-frombase-on { border-color: var(--yellow); background: var(--selected); font-weight: 600; }
 .recog-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); }
 .recog-modal-head b { font-size: 15px; }
 .recog-modal-head button { background: none; border: none; font-size: 20px; color: var(--muted); cursor: pointer; }
