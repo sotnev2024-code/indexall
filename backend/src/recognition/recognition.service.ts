@@ -32,7 +32,7 @@ import {
   RecognitionClass,
   slugFromLsValue,
 } from './recognition-classes';
-import { yoloDetect, resetYoloSession, readModelClassNames, yoloSettings, YoloBox } from './yolo';
+import { yoloDetect, resetYoloSession, readModelClassNames, yoloSettings, modelInputSize, YoloBox } from './yolo';
 
 const execFileAsync = promisify(execFile);
 
@@ -577,6 +577,22 @@ export class RecognitionService implements OnModuleInit {
     }
     const buf: Buffer = await pipeline.jpeg({ quality: 85 }).toBuffer();
 
+    // Без нарезки крупная зона сжимается до входа модели, и аппараты мельчают
+    // в разы против обучающих тайлов. На схемах Максима это стоило почти всего
+    // результата: классификатор находил 1 рамку вместо 31. Пишем в лог, чтобы
+    // причина была видна сразу, а не искалась заново.
+    if ((mode === 'yolo' || mode === 'twostage') && !tiledModel) {
+      try {
+        const inp = await modelInputSize(await this.activeModelPath(mode === 'twostage' ? 'detector' : 'single'));
+        if (Math.max(width, height) > inp * 1.5) {
+          this.logger.warn(
+            `Зона ${width}×${height} px сжимается до входа модели ${inp} px — ` +
+            'включите «нарезку на тайлы» у активной модели, иначе элементы мельчают против обучающих',
+          );
+        }
+      } catch { /* размер входа не прочитался — распознаванию не мешаем */ }
+    }
+
     let found: Array<{
       klass: string; designation?: string; fields?: Record<string, string>;
       bbox: [number, number, number, number]; confidence?: number;
@@ -713,14 +729,19 @@ export class RecognitionService implements OnModuleInit {
   }
 
   /** Двухступенчатая схема Максима: первая модель ищет элементы, вторая
-   *  определяет класс по каждой найденной области. */
+   *  определяет их класс.
+   *
+   *  Вырезанный элемент классификатору показывать НЕЛЬЗЯ: он обучен на тайлах
+   *  листа, а аппарат занимает там 30×45 px. Растянутый до входа 1280×1280 он
+   *  выглядит в 25 раз крупнее обучающих примеров — модель не находит вообще
+   *  ничего (замер на схемах Максима: 0 из 12 областей, из-за этого все
+   *  элементы получали «Прочее»). Поэтому класс берём с прогона по той же
+   *  зоне, что видел детектор, сопоставляя рамки по перекрытию; для областей,
+   *  где классификатор промолчал, показываем ему окно размером со вход модели
+   *  в масштабе 1:1 — то есть ровно такой тайл, как при обучении. */
   private async runTwoStage(buf: Buffer, cfg: ClassConfig) {
-    const sharp = require('sharp');
     const found = await this.detectWith('detector', buf);
     if (!found.length) return [];
-
-    const meta = await sharp(buf).metadata();
-    const W = meta.width || 1, H = meta.height || 1;
     const classifier = await this.activeModel('classifier');
 
     const out = found.map((b) => ({
@@ -732,29 +753,97 @@ export class RecognitionService implements OnModuleInit {
     }));
     if (!classifier) return out; // второй ступени нет — отдаём классы детектора
 
-    const modelPath = join(UPLOAD_DIR, classifier.filename);
-    // классифицируем каждую область отдельно; поле вокруг даёт контекст
+    const zoneBoxes = await this.detectWith('classifier', buf).catch((e: any) => {
+      this.logger.warn(`Классификатор не обработал зону: ${e?.message || e}`);
+      return [] as YoloBox[];
+    });
+
+    const taken = new Set<number>();
+    const rest: number[] = [];
+    let fromZone = 0;
     for (let i = 0; i < found.length; i++) {
-      const b = found[i].bbox;
-      const padX = b.w * 0.15, padY = b.h * 0.15;
-      const left = Math.max(0, Math.round((b.x - padX) * W));
-      const top = Math.max(0, Math.round((b.y - padY) * H));
-      const width = Math.min(W - left, Math.max(8, Math.round((b.w + 2 * padX) * W)));
-      const height = Math.min(H - top, Math.max(8, Math.round((b.h + 2 * padY) * H)));
+      const d = found[i].bbox;
+      let bi = -1, bs = 0;
+      zoneBoxes.forEach((c, j) => {
+        if (taken.has(j)) return;
+        const s = this.iouBbox(d, c.bbox);
+        if (s > bs) { bs = s; bi = j; }
+      });
+      if (bi >= 0 && bs >= 0.25) {
+        const c = zoneBoxes[bi];
+        taken.add(bi);
+        out[i].klass = this.mapKlass(c, cfg);
+        // рамка классификатора точнее рамки детектора (проверено на схемах
+        // Максима: детектор смещает её вверх-влево на четверть) — берём её
+        out[i].bbox = [c.bbox.x, c.bbox.y, c.bbox.w, c.bbox.h];
+        out[i].confidence = Math.max(out[i].confidence, c.conf);
+        fromZone++;
+      } else {
+        rest.push(i);
+      }
+    }
+    const fromWindow = rest.length
+      ? await this.classifyByWindow(buf, found, out, rest, classifier, cfg)
+      : 0;
+    this.logger.log(
+      `Поочерёдный режим: детектор ${found.length}, классификатор по зоне ${zoneBoxes.length}` +
+      `, класс по перекрытию ${fromZone}, класс по окну ${fromWindow}` +
+      `, осталось без класса ${out.filter((o) => o.klass === 'other').length}`,
+    );
+    return out;
+  }
+
+  /** Классификация областей, которые классификатор пропустил на прогоне по
+   *  зоне: показываем окно размером со вход модели в масштабе 1:1 (аппарат
+   *  выглядит как на обучающем тайле) и берём рамку, накрывающую элемент. */
+  private async classifyByWindow(
+    buf: Buffer,
+    found: YoloBox[],
+    out: Array<{ klass: string; bbox: [number, number, number, number]; confidence: number }>,
+    idxs: number[],
+    classifier: RecognitionModelVersion,
+    cfg: ClassConfig,
+  ): Promise<number> {
+    const sharp = require('sharp');
+    const modelPath = join(UPLOAD_DIR, classifier.filename);
+    let S: number;
+    try { S = await modelInputSize(modelPath); } catch { return 0; }
+    const meta = await sharp(buf).metadata();
+    const W = meta.width || 1, H = meta.height || 1;
+    let done = 0;
+
+    for (const i of idxs) {
+      const d = found[i].bbox;
+      const cx = (d.x + d.w / 2) * W, cy = (d.y + d.h / 2) * H;
+      const left = Math.max(0, Math.min(Math.round(cx - S / 2), Math.max(0, W - S)));
+      const top = Math.max(0, Math.min(Math.round(cy - S / 2), Math.max(0, H - S)));
+      const w = Math.min(S, W - left), h = Math.min(S, H - top);
+      if (w < 8 || h < 8) continue;
       try {
-        const crop: Buffer = await sharp(buf).extract({ left, top, width, height }).jpeg({ quality: 90 }).toBuffer();
-        const res = await yoloDetect(crop, modelPath, { tiles: false });
-        // берём самый уверенный класс, найденный внутри области
-        const best = res.sort((a, c) => c.conf - a.conf)[0];
-        if (best) {
+        let p = sharp(buf).extract({ left, top, width: w, height: h });
+        // добиваем окно до входа модели, а не растягиваем — масштаб 1:1
+        if (w < S || h < S) {
+          p = p.extend({ top: 0, left: 0, bottom: S - h, right: S - w, background: { r: 114, g: 114, b: 114 } });
+        }
+        const win: Buffer = await p.jpeg({ quality: 92 }).toBuffer();
+        const res = await yoloDetect(win, modelPath, { tiles: false });
+        // элемент в координатах окна — ищем рамку, которая его накрывает
+        const target = { x: (d.x * W - left) / S, y: (d.y * H - top) / S, w: (d.w * W) / S, h: (d.h * H) / S };
+        let best: YoloBox | null = null, bs = 0;
+        for (const c of res) {
+          const s = this.iouBbox(target, c.bbox);
+          if (s > bs) { bs = s; best = c; }
+        }
+        if (best && bs >= 0.2) {
           out[i].klass = this.mapKlass(best, cfg);
           out[i].confidence = Math.max(out[i].confidence, best.conf);
+          done++;
         }
       } catch (e: any) {
         this.logger.warn(`Классификатор не обработал область ${i}: ${e?.message || e}`);
       }
     }
-    return out;
+    return done;
   }
 
   /** Каскад Максима: YOLO находит рамки и классы, LLM одним вызовом

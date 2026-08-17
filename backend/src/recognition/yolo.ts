@@ -64,6 +64,12 @@ export function resetYoloSession() {
   sessions.clear();
 }
 
+/** Размер входа модели (imgsz экспорта). Нужен, чтобы показывать модели
+ *  область в масштабе 1:1 — как на тайлах, на которых её обучали. */
+export async function modelInputSize(modelPath: string): Promise<number> {
+  return (await getSession(modelPath)).input;
+}
+
 /** Действующие настройки инференса — показываются в самопроверке модуля. */
 export function yoloSettings() {
   return {
