@@ -1657,8 +1657,7 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-el { position: absolute; border: 2px solid; border-radius: 3px; cursor: pointer; }
 .recog-el.auto { border-style: dashed; }
 .recog-el.sel { z-index: 5; cursor: move; }
-.recog-el-chip { position: absolute; top: -20px; left: -2px; font-size: 10.5px; font-weight: 700; background: #fff;
-  border: 1px solid; border-radius: 8px; padding: 1px 7px; white-space: nowrap; pointer-events: none; }
+/* подписей у рамок нет — на плотных схемах они наслаивались (правка 17.08) */
 /* бегущие по периметру квадраты у выбранной рамки */
 .recog-el-runner { position: absolute; pointer-events: none; z-index: 7;
   animation: recog-run 4.4s linear infinite; }
@@ -1702,11 +1701,10 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
   background: var(--white); border: 1px solid var(--border); border-radius: 8px; padding: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.16); }
 .recog-batch-t { font-size: 12px; font-weight: 600; color: var(--muted); padding: 0 4px; white-space: nowrap; }
 
-/* подтверждённые рамки: сплошная тонкая рамка + полупрозрачная заливка
-   цвета класса (как в Label Studio). Остаются подвижными и редактируемыми */
+/* подтверждённые рамки: сплошная тонкая рамка + полупрозрачная заливка.
+   Цвет показывает состояние (жёлтая / зелёная / серая), задаётся из page.tsx.
+   Остаются подвижными и редактируемыми */
 .recog-el.done { border-style: solid; }
-.recog-el.done .recog-el-chip { display: none; }
-.recog-el.done:hover .recog-el-chip, .recog-el.done.sel .recog-el-chip { display: inline-block; }
 /* галочка «подтверждено» по центру нижнего края рамки */
 /* галочка статуса рамки: она же кнопка «Подтвердить».
    Серая — не подтверждена, зелёная — подтверждена. */
@@ -1823,7 +1821,15 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-doclist-note { padding: 12px 16px; font-size: 12.5px; color: var(--muted); }
 
 /* свотчи цветов (15 популярных + свой) */
-.recog-swatches { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+/* палитра спрятана под кнопкой-меню (правка Максима 17.08) */
+.recog-colorbtn { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 10px;
+  background: var(--white); border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px;
+  font-size: 12.5px; color: var(--text); cursor: pointer; text-align: left; }
+.recog-colorbtn:hover { border-color: var(--text); }
+.recog-colorbtn span:nth-child(2) { flex: 1; }
+.recog-colordot { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,.2); flex-shrink: 0; }
+.recog-colorchev { color: var(--muted); font-weight: 700; }
+.recog-swatches { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-top: 8px; }
 .recog-swatch { width: 22px; height: 22px; border-radius: 5px; border: 1px solid rgba(0,0,0,.15); cursor: pointer; padding: 0; }
 .recog-swatch.on { outline: 2px solid var(--black); outline-offset: 1px; }
 .recog-swatch-add { background: var(--white); display: flex; align-items: center; justify-content: center; color: var(--muted); border: 1px dashed var(--border); }

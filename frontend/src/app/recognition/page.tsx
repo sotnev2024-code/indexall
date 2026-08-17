@@ -131,6 +131,14 @@ function paramKeysFor(klass: string, fields: Record<string, string>): string[] {
  *  «упиралась» и оставалась визуально большой (замечания 2 и 3). */
 const MIN_BOX_PX = 4;
 
+/* Цвета рамок по состоянию (правка Максима 17.08): три цвета вместо цвета
+   класса — на плотных схемах класс всё равно не считывался, а состояние
+   видно сразу. Порог низкой уверенности он задал сам. */
+const FRAME_AUTO = '#f5c800';      // распознано
+const FRAME_CONFIRMED = '#1e7e34'; // подтверждено
+const FRAME_LOW = '#8f9aa6';       // уверенность ниже порога
+const LOW_CONF = 0.7;
+
 /* 15 популярных цветов рамок (пункт 7) */
 const SWATCHES = [
   '#E74C3C', '#D35400', '#F39C12', '#F1C40F', '#2ECC71',
@@ -311,8 +319,15 @@ export default function RecognitionPage() {
     () => new Map<string, RecogClass>(clsCfg.classes.map((c) => [c.code, c])),
     [clsCfg],
   );
-  const classColor = useCallback((el: Pick<RecogElement, 'klass' | 'color'>) =>
-    el.color || classByCode.get(el.klass)?.color || '#64748b', [classByCode]);
+  /** Цвет рамки на схеме (правка Максима 17.08): состояние, а не класс —
+   *  жёлтая после распознавания, зелёная после подтверждения, серая при
+   *  низкой уверенности. Свой цвет, выбранный вручную, приоритетнее. */
+  const frameColor = useCallback((el: Pick<RecogElement, 'color' | 'status' | 'confidence'>) => {
+    if (el.color) return el.color;
+    if (el.status !== 'auto') return FRAME_CONFIRMED;
+    if (el.confidence > 0 && el.confidence < LOW_CONF) return FRAME_LOW;
+    return FRAME_AUTO;
+  }, []);
   const className = useCallback((code: string) =>
     classByCode.get(code)?.nameRu || code, [classByCode]);
 
@@ -355,23 +370,30 @@ export default function RecognitionPage() {
   /* ── плавающий инспектор: позиция и перетаскивание за шапку ── */
   const INSP_W = 300;
   const [inspPos, setInspPos] = useState({ x: 24, y: 70 });
+  const inspRef = useRef<HTMLDivElement>(null);
   const inspDrag = useRef<{ dx: number; dy: number } | null>(null);
   const inspPinned = useRef(false); // пользователь двигал окно — не переставляем
   const inspWideRef = useRef(false); // открыт ли каталог внутри окна
 
-  /* при выборе новой рамки окно встаёт рядом с ней (пока его не двигали) */
+  /* Окно параметров при выборе рамки (правка Максима 17.08): всегда справа и
+     по центру по высоте, если там помещается — раньше оно вставало у самой
+     рамки и на нижних элементах уходило за край, видно было только часть.
+     Высоту меряем после отрисовки: состав полей зависит от типа элемента. */
   useEffect(() => {
-    if (!selEl || !page?.width || inspPinned.current) return;
+    if (!selEl || inspPinned.current) return;
     const wrap = workRef.current?.getBoundingClientRect();
-    const vp = vpRef.current?.getBoundingClientRect();
-    if (!wrap || !vp) return;
-    const bx = vp.left - wrap.left + view.x + (selEl.bbox.x + selEl.bbox.w) * page.width * view.z;
-    const by = vp.top - wrap.top + view.y + selEl.bbox.y * page.height * view.z;
-    const maxX = wrap.width - INSP_W - 12;
-    const x = bx + 16 > maxX ? Math.max(12, bx - INSP_W - 24) : bx + 16;
-    setInspPos({ x: Math.max(12, Math.min(maxX, x)), y: Math.max(12, Math.min(wrap.height - 120, by)) });
+    if (!wrap) return;
+    const box = inspRef.current;
+    const w = box?.offsetWidth || INSP_W;
+    const h = box?.offsetHeight || 0;
+    // не помещается справа (узкий экран) — прижимаем к левому краю
+    const x = wrap.width - w - 16 >= 12 ? wrap.width - w - 16 : 12;
+    const y = h > 0
+      ? Math.max(12, Math.min(Math.round((wrap.height - h) / 2), wrap.height - h - 12))
+      : 12;
+    setInspPos((p) => (p.x === x && p.y === y ? p : { x, y }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selEl?.id]);
+  }, [selEl?.id, selEl?.klass, pickerElId]);
 
   /* каталог живёт внутри окна элемента — при переходе на другую рамку закрываем */
   useEffect(() => { setPickerElId(null); }, [selEl?.id]);
@@ -1191,7 +1213,7 @@ export default function RecognitionPage() {
                       границ/ярлыков/маркеров компенсируем на 1/zoom — иначе на
                       зуме 400% граница 2px превращается в жирные 8px и давит схему */}
                   {page.width > 0 && pageElements.map((el) => {
-                    const c = classColor(el);
+                    const c = frameColor(el);
                     const sel = el.id === selId;
                     const inv = 1 / view.z; // компенсация масштаба
                     const done = el.status !== 'auto'; // подтверждена/исправлена
@@ -1222,10 +1244,10 @@ export default function RecognitionPage() {
                         onPointerMove={onPointerMove}
                         onPointerUp={onPointerUp}
                       >
-                        <span className="recog-el-chip"
-                          style={{ color: c, borderColor: c, transform: `scale(${inv})`, transformOrigin: 'left bottom' }}>
-                          {el.klass} {Math.round((el.confidence || 0) * 100)}%
-                        </span>
+                        {/* подписей на схеме нет (правка Максима 17.08): на
+                            плотных однолинейках таблички наслаивались друг на
+                            друга и закрывали сами аппараты. Класс и уверенность
+                            видны в окне параметров. */}
                         {/* выбранная рамка: 4 квадрата бегут по периметру
                             по часовой стрелке — видно, какой элемент открыт */}
                         {sel && [0, 1, 2, 3].map((i) => (
@@ -1377,7 +1399,7 @@ export default function RecognitionPage() {
               Каталог открывается второй колонкой в этом же окне: параметры
               рамки и выбор товара видны одновременно и переезжают вместе. */}
           {selEl && (
-            <div className={`recog-float-insp${pickerElId != null ? ' with-catalog' : ''}`}
+            <div ref={inspRef} className={`recog-float-insp${pickerElId != null ? ' with-catalog' : ''}`}
               style={{ left: inspPos.x, top: inspPos.y }}>
               <InspectorPanel
                 key={`${selEl.id}-${selEl.product_name || ''}-${selEl.article || ''}`}
@@ -1531,6 +1553,10 @@ function InspectorPanel({ el, cfg, catalogOpen, onHeadPointerDown, onClose, onSa
   const [designation, setDesignation] = useState(el.designation || '');
   const [fields, setFields] = useState<Record<string, string>>({ ...(el.fields || {}) });
   const [color, setColor] = useState(el.color || '');
+  const [colorOpen, setColorOpen] = useState(false);
+  /** цвет, которым рамка красится без ручного выбора — по состоянию */
+  const stateColor = el.status !== 'auto' ? FRAME_CONFIRMED
+    : el.confidence > 0 && el.confidence < LOW_CONF ? FRAME_LOW : FRAME_AUTO;
   /** параметры, переведённые на ручной ввод («Своё значение…») */
   const [manualKeys, setManualKeys] = useState<Set<string>>(() => {
     const s = new Set<string>();
@@ -1551,7 +1577,7 @@ function InspectorPanel({ el, cfg, catalogOpen, onHeadPointerDown, onClose, onSa
     }
     return { klass, designation, fields: out, color };
   };
-  const warn = el.confidence > 0 && el.confidence < 0.7 && el.status === 'auto';
+  const warn = el.confidence > 0 && el.confidence < LOW_CONF && el.status === 'auto';
 
   const productBlock = el.product_name ? (
     <div className="recog-product">
@@ -1646,26 +1672,38 @@ function InspectorPanel({ el, cfg, catalogOpen, onHeadPointerDown, onClose, onSa
         );
       })}
 
-      {/* пункт 7: 15 популярных цветов + кнопка «добавить свой» */}
-      <label>Цвет рамки</label>
-      <div className="recog-swatches">
-        {SWATCHES.map((c) => (
-          <button key={c}
-            className={`recog-swatch ${color === c ? 'on' : ''}`}
-            style={{ background: c }}
-            title={c}
-            onClick={() => setColor(c)}
-          />
-        ))}
-        <button className="recog-swatch recog-swatch-add" title="Выбрать свой цвет из палитры"
-          onClick={() => document.getElementById('recog-custom-color')?.click()}>
-          <Icon.plus />
-        </button>
-        <input id="recog-custom-color" type="color" hidden
-          value={color || byCode.get(klass)?.color || '#64748b'}
-          onChange={(e) => setColor(e.target.value)} />
-        {color && <button className="btn-outline recog-swatch-reset" onClick={() => setColor('')}>Цвет класса</button>}
-      </div>
+      {/* Цвет — под выпадающим меню (правка Максима 17.08): по умолчанию рамка
+          красится по состоянию, палитра нужна редко и место занимала зря */}
+      <button type="button" className="recog-colorbtn" onClick={() => setColorOpen((v) => !v)}
+        title="Свой цвет рамки. По умолчанию цвет показывает состояние: жёлтая — распознана, зелёная — подтверждена, серая — низкая уверенность">
+        <span className="recog-colordot" style={{ background: color || stateColor }} />
+        <span>Цвет рамки{color ? '' : ' — по состоянию'}</span>
+        <span className="recog-colorchev">{colorOpen ? '−' : '+'}</span>
+      </button>
+      {colorOpen && (
+        <div className="recog-swatches">
+          {SWATCHES.map((c) => (
+            <button key={c}
+              className={`recog-swatch ${color === c ? 'on' : ''}`}
+              style={{ background: c }}
+              title={c}
+              onClick={() => setColor(c)}
+            />
+          ))}
+          <button className="recog-swatch recog-swatch-add" title="Выбрать свой цвет из палитры"
+            onClick={() => document.getElementById('recog-custom-color')?.click()}>
+            <Icon.plus />
+          </button>
+          <input id="recog-custom-color" type="color" hidden
+            value={color || stateColor}
+            onChange={(e) => setColor(e.target.value)} />
+          {color && (
+            <button className="btn-outline recog-swatch-reset" onClick={() => setColor('')}>
+              Вернуть цвет состояния
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="recog-insp-btns">
         <button className="btn-primary" onClick={() => onSave(collect(), 'confirmed')}>Подтвердить</button>
