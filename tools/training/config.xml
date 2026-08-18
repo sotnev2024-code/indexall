@@ -27,6 +27,7 @@
     <Label value="Disconnector — рубильник" category="7" background="#5B6EE1"/>
     <Label value="Relay — реле" category="8" background="#9B59B6"/>
     <Label value="Contactor — контактор" category="9" background="#E84393"/>
+    <Label value="Contactor / Power supply — определяется по тексту" category="46" background="#C39BD3"/>
     <Label value="Terminal — клемма" category="10" background="#7F8C8D"/>
     <Label value="Button — кнопка" category="11" background="#16A085"/>
     <Label value="Lamp — лампа" category="12" background="#F4D03F"/>

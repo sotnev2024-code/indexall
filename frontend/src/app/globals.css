@@ -1633,9 +1633,13 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-viewport { flex: 1; position: relative; overflow: hidden; cursor: grab; touch-action: none;
   user-select: none; -webkit-user-select: none; background: var(--bg);
   background-image: linear-gradient(#e9e9e9 1px, transparent 1px), linear-gradient(90deg, #e9e9e9 1px, transparent 1px); background-size: 26px 26px; }
-.recog-viewport.crosshair { cursor: crosshair; }
+/* курсор режима выделения: системный крестик белый и на белом листе схемы
+   терялся (правка Максима 18.08) — рисуем свой, чёрный в белой обводке */
+.recog-viewport.crosshair,
+.recog-viewport.crosshair:active {
+  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28'><g stroke='%23fff' stroke-width='5'><path d='M14 2v24M2 14h24'/></g><g stroke='%23111' stroke-width='2.2'><path d='M14 2v24M2 14h24'/></g><circle cx='14' cy='14' r='2.6' fill='none' stroke='%23f5c800' stroke-width='2'/></svg>") 14 14, crosshair;
+}
 .recog-viewport:active { cursor: grabbing; }
-.recog-viewport.crosshair:active { cursor: crosshair; }
 .recog-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 /* картинку схемы браузер не должен таскать как файл — иначе теряется
    жест выделения зоны (и распознавание не запускается) */
@@ -1671,15 +1675,17 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 @media (prefers-reduced-motion: reduce) { .recog-el-runner { animation: none; opacity: .6; } }
 
 /* плавающий инспектор поверх схемы */
-.recog-float-insp { position: absolute; z-index: 45; width: 300px; max-height: calc(100% - 24px);
+/* окно шире (правка Максима 18.08): параметры в две колонки помещаются
+   целиком, прокручивать до кнопок не нужно */
+.recog-float-insp { position: absolute; z-index: 45; width: 420px; max-height: calc(100% - 24px);
   overflow: auto; background: var(--white); border: 1px solid var(--border); border-radius: 10px;
   box-shadow: 0 8px 28px rgba(0,0,0,.20); }
 /* каталог («Добавить из базы») раскрывается второй колонкой в этом же окне:
    параметры рамки и выбор товара перед глазами одновременно, окно двигается
    целиком за ту же шапку */
-.recog-float-insp.with-catalog { display: flex; width: min(1010px, calc(100% - 24px));
+.recog-float-insp.with-catalog { display: flex; width: min(1130px, calc(100% - 24px));
   height: calc(100% - 24px); overflow: hidden; }
-.recog-float-insp.with-catalog > .recog-insp { flex: 0 0 300px; width: 300px;
+.recog-float-insp.with-catalog > .recog-insp { flex: 0 0 420px; width: 420px;
   overflow-y: auto; min-height: 0; border-right: 1px solid var(--border); }
 .recog-float-insp.with-catalog .recog-catalog { position: static; flex: 1 1 auto;
   width: auto; min-width: 0; border-left: none; box-shadow: none; }
@@ -1751,6 +1757,17 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 /* набор параметров закреплён за типом элемента: ни крестика «убрать поле»,
    ни строки «новый параметр» здесь больше нет (замечания 5 и 6) */
 .recog-fieldline { display: flex; gap: 6px; }
+/* параметры по две в ряд: значения короткие, полосы на всю ширину гнали
+   окно в высоту и требовали прокрутки (правка Максима 18.08) */
+.recog-fieldgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.recog-fieldgrid .recog-fieldrow { min-width: 0; }
+.recog-fieldgrid .recog-fieldrow label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* «Подтвердить» / «Сохранить» наверху и не уезжают при прокрутке */
+.recog-insp-btns-top { position: sticky; top: 34px; z-index: 3; background: var(--white);
+  margin-top: 0; padding: 2px 0 10px; border-bottom: 1px solid var(--border); }
+.recog-insp-btns-top .btn-primary { flex: 1; }
+/* кнопка перехода к спецификации в карточке листа */
+.recog-page-spec { grid-column: 1 / -1; width: 100%; margin-top: 8px; font-size: 12.5px; padding: 8px; }
 .recog-colorline { display: flex; align-items: center; gap: 8px; }
 .recog-colorline input[type="color"] { width: 44px; height: 30px; border: 1px solid var(--border); border-radius: 6px; background: var(--white); padding: 2px; cursor: pointer; }
 .recog-insp-btns { display: flex; gap: 8px; margin-top: 14px; }

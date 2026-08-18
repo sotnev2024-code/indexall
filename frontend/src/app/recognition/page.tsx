@@ -197,7 +197,7 @@ type PickedProduct = {
 };
 
 /** ширина плавающего окна элемента с раскрытой колонкой каталога */
-const INSP_W_CAT = 1010;
+const INSP_W_CAT = 1130;
 
 export default function RecognitionPage() {
   const router = useRouter();
@@ -368,7 +368,7 @@ export default function RecognitionPage() {
   const selElRef = useRef<RecogElement | null>(null); selElRef.current = selEl;
 
   /* ── плавающий инспектор: позиция и перетаскивание за шапку ── */
-  const INSP_W = 300;
+  const INSP_W = 420;
   const [inspPos, setInspPos] = useState({ x: 24, y: 70 });
   const inspRef = useRef<HTMLDivElement>(null);
   const inspDrag = useRef<{ dx: number; dy: number } | null>(null);
@@ -1133,6 +1133,15 @@ export default function RecognitionPage() {
                   <button title="Удалить лист в корзину"
                     onClick={(e) => { e.stopPropagation(); trashPage(p); }}><Icon.trash /></button>
                 </div>
+                {/* переход к спецификации прямо из карточки листа (правка
+                    Максима 18.08 — он сам предложил это место) */}
+                {page?.id === p.id && (
+                  <button className="btn-primary recog-page-spec"
+                    title="Лист спецификации по этой схеме: подтверждённые рамки с параметрами"
+                    onClick={(e) => { e.stopPropagation(); setSpecTab(p.id); setSpecOpen(true); }}>
+                    Открыть спецификацию
+                  </button>
+                )}
               </div>
             ))}
             {doc.status === 'rendering' && <div className="recog-render-note">Готовим листы… {visiblePages.filter((p) => p.image_url).length}/{doc.page_count}</div>}
@@ -1273,14 +1282,23 @@ export default function RecognitionPage() {
                             Нажатие равнозначно кнопке «Подтвердить». */}
                         <span
                           className={`recog-el-check ${done ? 'on' : ''}`}
-                          style={{ transform: `translateX(-50%) scale(${inv})`, transformOrigin: 'center top' }}
+                          style={{
+                            transform: `translateX(-50%) scale(${inv})`,
+                            transformOrigin: 'center top',
+                            // отступ компенсируем зумом, иначе на большом
+                            // масштабе галочка налезает на саму рамку
+                            bottom: -9 * inv,
+                          }}
                           title={done ? 'Подтверждена — нажмите, чтобы снять' : 'Подтвердить рамку'}
                           onPointerDown={(e) => e.stopPropagation()}
                           onClick={(e) => { e.stopPropagation(); toggleConfirm(el); }}
                         >
                           <Icon.check />
                         </span>
-                        {sel && ['nw','n','ne','e','se','s','sw','w'].map((h) => {
+                        {/* маркеров по нижнему краю нет: там галочка, и
+                            центральный квадрат перехватывал нажатие на неё
+                            (правка Максима 18.08). Тянуть низ можно за углы. */}
+                        {sel && ['nw','n','ne','e','se','sw','w'].map((h) => {
                           // размер и смещение маркеров тоже компенсируем зумом,
                           // иначе на большом масштабе они «съезжают» с углов
                           const size = 10 * inv, off = -size / 2;
@@ -1613,6 +1631,14 @@ function InspectorPanel({ el, cfg, catalogOpen, onHeadPointerDown, onClose, onSa
         )}
       </div>
 
+      {/* «Подтвердить» наверху (правка Максима 18.08): до правки кнопка была
+          в самом низу и до неё приходилось прокручивать окно на каждом
+          элементе. Блок липкий — остаётся на месте при прокрутке полей. */}
+      <div className="recog-insp-btns recog-insp-btns-top">
+        <button className="btn-primary" onClick={() => onSave(collect(), 'confirmed')}>Подтвердить</button>
+        <button className="btn-outline" onClick={() => onSave(collect(), 'corrected')}>Сохранить</button>
+      </div>
+
       {productBlock}
       {!el.product_name && (
         <button className={`btn-outline recog-frombase${catalogOpen ? ' recog-frombase-on' : ''}`}
@@ -1638,6 +1664,10 @@ function InspectorPanel({ el, cfg, catalogOpen, onHeadPointerDown, onClose, onSa
       <label>Обозначение (QF1, Гр.2…)</label>
       <input value={designation} onChange={(e) => setDesignation(e.target.value)} />
 
+      {/* Параметры в две колонки (правка Максима 18.08): значения короткие —
+          «3P», «250 А», — и полосы на всю ширину занимали место зря, из-за
+          них окно не помещалось на экран целиком. */}
+      <div className="recog-fieldgrid">
       {paramKeys.map((k) => {
         const v = fields[k] ?? '';
         const opts = PARAM_OPTIONS[k];
@@ -1671,6 +1701,7 @@ function InspectorPanel({ el, cfg, catalogOpen, onHeadPointerDown, onClose, onSa
           </div>
         );
       })}
+      </div>
 
       {/* Цвет — под выпадающим меню (правка Максима 17.08): по умолчанию рамка
           красится по состоянию, палитра нужна редко и место занимала зря */}
@@ -1705,10 +1736,8 @@ function InspectorPanel({ el, cfg, catalogOpen, onHeadPointerDown, onClose, onSa
         </div>
       )}
 
-      <div className="recog-insp-btns">
-        <button className="btn-primary" onClick={() => onSave(collect(), 'confirmed')}>Подтвердить</button>
-        <button className="btn-outline" onClick={() => onSave(collect(), 'corrected')}>Сохранить</button>
-      </div>
+      {/* «Подтвердить» и «Сохранить» переехали наверх — здесь только
+          дублирование и удаление */}
       <div className="recog-insp-btns">
         <button className="btn-outline" style={{ flex: 1 }} onClick={() => onDuplicate(collect())}
           title="Создать копию рамки рядом (Ctrl+C / Ctrl+V)">Дублировать</button>
@@ -1716,8 +1745,8 @@ function InspectorPanel({ el, cfg, catalogOpen, onHeadPointerDown, onClose, onSa
           title="Удалить рамку (клавиша Delete)">Удалить</button>
       </div>
       <p className="recog-insp-hint">
-        Рамку можно двигать, менять её размер и параметры в любой момент — в том числе после подтверждения.
-        Ctrl+C / Ctrl+V — копия рамки со всеми параметрами, Delete — удалить.
+        Рамку можно двигать и менять в любой момент, в том числе после подтверждения.
+        Ctrl+C / Ctrl+V — копия, Delete — удалить.
       </p>
     </div>
   );

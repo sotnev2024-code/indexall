@@ -236,7 +236,15 @@ export async function yoloDetect(
 
   if (!tiled) {
     // ── одна картинка: letterbox во вход модели (как в ultralytics) ──
-    const scale = Math.min(S / srcW, S / srcH);
+    // Модель, обученную на тайлах, НЕЛЬЗЯ кормить растянутой картинкой:
+    // зона 684×286 на листе PDF растягивалась до входа 1280 почти вдвое, и
+    // аппараты становились в два раза крупнее обучающих — детектор не находил
+    // ничего (замеры Максима 18.08: «на PDF не срабатывает», «первый прогон
+    // ничего не находит» — обе жалобы про мелкие зоны). Поэтому для тайловой
+    // модели масштаб не поднимаем выше 1:1, а добиваем полем, как в тайле.
+    const scale = tilesWanted
+      ? Math.min(1, S / srcW, S / srcH)
+      : Math.min(S / srcW, S / srcH);
     const newW = Math.max(1, Math.round(srcW * scale));
     const newH = Math.max(1, Math.round(srcH * scale));
     const padX = Math.floor((S - newW) / 2);
