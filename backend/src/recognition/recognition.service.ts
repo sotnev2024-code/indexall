@@ -569,9 +569,9 @@ export class RecognitionService implements OnModuleInit {
       });
     } else if (maxEdge < 640 && !tiledModel) {
       // Крошечная зона (один элемент): увеличиваем, чтобы LLM читала подписи.
-      // Тайловой модели увеличение вредит — аппарат становится крупнее
-      // обучающих примеров и не находится (жалобы Максима 18.08), ей зона
-      // уходит в исходном масштабе и добивается полем уже в yoloDetect.
+      // Тайловой модели увеличение не нужно — она ждёт аппараты в размере
+      // обучающих тайлов, поэтому зона уходит в исходном масштабе и
+      // добивается полем уже в yoloDetect.
       pipeline = pipeline.resize({
         width: width >= height ? 640 : undefined,
         height: height > width ? 640 : undefined,
@@ -602,7 +602,9 @@ export class RecognitionService implements OnModuleInit {
     }>;
 
     const startedAt = Date.now();
-    const where = `режим ${mode}, страница ${page.id}, зона ${width}×${height} px`;
+    // координаты зоны в логе: по ним разбираются жалобы вида «ничего не нашло» —
+    // сразу видно, на какой участок листа пришлась выделенная область
+    const where = `режим ${mode}, страница ${page.id}, зона ${width}×${height} px от (${left}, ${top})`;
     try {
       if (mode === 'yolo') {
         found = await this.runYolo(buf, cfg);
