@@ -48,6 +48,10 @@ const TILES_ENABLED = /^(1|true|on|yes)$/i.test((process.env.RECOGNITION_YOLO_TI
  */
 const MAX_TILES = parseInt(process.env.RECOGNITION_YOLO_MAX_TILES || '36', 10) || 36;
 const TILE_OVERLAP = 0.2;
+/** Чем добиваем картинку до входа модели. Схемы — чёрным по белому, поэтому
+ *  поле белое: серая заливка для модели инородна, а Максим просил именно
+ *  «дорисовать белые области с сохранением пропорций» (19.08). */
+const PAD_COLOR = { r: 255, g: 255, b: 255 };
 const CONF_THRESHOLD = 0.25;
 const IOU_THRESHOLD = 0.45;
 const MAX_DETECTIONS = 300;
@@ -130,6 +134,78 @@ async function getSession(modelPath: string): Promise<Cached> {
   }
   sessions.set(modelPath, entry);
   return entry;
+}
+
+/**
+ * Что за модель лежит в файле: детектор (выход [1, N, …]) или классификатор
+ * по кропу (выход [1, C] — вероятности классов). Максим 19.08 прислал вторую:
+ * «эта нейросеть работает по кропу, детектор должен давать ей область, а она
+ * может только определять класс». Тип определяем по форме выхода, чтобы
+ * загрузка новой модели не требовала переключателей.
+ */
+export type ModelKind = 'detect' | 'classify';
+
+export async function modelKind(modelPath: string): Promise<ModelKind> {
+  const { session } = await getSession(modelPath);
+  try {
+    const md = session.outputMetadata?.[0];
+    const dims = md?.shape || md?.dims;
+    if (Array.isArray(dims) && dims.length === 2) return 'classify';
+  } catch { /* метаданных нет — считаем детектором, ошибка вылезет при прогоне */ }
+  return 'detect';
+}
+
+/**
+ * Нормализация входа классификатора. Обучение на torchvision/timm почти всегда
+ * идёт со средним и разбросом ImageNet; если Максим обучал без нормализации,
+ * переключается переменной RECOGNITION_CLS_NORM=01.
+ */
+const CLS_NORM = (process.env.RECOGNITION_CLS_NORM || 'imagenet').trim().toLowerCase();
+const IMAGENET_MEAN = [0.485, 0.456, 0.406];
+const IMAGENET_STD = [0.229, 0.224, 0.225];
+
+/**
+ * Классификация вырезанного элемента: картинка → вероятности классов.
+ * Возвращает несколько лучших вариантов, отсортированных по убыванию.
+ */
+export async function classifyImage(
+  imageJpeg: Buffer, modelPath: string, topK = 3,
+): Promise<{ classId: number; conf: number; className?: string }[]> {
+  const ort = require('onnxruntime-node');
+  const sharp = require('sharp');
+  const { session, input: S, names } = await getSession(modelPath);
+
+  // кроп растягиваем во вход: классификатор обучали именно так — на
+  // вырезанных элементах, приведённых к одному размеру
+  const raw: Buffer = await sharp(imageJpeg)
+    .resize(S, S, { fit: 'fill' })
+    .removeAlpha().raw().toBuffer();
+
+  const px = S * S;
+  const data = new Float32Array(3 * px);
+  for (let i = 0; i < px; i++) {
+    for (let c = 0; c < 3; c++) {
+      const v = raw[i * 3 + c] / 255;
+      data[c * px + i] = CLS_NORM === '01' ? v : (v - IMAGENET_MEAN[c]) / IMAGENET_STD[c];
+    }
+  }
+  const tensor = new ort.Tensor('float32', data, [1, 3, S, S]);
+  const outputs = await session.run({ [session.inputNames[0]]: tensor });
+  const out = outputs[session.outputNames[0]];
+  const logits: any = out.data;
+  const C = Number(out.dims[out.dims.length - 1]) || logits.length;
+
+  // softmax: модель отдаёт логиты, а нам нужна уверенность для порогов и UI
+  let max = -Infinity;
+  for (let i = 0; i < C; i++) max = Math.max(max, Number(logits[i]));
+  let sum = 0;
+  const probs = new Array(C);
+  for (let i = 0; i < C; i++) { probs[i] = Math.exp(Number(logits[i]) - max); sum += probs[i]; }
+
+  return probs
+    .map((p: number, i: number) => ({ classId: i, conf: sum > 0 ? p / sum : 0, className: names?.[i] }))
+    .sort((a, b) => b.conf - a.conf)
+    .slice(0, Math.max(1, topK));
 }
 
 /** Один прогон подготовленного квадрата inputSize×inputSize. */
@@ -253,7 +329,7 @@ export async function yoloDetect(
     const raw: Buffer = await sharp(work)
       .resize(newW, newH)
       .extend({ top: padY, bottom: S - newH - padY, left: padX, right: S - newW - padX,
-        background: { r: 114, g: 114, b: 114 } })
+        background: PAD_COLOR })
       .removeAlpha().raw().toBuffer();
 
     for (const d of await runTile(ort, session, raw, S, names)) {
@@ -273,7 +349,7 @@ export async function yoloDetect(
         const raw: Buffer = await sharp(work)
           .extract({ left, top, width: w, height: h })
           .extend({ top: 0, left: 0, bottom: S - h, right: S - w,
-            background: { r: 114, g: 114, b: 114 } })
+            background: PAD_COLOR })
           .removeAlpha().raw().toBuffer();
 
         for (const d of await runTile(ort, session, raw, S, names)) {

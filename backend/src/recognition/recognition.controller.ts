@@ -99,7 +99,7 @@ export class RecognitionController {
   @Post('models')
   @UseInterceptors(FileInterceptor('file', {
     storage: modelStorage,
-    limits: { fileSize: 300 * 1024 * 1024 },
+    limits: { fileSize: 600 * 1024 * 1024 },
   }))
   uploadModel(
     @UploadedFile() file: Express.Multer.File,
@@ -114,6 +114,20 @@ export class RecognitionController {
   @Post('models/:id/activate')
   activateModel(@Param('id', ParseIntPipe) id: number) {
     return this.service.activateModel(id);
+  }
+
+  /** class_mapping.json к модели-классификатору: номер выхода → имя класса */
+  @Post('models/:id/class-map')
+  @UseInterceptors(FileInterceptor('file', {
+    storage: memoryStorage(),
+    limits: { fileSize: 2 * 1024 * 1024 },
+  }))
+  uploadClassMap(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file?.buffer) throw new BadRequestException('Файл не загружен');
+    return this.service.setClassMap(id, file.buffer.toString('utf8'));
   }
 
   /** Роль модели в конвейере (детектор/классификатор) и нарезка на тайлы */

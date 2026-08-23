@@ -419,6 +419,12 @@ export const recognitionApi = {
     return api.post('/recognition/models', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600000 });
   },
   activateModel: (id: number) => api.post(`/recognition/models/${id}/activate`),
+  /** class_mapping.json к сети-классификатору: номер выхода → класс */
+  uploadClassMap: (id: number, file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return api.post(`/recognition/models/${id}/class-map`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
   /** роль модели в конвейере и нарезка на тайлы */
   updateModel: (id: number, patch: { role?: string; tiled?: boolean; note?: string }) =>
     api.patch(`/recognition/models/${id}`, patch),

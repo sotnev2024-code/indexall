@@ -35,6 +35,12 @@ export class RecognitionModelVersion {
   @Column({ default: false })
   tiled: boolean;
 
+  /** class_mapping.json от Максима: соответствие номера выхода модели имени
+   *  класса. У классификатора по кропу имён в метаданных ONNX нет, поэтому
+   *  без этого файла номера не с чем сопоставить. Хранится как есть. */
+  @Column({ type: 'text', default: '' })
+  class_map: string;
+
   @CreateDateColumn()
   createdAt: Date;
 }

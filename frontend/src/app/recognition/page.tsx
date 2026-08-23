@@ -234,9 +234,6 @@ export default function RecognitionPage() {
   /* зеркало выделяемой зоны: обработчик отпускания может прийти из
      window-страховки, где значение из замыкания уже устарело */
   const zoneDraftRef = useRef<Zone | null>(null); zoneDraftRef.current = zoneDraft;
-  /* результат последнего распознавания зоны: id рамок + зона — для
-     кнопок «Подтвердить все» / «Удалить» */
-  const [batch, setBatch] = useState<{ ids: number[]; zone: Zone } | null>(null);
   const lastDownRef = useRef({ t: 0, x: 0, y: 0 });
   /** буфер копирования рамки (Ctrl+C → Ctrl+V) */
   const clipRef = useRef<RecogElement | null>(null);
@@ -295,22 +292,29 @@ export default function RecognitionPage() {
           return;
         }
         try {
-          const saved = JSON.parse(sessionStorage.getItem('recogState') || 'null');
+          const saved = JSON.parse(localStorage.getItem('recogState') || 'null');
           if (saved?.docId) {
             reloadDoc(saved.docId)
               .then(() => { if (saved.pageId) setPageId(saved.pageId); })
-              .catch(() => sessionStorage.removeItem('recogState'));
+              .catch(() => localStorage.removeItem('recogState'));
           }
         } catch { /* повреждённое состояние — игнорируем */ }
       })
       .catch(() => router.replace('/projects'));
   }, [router, loadDocs, reloadDoc]);
 
-  /* запоминаем открытый документ/лист для восстановления после F5 */
+  /* Запоминаем открытый документ и лист, чтобы вернуться к ним после листа
+     спецификации и после F5 (жалоба Максима 19.08: «как вернуться к проекту
+     с распознанными схемами — непонятно»).
+     ВАЖНО: пустое значение здесь НЕ стираем. Раньше стирали — и при загрузке
+     страницы этот эффект успевал сработать с doc === null раньше, чем
+     асинхронное восстановление читало сохранённое, так что возврат не работал
+     никогда. Состояние очищается только кнопкой «Все документы».
+     localStorage, а не sessionStorage: спецификацию открывают и в новой
+     вкладке, там сеансовое хранилище пустое. */
   useEffect(() => {
     try {
-      if (doc) sessionStorage.setItem('recogState', JSON.stringify({ docId: doc.id, pageId }));
-      else sessionStorage.removeItem('recogState');
+      if (doc) localStorage.setItem('recogState', JSON.stringify({ docId: doc.id, pageId }));
     } catch { /* приватный режим и т.п. */ }
   }, [doc?.id, pageId]);
 
@@ -507,7 +511,7 @@ export default function RecognitionPage() {
     setView({ x: 24, y: 24, z: 1 });
   }, []);
 
-  useEffect(() => { openAt100(); setBatch(null); /* eslint-disable-next-line */ }, [page?.id, page?.width, isFs]);
+  useEffect(() => { openAt100(); /* eslint-disable-next-line */ }, [page?.id, page?.width, isFs]);
 
   /* ── загрузка файла ── */
   const uploadFile = useCallback(async (file: File) => {
@@ -607,7 +611,7 @@ export default function RecognitionPage() {
   }, [doc, page, mode]);
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if ((e.target as HTMLElement).closest('.recog-el, .recog-handle, .recog-zone-confirm')) return;
+    if ((e.target as HTMLElement).closest('.recog-el, .recog-handle')) return;
     if (e.button !== 0) return;                       // только левая кнопка
     e.preventDefault();                               // гасим нативный drag картинки
     // захват на самом холсте (не на <img>): иначе при перетаскивании
@@ -624,7 +628,6 @@ export default function RecognitionPage() {
       const p = toPagePoint(e.clientX, e.clientY);
       // в режиме pan двойное нажатие означает распознавание
       drag.current = { kind: 'zone', start: p, action: mode === 'manual' ? 'manual' : 'detect' };
-      setBatch(null);
       setZoneDraft({ x: p.x, y: p.y, w: 0, h: 0 });
     } else {
       drag.current = { kind: 'pan', start, view: { ...viewRef.current } };
@@ -709,17 +712,13 @@ export default function RecognitionPage() {
   async function runDetect(zone: Zone) {
     if (!page) return;
     setDetecting(true);
-    setBatch(null);
     const ac = new AbortController();
     detectAbortRef.current = ac;
     try {
       const { data } = await recognitionApi.detect(page.id, zone, ac.signal);
       setDoc((d) => d ? { ...d, elements: [...d.elements, ...data.elements] } : d);
       if (data.elements.length === 0) toast('В выбранной зоне ничего не нашлось — попробуйте другую область');
-      else {
-        toast.success(`Распознано элементов: ${data.elements.length}`);
-        setBatch({ ids: data.elements.map((e) => e.id), zone });
-      }
+      else toast.success(`Распознано элементов: ${data.elements.length}`);
     } catch (e: any) {
       // отмена по Esc/кнопке — это не ошибка
       if (e?.code === 'ERR_CANCELED' || e?.name === 'CanceledError' || ac.signal.aborted) {
@@ -733,36 +732,7 @@ export default function RecognitionPage() {
     }
   }
 
-  /** «Подтвердить все» для рамок последнего распознавания */
-  async function confirmBatch() {
-    if (!batch || !page) return;
-    const ids = batch.ids;
-    setBatch(null);
-    const results = await Promise.all(ids.map((id) =>
-      recognitionApi.updateElement(id, { status: 'confirmed' } as any).then((r) => r.data).catch(() => null)));
-    setDoc((d) => d ? {
-      ...d,
-      elements: d.elements.map((e) => {
-        const u: any = results.find((r: any) => r && r.id === e.id);
-        return u ? { ...e, ...u } : e;
-      }),
-    } : d);
-    const ok = results.filter(Boolean).length;
-    toast.success(page.sheet_id ? `Подтверждено: ${ok} — лист обновлён` : `Подтверждено: ${ok}`);
-    if (page.sheet_id) recognitionApi.createSheetForPage(page.id).catch(() => {});
-  }
 
-  /** «Удалить» — убрать все рамки последнего распознавания */
-  async function deleteBatch() {
-    if (!batch) return;
-    const ids = new Set(batch.ids);
-    setBatch(null);
-    await Promise.all([...ids].map((id) => recognitionApi.removeElement(id).catch(() => {})));
-    setDoc((d) => d ? { ...d, elements: d.elements.filter((e) => !ids.has(e.id)) } : d);
-    setSelId((cur) => (cur !== null && ids.has(cur) ? null : cur));
-    toast.success('Результат распознавания удалён');
-    if (page?.sheet_id) recognitionApi.createSheetForPage(page.id).catch(() => {});
-  }
 
   async function createManual(zone: Zone) {
     if (!page) return;
@@ -1072,7 +1042,11 @@ export default function RecognitionPage() {
           {/* левая колонка: схемы */}
           <aside className="recog-pages">
             <div className="recog-pages-head">
-              <button className="btn-outline recog-back" onClick={() => { setDoc(null); setSelId(null); setDocsOpen(false); }}>
+              <button className="btn-outline recog-back" onClick={() => {
+                // выход к списку — единственное место, где забываем документ
+                try { localStorage.removeItem('recogState'); } catch {}
+                setDoc(null); setSelId(null); setDocsOpen(false);
+              }}>
                 <Icon.back /> Все документы
               </button>
               {/* быстрый переход между своими документами, не выходя из схемы */}
@@ -1226,6 +1200,11 @@ export default function RecognitionPage() {
                     const sel = el.id === selId;
                     const inv = 1 / view.z; // компенсация масштаба
                     const done = el.status !== 'auto'; // подтверждена/исправлена
+                    // уголки вместо сплошного контура (правка Максима 21.08):
+                    // длина — четверть меньшей стороны, но не меньше видимых 5 px
+                    const elW = el.bbox.w * page.width, elH = el.bbox.h * page.height;
+                    const brLen = Math.max(5 * inv, Math.min(elW, elH) * 0.26);
+                    const brThick = Math.max(1, 2 * inv);
                     return (
                       <div
                         key={el.id}
@@ -1233,12 +1212,10 @@ export default function RecognitionPage() {
                         style={{
                           left: el.bbox.x * page.width, top: el.bbox.y * page.height,
                           width: el.bbox.w * page.width, height: el.bbox.h * page.height,
-                          // как в Label Studio: полупрозрачная заливка + тонкая рамка
-                          // цвета класса; без второго контура у выбранной рамки
-                          borderWidth: Math.max(1, (sel ? 2 : 1.5) * inv),
-                          borderColor: c,
-                          background: sel ? `${c}3d` : done ? `${c}20` : `${c}14`,
-                          // прямые углы — «инженерный» вид (просьба Максима)
+                          // контура нет — только уголки и лёгкая заливка в цвет
+                          // (правка Максима 21.08): сплошная рамка на плотных
+                          // схемах сливалась с линиями самого чертежа
+                          background: sel ? `${c}3a` : `${c}1c`,
                           borderRadius: 0,
                         }}
                         onPointerDown={(e) => {
@@ -1257,24 +1234,18 @@ export default function RecognitionPage() {
                             плотных однолинейках таблички наслаивались друг на
                             друга и закрывали сами аппараты. Класс и уверенность
                             видны в окне параметров. */}
-                        {/* выбранная рамка: 4 квадрата бегут по периметру
-                            по часовой стрелке — видно, какой элемент открыт */}
-                        {sel && [0, 1, 2, 3].map((i) => (
-                          <span key={`run-${i}`} className="recog-el-runner"
+                        {/* уголки по четырём углам (правка Максима 21.08).
+                            Анимация выбранной рамки убрана — выделение и так
+                            читается по усиленной заливке. */}
+                        {['nw', 'ne', 'se', 'sw'].map((h) => (
+                          <span key={h} className={`recog-el-bracket rb-${h}`}
                             style={{
-                              width: 7 * inv, height: 7 * inv, background: c,
-                              animationDelay: `${-1.1 * i}s`,
-                            }} />
-                        ))}
-                        {/* угловые квадраты — как в чертёжных редакторах;
-                            у выбранной рамки вместо них активные маркеры */}
-                        {!sel && ['nw', 'ne', 'se', 'sw'].map((h) => (
-                          <span key={h} className={`recog-el-corner rc-${h}`}
-                            style={{
-                              width: 6 * inv, height: 6 * inv,
-                              background: c,
-                              [h.includes('n') ? 'top' : 'bottom']: -3 * inv,
-                              [h.includes('w') ? 'left' : 'right']: -3 * inv,
+                              width: brLen, height: brLen,
+                              borderColor: c,
+                              [h.includes('n') ? 'borderTopWidth' : 'borderBottomWidth']: brThick,
+                              [h.includes('w') ? 'borderLeftWidth' : 'borderRightWidth']: brThick,
+                              [h.includes('n') ? 'top' : 'bottom']: -brThick,
+                              [h.includes('w') ? 'left' : 'right']: -brThick,
                             }} />
                         ))}
                         {/* Галочка статуса по центру нижнего края: серая —
@@ -1349,28 +1320,10 @@ export default function RecognitionPage() {
                 </div>
               )}
 
-              {/* действия над результатом распознавания зоны */}
-              {batch && page && !detecting && (
-                <div
-                  className="recog-zone-confirm"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  style={{
-                    left: view.x + (batch.zone.x + batch.zone.w / 2) * page.width * view.z,
-                    top: view.y + (batch.zone.y + batch.zone.h) * page.height * view.z + 10,
-                  }}
-                >
-                  <span className="recog-batch-t">Найдено: {batch.ids.length}</span>
-                  <button className="btn-primary" onClick={confirmBatch}
-                    title="Подтвердить все распознанные рамки — попадут в лист спецификации">
-                    Подтвердить все
-                  </button>
-                  <button className="btn-outline" onClick={deleteBatch}
-                    title="Удалить все рамки этого распознавания">
-                    Удалить
-                  </button>
-                  <button className="btn-outline" onClick={() => setBatch(null)} title="Закрыть (оставить как есть)"><Icon.cross /></button>
-                </div>
-              )}
+              {/* Плашка «Подтвердить все / Удалить» убрана (правка Максима
+                  19.08): каждый элемент он всё равно проверяет вручную, а
+                  всплывающее меню перекрывало схему сразу после распознавания.
+                  Число найденных показывается уведомлением. */}
 
               {/* зум-виджет */}
               <div className="recog-zoomctl" onPointerDown={(e) => e.stopPropagation()}>
@@ -1419,6 +1372,8 @@ export default function RecognitionPage() {
           {selEl && (
             <div ref={inspRef} className={`recog-float-insp${pickerElId != null ? ' with-catalog' : ''}`}
               style={{ left: inspPos.x, top: inspPos.y }}>
+              {/* после подтверждения и удаления окно закрывается само
+                  (правка Максима 21.08) — работа идёт рамка за рамкой */}
               <InspectorPanel
                 key={`${selEl.id}-${selEl.product_name || ''}-${selEl.article || ''}`}
                 el={selEl}
@@ -1426,8 +1381,11 @@ export default function RecognitionPage() {
                 catalogOpen={pickerElId != null}
                 onHeadPointerDown={startInspDrag}
                 onClose={() => { setPickerElId(null); setSelId(null); }}
-                onSave={(patch, status) => saveElement(selEl, patch, status)}
-                onDelete={() => deleteElement(selEl)}
+                onSave={(patch, status) => {
+                  saveElement(selEl, patch, status);
+                  if (status === 'confirmed') { setPickerElId(null); setSelId(null); }
+                }}
+                onDelete={() => { setPickerElId(null); setSelId(null); deleteElement(selEl); }}
                 onDuplicate={(patch) => duplicateElement(selEl, patch)}
                 onPickCatalog={() => setPickerElId((v) => (v == null ? selEl.id : null))}
                 onClearProduct={() => applyProduct(selEl.id, { product_name: '', brand: '', article: '', etm_code: '', price: '' })}
@@ -1631,12 +1589,14 @@ function InspectorPanel({ el, cfg, catalogOpen, onHeadPointerDown, onClose, onSa
         )}
       </div>
 
-      {/* «Подтвердить» наверху (правка Максима 18.08): до правки кнопка была
-          в самом низу и до неё приходилось прокручивать окно на каждом
-          элементе. Блок липкий — остаётся на месте при прокрутке полей. */}
+      {/* «Подтвердить» наверху (правка Максима 18.08), рядом «Удалить» —
+          ошибочные определения убираются в одно нажатие (правка 19.08).
+          «Сохранить» убрана: она отличалась от «Подтвердить» только статусом.
+          Блок липкий — остаётся на месте при прокрутке полей. */}
       <div className="recog-insp-btns recog-insp-btns-top">
         <button className="btn-primary" onClick={() => onSave(collect(), 'confirmed')}>Подтвердить</button>
-        <button className="btn-outline" onClick={() => onSave(collect(), 'corrected')}>Сохранить</button>
+        <button className="recog-insp-del" style={{ marginTop: 0 }} onClick={onDelete}
+          title="Удалить рамку (клавиша Delete)">Удалить</button>
       </div>
 
       {productBlock}
@@ -1736,13 +1696,11 @@ function InspectorPanel({ el, cfg, catalogOpen, onHeadPointerDown, onClose, onSa
         </div>
       )}
 
-      {/* «Подтвердить» и «Сохранить» переехали наверх — здесь только
-          дублирование и удаление */}
+      {/* «Подтвердить» и «Удалить» переехали наверх — здесь дублирование
+          и сохранение правок без смены статуса */}
       <div className="recog-insp-btns">
         <button className="btn-outline" style={{ flex: 1 }} onClick={() => onDuplicate(collect())}
           title="Создать копию рамки рядом (Ctrl+C / Ctrl+V)">Дублировать</button>
-        <button className="recog-insp-del" style={{ flex: 1, marginTop: 0 }} onClick={onDelete}
-          title="Удалить рамку (клавиша Delete)">Удалить</button>
       </div>
       <p className="recog-insp-hint">
         Рамку можно двигать и менять в любой момент, в том числе после подтверждения.
@@ -2348,6 +2306,21 @@ function ModelPanel() {
       setUploading(false);
     }
   }
+  async function sendClassMap(id: number, f: File) {
+    try {
+      const { data } = await recognitionApi.uploadClassMap(id, f);
+      const unknown: string[] = data?.unknown || [];
+      toast.success(`Классы загружены: ${data?.classes ?? '?'}`);
+      // молчать о нестыковке нельзя: такие классы уйдут в «Прочее»
+      if (unknown.length) {
+        toast(`Нет в конфиге классов: ${unknown.slice(0, 3).join(', ')}${unknown.length > 3 ? ` и ещё ${unknown.length - 3}` : ''}`,
+          { duration: 8000 });
+      }
+      reload();
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Не удалось загрузить файл классов');
+    }
+  }
   async function patchModel(id: number, patch: { role?: string; tiled?: boolean }) {
     try {
       const { data: d } = await recognitionApi.updateModel(id, patch);
@@ -2474,6 +2447,15 @@ function ModelPanel() {
                 <input type="checkbox" checked={!!m.tiled}
                   onChange={(e) => patchModel(m.id, { tiled: e.target.checked })} />
                 тайлы
+              </label>
+              {/* class_mapping.json нужен сети-классификатору: в её ONNX имён
+                  классов нет, только номера выходов */}
+              <label className="recog-tiles-check" title="class_mapping.json: номер выхода сети → класс. Нужен модели-классификатору по кропу">
+                <input type="file" accept=".json,application/json" hidden
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) sendClassMap(m.id, f); e.target.value = ''; }} />
+                <span className={`recog-classmap ${m.class_map ? 'on' : ''}`}>
+                  {m.class_map ? 'классы ✓' : 'классы…'}
+                </span>
               </label>
               <span className="recog-model-date">{new Date(m.createdAt).toLocaleString('ru-RU')}</span>
               {m.active

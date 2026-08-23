@@ -49,5 +49,9 @@
     <Label value="Contactor-based ATS — АВР на контакторах" category="37" background="#27AE60"/>
     <Label value="Voltage transformer — трансформатор напряжения" category="39" background="#1F618D"/>
     <Label value="Contactor interlock mechanism — механизм взаимоблокировки контакторов" category="25" background="#58D68D"/>
+    <Label value="Coil — катушка" category="47" background="#AAB7B8"/>
+    <Label value="Contact — контакт" category="48" background="#AAB7B8"/>
+    <Label value="Disconnector 1 input — рубильник на 1 ввод" category="49" background="#AAB7B8"/>
+    <Label value="Socket — розетка" category="50" background="#AAB7B8"/>
   </RectangleLabels>
 </View>

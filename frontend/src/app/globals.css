@@ -1658,21 +1658,16 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
   border: 1px solid #e8c88a; border-radius: 12px; padding: 4px 10px; white-space: nowrap; cursor: help; }
 
 /* рамки элементов */
-.recog-el { position: absolute; border: 2px solid; border-radius: 3px; cursor: pointer; }
-.recog-el.auto { border-style: dashed; }
+/* рамка элемента: контура нет, только уголки и лёгкая заливка в цвет
+   состояния (правка Максима 21.08) — сплошная рамка спорила с линиями схемы */
+.recog-el { position: absolute; border: 0; border-radius: 0; cursor: pointer; }
+/* уголок: две стороны из четырёх, длина и толщина задаются inline (зум) */
+.recog-el-bracket { position: absolute; pointer-events: none; border-style: solid; border-width: 0; }
 .recog-el.sel { z-index: 5; cursor: move; }
 /* подписей у рамок нет — на плотных схемах они наслаивались (правка 17.08) */
 /* бегущие по периметру квадраты у выбранной рамки */
-.recog-el-runner { position: absolute; pointer-events: none; z-index: 7;
-  animation: recog-run 4.4s linear infinite; }
-@keyframes recog-run {
-  0%   { left: 0%;   top: 0%;   transform: translate(-50%, -50%); }
-  25%  { left: 100%; top: 0%;   transform: translate(-50%, -50%); }
-  50%  { left: 100%; top: 100%; transform: translate(-50%, -50%); }
-  75%  { left: 0%;   top: 100%; transform: translate(-50%, -50%); }
-  100% { left: 0%;   top: 0%;   transform: translate(-50%, -50%); }
-}
-@media (prefers-reduced-motion: reduce) { .recog-el-runner { animation: none; opacity: .6; } }
+/* анимация выбранной рамки убрана (правка Максима 21.08): выделение
+   читается по усиленной заливке, бегущие квадраты только отвлекали */
 
 /* плавающий инспектор поверх схемы */
 /* окно шире (правка Максима 18.08): параметры в две колонки помещаются
@@ -1695,7 +1690,6 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 
 /* маркеры и углы — строго квадратные, «инженерный» вид */
 .recog-handle { position: absolute; width: 10px; height: 10px; background: #fff; border: 2px solid var(--black); border-radius: 0; z-index: 6; }
-.recog-el-corner { position: absolute; pointer-events: none; }
 /* позиции маркеров задаются inline (компенсация зума) — здесь только курсоры */
 .rh-nw, .rh-se { cursor: nwse-resize; }
 .rh-ne, .rh-sw { cursor: nesw-resize; }
@@ -1707,10 +1701,8 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
   background: var(--white); border: 1px solid var(--border); border-radius: 8px; padding: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.16); }
 .recog-batch-t { font-size: 12px; font-weight: 600; color: var(--muted); padding: 0 4px; white-space: nowrap; }
 
-/* подтверждённые рамки: сплошная тонкая рамка + полупрозрачная заливка.
-   Цвет показывает состояние (жёлтая / зелёная / серая), задаётся из page.tsx.
-   Остаются подвижными и редактируемыми */
-.recog-el.done { border-style: solid; }
+/* цвет уголков и заливки показывает состояние (жёлтая / зелёная / серая)
+   и задаётся из page.tsx. Рамки остаются подвижными и редактируемыми */
 /* галочка «подтверждено» по центру нижнего края рамки */
 /* галочка статуса рамки: она же кнопка «Подтвердить».
    Серая — не подтверждена, зелёная — подтверждена. */
@@ -1818,6 +1810,10 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-model-role { font-size: 11.5px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
 .recog-tiles-check { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--muted); white-space: nowrap; cursor: pointer; }
 .recog-tiles-check input { width: 13px; height: 13px; accent-color: var(--yellow); cursor: pointer; }
+/* файл классов у модели-классификатора */
+.recog-classmap { border: 1px dashed var(--border); border-radius: 6px; padding: 2px 7px; font-size: 11px; }
+.recog-classmap:hover { border-color: var(--text); color: var(--text); }
+.recog-classmap.on { border-style: solid; border-color: #1e7e34; color: #1e7e34; }
 
 /* теневые прогоны */
 .recog-shadow { margin-top: 14px; border-top: 1px dashed var(--border); padding-top: 10px; }

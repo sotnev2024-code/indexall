@@ -32,7 +32,10 @@ import {
   RecognitionClass,
   slugFromLsValue,
 } from './recognition-classes';
-import { yoloDetect, resetYoloSession, readModelClassNames, yoloSettings, modelInputSize, YoloBox } from './yolo';
+import {
+  yoloDetect, resetYoloSession, readModelClassNames, yoloSettings,
+  modelInputSize, modelKind, classifyImage, YoloBox,
+} from './yolo';
 
 const execFileAsync = promisify(execFile);
 
@@ -64,6 +67,33 @@ const DETECT_MAX_EDGE = 2200;
 /** То же для тайловых моделей: масштаб 1:1 важнее размера картинки, а LLM
  *  в этих режимах не участвует — ограничение провайдера не действует. */
 const DETECT_MAX_EDGE_TILED = parseInt(process.env.RECOGNITION_MAX_EDGE_TILED || '4400', 10) || 4400;
+/** Поле, которым добиваем область до входа модели — белое, как бумага схемы */
+const PAD_COLOR = { r: 255, g: 255, b: 255 };
+
+/**
+ * class_mapping.json Максима → массив имён по номеру выхода модели.
+ * Формат файла: [{ "model_index": 0, "class_name": "AFDD — УЗДП", … }, …].
+ * Понимаем и словарь {"0": "имя"} — на случай другого экспорта.
+ */
+function parseClassMap(raw: string): string[] {
+  const data = JSON.parse(raw);
+  const names: string[] = [];
+  if (Array.isArray(data)) {
+    for (const it of data) {
+      const i = Number(it?.model_index ?? it?.index ?? it?.id);
+      const name = String(it?.class_name ?? it?.name ?? '').trim();
+      if (Number.isInteger(i) && i >= 0 && name) names[i] = name;
+    }
+  } else if (data && typeof data === 'object') {
+    for (const [k, v] of Object.entries(data)) {
+      const i = Number(k);
+      const name = String(v ?? '').trim();
+      if (Number.isInteger(i) && i >= 0 && name) names[i] = name;
+    }
+  }
+  if (!names.length) throw new Error('В файле не нашлось пар «номер → класс»');
+  return names;
+}
 
 /** Ключ настройки с XML-конфигом Label Studio (см. recognition-classes.ts) */
 const LS_CONFIG_KEY = 'recognition_ls_config';
@@ -758,6 +788,20 @@ export class RecognitionService implements OnModuleInit {
     }));
     if (!classifier) return out; // второй ступени нет — отдаём классы детектора
 
+    // Сеть-классификатор по кропу (Максим 19.08): рамок не ищет, только
+    // называет класс вырезанной области — ей и отдаём находки детектора.
+    const classifierPath = join(UPLOAD_DIR, classifier.filename);
+    let kind: 'detect' | 'classify' = 'detect';
+    try { kind = await modelKind(classifierPath); } catch { /* решим по прогону */ }
+    if (kind === 'classify') {
+      const done = await this.classifyCrops(buf, found, out, classifier, cfg);
+      this.logger.log(
+        `Поочерёдный режим (классификатор по кропу): детектор ${found.length}` +
+        `, классов присвоено ${done}, осталось без класса ${out.filter((o) => o.klass === 'other').length}`,
+      );
+      return out;
+    }
+
     const zoneBoxes = await this.detectWith('classifier', buf).catch((e: any) => {
       this.logger.warn(`Классификатор не обработал зону: ${e?.message || e}`);
       return [] as YoloBox[];
@@ -798,6 +842,62 @@ export class RecognitionService implements OnModuleInit {
     return out;
   }
 
+  /**
+   * Вторая ступень сетью-классификатором: каждой найденной детектором области
+   * даём её вырезку, сеть возвращает класс. Имена берём из class_mapping.json,
+   * приложенного к модели, — в ONNX классификатора имён классов нет.
+   */
+  private async classifyCrops(
+    buf: Buffer,
+    found: YoloBox[],
+    out: Array<{ klass: string; bbox: [number, number, number, number]; confidence: number }>,
+    classifier: RecognitionModelVersion,
+    cfg: ClassConfig,
+  ): Promise<number> {
+    const sharp = require('sharp');
+    const modelPath = join(UPLOAD_DIR, classifier.filename);
+    let names: string[] = [];
+    if (classifier.class_map) {
+      try { names = parseClassMap(classifier.class_map); } catch { /* разберём по номерам */ }
+    }
+    const meta = await sharp(buf).metadata();
+    const W = meta.width || 1, H = meta.height || 1;
+    const byCode = new Set(cfg.classes.map((c) => c.code));
+    let done = 0;
+
+    for (let i = 0; i < found.length; i++) {
+      const d = found[i].bbox;
+      // немного поля вокруг: на обучении кроп резался с запасом, впритык
+      // символ теряет характерные хвосты линий
+      const padX = d.w * 0.12, padY = d.h * 0.12;
+      const left = Math.max(0, Math.round((d.x - padX) * W));
+      const top = Math.max(0, Math.round((d.y - padY) * H));
+      const w = Math.min(W - left, Math.max(8, Math.round((d.w + 2 * padX) * W)));
+      const h = Math.min(H - top, Math.max(8, Math.round((d.h + 2 * padY) * H)));
+      try {
+        const crop: Buffer = await sharp(buf)
+          .extract({ left, top, width: w, height: h })
+          .jpeg({ quality: 92 }).toBuffer();
+        const top1 = (await classifyImage(crop, modelPath, 1))[0];
+        if (!top1) continue;
+        const name = names[top1.classId] || top1.className || '';
+        const slug = name ? slugFromLsValue(name) : '';
+        if (slug && byCode.has(slug)) {
+          out[i].klass = slug;
+          out[i].confidence = top1.conf;
+          done++;
+        } else if (name) {
+          // класс сети известен, а в конфиге такой метки нет — видно в логе,
+          // чтобы метку добавили, а не гадали, почему всё «Прочее»
+          this.logger.warn(`Класс «${name}» из сети не найден в конфиге классов`);
+        }
+      } catch (e: any) {
+        this.logger.warn(`Классификатор не обработал область ${i}: ${e?.message || e}`);
+      }
+    }
+    return done;
+  }
+
   /** Классификация областей, которые классификатор пропустил на прогоне по
    *  зоне: показываем окно размером со вход модели в масштабе 1:1 (аппарат
    *  выглядит как на обучающем тайле) и берём рамку, накрывающую элемент. */
@@ -828,7 +928,7 @@ export class RecognitionService implements OnModuleInit {
         let p = sharp(buf).extract({ left, top, width: w, height: h });
         // добиваем окно до входа модели, а не растягиваем — масштаб 1:1
         if (w < S || h < S) {
-          p = p.extend({ top: 0, left: 0, bottom: S - h, right: S - w, background: { r: 114, g: 114, b: 114 } });
+          p = p.extend({ top: 0, left: 0, bottom: S - h, right: S - w, background: PAD_COLOR });
         }
         const win: Buffer = await p.jpeg({ quality: 92 }).toBuffer();
         const res = await yoloDetect(win, modelPath, { tiles: false });
@@ -1664,6 +1764,26 @@ export class RecognitionService implements OnModuleInit {
     await this.modelsRepo.update(id, { active: true });
     resetYoloSession();
     return this.listModels();
+  }
+
+  /** class_mapping.json к модели: номер выхода классификатора → имя класса.
+   *  Принимаем и массив объектов от Максима, и простой объект {"0": "имя"}. */
+  async setClassMap(id: number, raw: string) {
+    const model = await this.modelsRepo.findOne({ where: { id } });
+    if (!model) throw new NotFoundException('Версия модели не найдена');
+    let names: string[];
+    try {
+      names = parseClassMap(raw);
+    } catch (e: any) {
+      throw new BadRequestException(e?.message || 'Не удалось разобрать файл классов');
+    }
+    if (names.length < 2) throw new BadRequestException('В файле классов меньше двух классов');
+    await this.modelsRepo.update(id, { class_map: raw.slice(0, 200_000) });
+    resetYoloSession();
+    const cfg = await this.getClassConfig();
+    const codes = new Set(cfg.classes.map((c) => c.code));
+    const unknown = names.filter((n) => n && !codes.has(slugFromLsValue(n)));
+    return { classes: names.length, unknown };
   }
 
   /** Роль модели в конвейере и нужна ли ей нарезка на тайлы. */
