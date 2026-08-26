@@ -1548,7 +1548,16 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-drop-sub { font-size: 12.5px; color: var(--muted); margin-bottom: 6px; text-align: center; }
 .recog-doclist { width: min(720px, 100%); background: var(--white); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 .recog-doclist-title { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; padding: 12px 16px 8px; }
-.recog-docitem { display: flex; align-items: center; gap: 12px; padding: 11px 16px; border-top: 1px solid #eee; cursor: pointer; }
+/* шапка списка с поиском и сам список с прокруткой: документов накопились
+   десятки, без ограничения высоты они выдавливали загрузку файла за экран */
+.recog-doclist-head { display: flex; align-items: center; gap: 10px; padding-right: 12px; }
+.recog-doclist-head .recog-doclist-title { flex: 1; }
+.recog-doc-search { width: 220px; border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; font-size: 12.5px; }
+.recog-doclist-scroll { max-height: 340px; overflow-y: auto; }
+.recog-docthumb { width: 46px; height: 34px; flex-shrink: 0; background: #f2f2f2; border: 1px solid var(--border);
+  border-radius: 4px; overflow: hidden; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.recog-docthumb img { width: 100%; height: 100%; object-fit: cover; }
+.recog-docitem { display: flex; align-items: center; gap: 12px; padding: 9px 16px; border-top: 1px solid #eee; cursor: pointer; }
 .recog-docitem:hover { background: var(--selected); }
 .recog-docname { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recog-docmeta { font-size: 12px; color: var(--muted); white-space: nowrap; }

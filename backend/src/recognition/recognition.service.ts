@@ -478,7 +478,13 @@ export class RecognitionService implements OnModuleInit {
       ...(isAdmin ? {} : { where: { owner_id: userId } }),
       order: { id: 'DESC' },
     });
-    if (!isAdmin || !docs.length) return docs.map((d) => ({ ...d, owner_email: '', own: true }));
+    // Миниатюра первой страницы и число рамок: в списке почти все документы
+    // называются image.png (скриншоты), и без картинки найти нужную схему
+    // невозможно — жалоба «нет возможности смотреть предыдущие схемы».
+    const extras = await this.listExtras(docs.map((d) => d.id));
+    const withExtras = (d: RecognitionDocument) => ({ ...d, ...(extras.get(d.id) || { preview_url: null, elements_count: 0 }) });
+
+    if (!isAdmin || !docs.length) return docs.map((d) => ({ ...withExtras(d), owner_email: '', own: true }));
     // подписываем владельца, чтобы было видно, чья схема
     const ids = [...new Set(docs.map((d) => d.owner_id))];
     let emails = new Map<number, string>();
@@ -489,10 +495,48 @@ export class RecognitionService implements OnModuleInit {
       emails = new Map(rows.map((r: any) => [Number(r.id), String(r.email || '')]));
     } catch { /* без email — не критично */ }
     return docs.map((d) => ({
-      ...d,
+      ...withExtras(d),
       owner_email: d.owner_id === userId ? '' : (emails.get(d.owner_id) || `id ${d.owner_id}`),
       own: d.owner_id === userId,
     }));
+  }
+
+  /** Для списка документов: картинка первого листа и сколько рамок размечено */
+  private async listExtras(ids: number[]) {
+    const map = new Map<number, { preview_url: string | null; elements_count: number }>();
+    if (!ids.length) return map;
+    try {
+      const rows = await this.docsRepo.query(
+        `SELECT DISTINCT ON (p.document_id) p.document_id, p.image_file
+           FROM recognition_pages p
+          WHERE p.document_id = ANY($1) AND p.image_file <> ''
+          ORDER BY p.document_id, p.page_index`,
+        [ids],
+      );
+      for (const r of rows) {
+        map.set(Number(r.document_id), {
+          preview_url: r.image_file ? `/api/uploads/${r.image_file}` : null,
+          elements_count: 0,
+        });
+      }
+      const counts = await this.docsRepo.query(
+        `SELECT p.document_id, COUNT(e.id)::int AS n
+           FROM recognition_pages p
+           JOIN recognition_elements e ON e.page_id = p.id
+          WHERE p.document_id = ANY($1)
+          GROUP BY p.document_id`,
+        [ids],
+      );
+      for (const r of counts) {
+        const id = Number(r.document_id);
+        const cur = map.get(id) || { preview_url: null, elements_count: 0 };
+        map.set(id, { ...cur, elements_count: Number(r.n) || 0 });
+      }
+    } catch (e: any) {
+      // список важнее миниатюр: без них он всё равно работает
+      this.logger.warn(`Миниатюры документов не собрались: ${e?.message || e}`);
+    }
+    return map;
   }
 
   async getDocument(id: number, userId: number) {

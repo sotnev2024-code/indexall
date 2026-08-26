@@ -204,6 +204,8 @@ export default function RecognitionPage() {
   /* null — ещё грузится; [] — пусто */
   const [docs, setDocs] = useState<any[] | null>(null);
   const [docsError, setDocsError] = useState(false);
+  /** отбор в списке документов: имён «image.png» накопились десятки */
+  const [docQuery, setDocQuery] = useState('');
   const [clsCfg, setClsCfg] = useState<RecogClassConfig>(DEFAULT_CFG);
   const [doc, setDoc] = useState<RecogDocument | null>(null);
   const [pageId, setPageId] = useState<number | null>(null);
@@ -319,6 +321,16 @@ export default function RecognitionPage() {
   }, [doc?.id, pageId]);
 
   /* динамическая таксономия: код класса → карточка */
+  /** документы после отбора по строке поиска (имя или владелец) */
+  const visibleDocs = useMemo(() => {
+    const q = docQuery.trim().toLowerCase();
+    const list = docs || [];
+    if (!q) return list;
+    return list.filter((d: any) =>
+      String(d.filename || '').toLowerCase().includes(q) ||
+      String(d.owner_email || '').toLowerCase().includes(q));
+  }, [docs, docQuery]);
+
   const classByCode = useMemo(
     () => new Map<string, RecogClass>(clsCfg.classes.map((c) => [c.code, c])),
     [clsCfg],
@@ -987,7 +999,21 @@ export default function RecognitionPage() {
           )}
 
           <div className="recog-doclist">
-            <div className="recog-doclist-title">Мои документы</div>
+            <div className="recog-doclist-head">
+              <span className="recog-doclist-title">
+                Мои документы{docs?.length ? ` (${docs.length})` : ''}
+              </span>
+              {/* поиск: почти все схемы называются image.png, и без отбора
+                  нужную в списке не найти (жалоба 26.08) */}
+              {(docs?.length || 0) > 6 && (
+                <input
+                  className="recog-doc-search"
+                  placeholder="Поиск по названию…"
+                  value={docQuery}
+                  onChange={(e) => setDocQuery(e.target.value)}
+                />
+              )}
+            </div>
             {docsError && (
               <div className="recog-doclist-error">
                 Список не загрузился (подробности в консоли браузера, F12).
@@ -998,11 +1024,24 @@ export default function RecognitionPage() {
             {!docsError && docs !== null && docs.length === 0 && (
               <div className="recog-doclist-note">Документов пока нет — загрузите первый файл ниже.</div>
             )}
-            {(docs || []).map((d) => (
+            {!docsError && docs !== null && docs.length > 0 && visibleDocs.length === 0 && (
+              <div className="recog-doclist-note">По запросу «{docQuery}» ничего не нашлось</div>
+            )}
+            <div className="recog-doclist-scroll">
+            {visibleDocs.map((d) => (
                 <div key={d.id} className="recog-docitem" onClick={() => reloadDoc(d.id).then(() => { setPageId(null); setSelId(null); })}>
+                  {/* миниатюра первого листа: имена у скриншотов одинаковые,
+                      узнать схему можно только по картинке */}
+                  <span className="recog-docthumb">
+                    {d.preview_url
+                      ? <img src={`${API_ORIGIN}${d.preview_url}`} alt="" loading="lazy" />
+                      : <i>…</i>}
+                  </span>
                   <span className="recog-docname">{d.filename}</span>
                   <span className="recog-docmeta">
-                    {d.page_count} стр. · {new Date(d.createdAt).toLocaleDateString('ru-RU')}
+                    {d.page_count} стр.
+                    {d.elements_count ? ` · рамок: ${d.elements_count}` : ''}
+                    {' · '}{new Date(d.createdAt).toLocaleDateString('ru-RU')}
                     {d.owner_email ? ` · ${d.owner_email}` : ''}
                   </span>
                   <button
@@ -1016,6 +1055,7 @@ export default function RecognitionPage() {
                   ><Icon.cross /></button>
                 </div>
               ))}
+            </div>
           </div>
 
           <div
