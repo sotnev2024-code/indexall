@@ -1582,7 +1582,10 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
 .recog-docswitch-item b { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recog-docswitch-item span { font-size: 11px; color: var(--muted); }
 .recog-docswitch-empty { font-size: 12px; color: var(--muted); padding: 8px; }
-.recog-pageitem { display: flex; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: 8px; padding: 6px; cursor: pointer; background: var(--white); }
+/* карточка листа: миниатюра, описание и кнопки в строку, а «Открыть
+   спецификацию» переносится на свою строку — без переноса она вставала
+   поверх иконок (замечание Максима 26.08) */
+.recog-pageitem { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border: 1px solid var(--border); border-radius: 8px; padding: 6px; cursor: pointer; background: var(--white); }
 .recog-pageitem:hover { border-color: var(--text); }
 .recog-pageitem.on { background: var(--selected); border-color: var(--yellow); }
 .recog-pagethumb { width: 52px; height: 66px; background: #f0f0f0; border-radius: 4px; overflow: hidden; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
@@ -1759,7 +1762,9 @@ input:focus, select:focus { border-color: var(--yellow) !important; }
   margin-top: 0; padding: 2px 0 10px; border-bottom: 1px solid var(--border); }
 .recog-insp-btns-top .btn-primary { flex: 1; }
 /* кнопка перехода к спецификации в карточке листа */
-.recog-page-spec { grid-column: 1 / -1; width: 100%; margin-top: 8px; font-size: 12.5px; padding: 8px; }
+/* flex-basis, а не grid-column: карточка выше — флекс, и правило про сетку
+   не действовало, поэтому кнопка лезла в строку с иконками */
+.recog-page-spec { flex: 0 0 100%; width: 100%; margin-top: 2px; font-size: 12.5px; padding: 8px 6px; white-space: nowrap; }
 .recog-colorline { display: flex; align-items: center; gap: 8px; }
 .recog-colorline input[type="color"] { width: 44px; height: 30px; border: 1px solid var(--border); border-radius: 6px; background: var(--white); padding: 2px; cursor: pointer; }
 .recog-insp-btns { display: flex; gap: 8px; margin-top: 14px; }

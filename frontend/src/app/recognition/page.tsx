@@ -2454,7 +2454,7 @@ function ModelPanel() {
                 <input type="file" accept=".json,application/json" hidden
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) sendClassMap(m.id, f); e.target.value = ''; }} />
                 <span className={`recog-classmap ${m.class_map ? 'on' : ''}`}>
-                  {m.class_map ? 'классы ✓' : 'классы…'}
+                  {m.class_map ? 'классы ✓' : '+ файл классов'}
                 </span>
               </label>
               <span className="recog-model-date">{new Date(m.createdAt).toLocaleString('ru-RU')}</span>
