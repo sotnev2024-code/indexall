@@ -998,6 +998,30 @@ export default function RecognitionPage() {
             <div className="recog-warn">Распознавание пока не настроено администратором — загрузка и разметка работают, автораспознавание будет недоступно.</div>
           )}
 
+          {/* Строка последних схем — первое, что видно на экране (просьба
+              27.08). Полный список с поиском остаётся ниже: он нужен, когда
+              документов уже сотня, а тут — продолжить вчерашнюю работу. */}
+          {!!(docs && docs.length) && (
+            <div className="recog-recent">
+              <div className="recog-recent-title">Продолжить работу</div>
+              <div className="recog-recent-row">
+                {(docs || []).slice(0, 12).map((d: any) => (
+                  <button key={d.id} className="recog-recent-card"
+                    title={`${d.filename} · ${d.page_count} стр.`}
+                    onClick={() => reloadDoc(d.id).then(() => { setPageId(null); setSelId(null); })}>
+                    <span className="recog-recent-thumb">
+                      {d.preview_url ? <img src={`${API_ORIGIN}${d.preview_url}`} alt="" loading="lazy" /> : <i>…</i>}
+                    </span>
+                    <span className="recog-recent-name">{d.filename}</span>
+                    <span className="recog-recent-meta">
+                      {d.page_count} стр.{d.elements_count ? ` · рамок ${d.elements_count}` : ''}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="recog-doclist">
             <div className="recog-doclist-head">
               <span className="recog-doclist-title">
