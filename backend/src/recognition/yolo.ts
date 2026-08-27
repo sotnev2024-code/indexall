@@ -48,6 +48,12 @@ const TILES_ENABLED = /^(1|true|on|yes)$/i.test((process.env.RECOGNITION_YOLO_TI
  */
 const MAX_TILES = parseInt(process.env.RECOGNITION_YOLO_MAX_TILES || '36', 10) || 36;
 const TILE_OVERLAP = 0.2;
+/**
+ * Второй проход детектора со сдвигом сетки тайлов на половину тайла
+ * (ТЗ Максима 27.08). Стоит вдвое дороже по времени, поэтому выключаемо:
+ *   RECOGNITION_YOLO_HALF_SHIFT=0
+ */
+const HALF_SHIFT_PASS = !/^(0|false|off|no)$/i.test((process.env.RECOGNITION_YOLO_HALF_SHIFT || '').trim());
 /** Чем добиваем картинку до входа модели. Схемы — чёрным по белому, поэтому
  *  поле белое: серая заливка для модели инородна, а Максим просил именно
  *  «дорисовать белые области с сохранением пропорций» (19.08). */
@@ -339,24 +345,39 @@ export async function yoloDetect(
     }
   } else {
     // ── тайлы: масштаб сохраняется, мелкие элементы не теряются ──
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const left = Math.min(Math.max(0, c * step), Math.max(0, srcW - Math.min(S, srcW)));
-        const top = Math.min(Math.max(0, r * step), Math.max(0, srcH - Math.min(S, srcH)));
-        const w = Math.min(S, srcW - left);
-        const h = Math.min(S, srcH - top);
-        if (w < 8 || h < 8) continue;
-        const raw: Buffer = await sharp(work)
-          .extract({ left, top, width: w, height: h })
-          .extend({ top: 0, left: 0, bottom: S - h, right: S - w,
-            background: PAD_COLOR })
-          .removeAlpha().raw().toBuffer();
+    //
+    // Проход второй — со смещением сетки на половину тайла (ТЗ Максима 27.08):
+    // элемент, попавший на стык тайлов, в первом проходе виден только
+    // наполовину и часто теряется; во втором он оказывается в середине.
+    // Дубли снимает NMS ниже — остаётся рамка с наибольшей уверенностью.
+    const runGrid = async (offX: number, offY: number) => {
+      for (let top0 = offY; top0 < srcH; top0 += step) {
+        for (let left0 = offX; left0 < srcW; left0 += step) {
+          // край листа: прижимаем тайл к границе, чтобы не резать пополам
+          const left = Math.min(Math.max(0, left0), Math.max(0, srcW - Math.min(S, srcW)));
+          const top = Math.min(Math.max(0, top0), Math.max(0, srcH - Math.min(S, srcH)));
+          const w = Math.min(S, srcW - left);
+          const h = Math.min(S, srcH - top);
+          if (w < 8 || h < 8) continue;
+          const raw: Buffer = await sharp(work)
+            .extract({ left, top, width: w, height: h })
+            .extend({ top: 0, left: 0, bottom: S - h, right: S - w,
+              background: PAD_COLOR })
+            .removeAlpha().raw().toBuffer();
 
-        for (const d of await runTile(ort, session, raw, S, names)) {
-          pushBox(found, names, d.cls, d.conf,
-            d.x1 + left, d.y1 + top, d.x2 + left, d.y2 + top, srcW, srcH);
+          for (const d of await runTile(ort, session, raw, S, names)) {
+            pushBox(found, names, d.cls, d.conf,
+              d.x1 + left, d.y1 + top, d.x2 + left, d.y2 + top, srcW, srcH);
+          }
         }
       }
+    };
+
+    await runGrid(0, 0);
+    // второй проход нужен, только если сетка вообще больше одного тайла
+    if (HALF_SHIFT_PASS && (cols > 1 || rows > 1)) {
+      const half = Math.round(S / 2);
+      if (srcW > half || srcH > half) await runGrid(half, half);
     }
   }
 
