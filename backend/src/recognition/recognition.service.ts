@@ -456,48 +456,22 @@ export class RecognitionService implements OnModuleInit {
     await this.docsRepo.update(doc.id, { status: 'ready' });
   }
 
-  /** Админ? Кэш на минуту — используется для доступа к чужим схемам:
-   *  модуль общий, датасет один на всех, документы грузят несколько человек. */
-  private adminCache = new Map<number, { v: boolean; at: number }>();
-  private async isAdminUser(userId: number): Promise<boolean> {
-    const c = this.adminCache.get(userId);
-    if (c && Date.now() - c.at < 60_000) return c.v;
-    let v = false;
-    try {
-      const rows = await this.docsRepo.query(`SELECT plan FROM users WHERE id = $1`, [userId]);
-      v = String(rows?.[0]?.plan || '') === 'admin';
-    } catch { /* не смогли определить — считаем обычным пользователем */ }
-    this.adminCache.set(userId, { v, at: Date.now() });
-    return v;
-  }
 
-  /** Список документов. Админу видны все схемы (с пометкой владельца). */
+  /** Список документов пользователя. Только свои: чужие схемы в продакшене
+   *  не показываем и не открываем (подготовка к запуску, 27.08). */
   async listDocuments(userId: number) {
-    const isAdmin = await this.isAdminUser(userId);
     const docs = await this.docsRepo.find({
-      ...(isAdmin ? {} : { where: { owner_id: userId } }),
+      where: { owner_id: userId },
       order: { id: 'DESC' },
     });
-    // Миниатюра первой страницы и число рамок: в списке почти все документы
-    // называются image.png (скриншоты), и без картинки найти нужную схему
-    // невозможно — жалоба «нет возможности смотреть предыдущие схемы».
+    // Миниатюра первой страницы и число рамок: почти все документы называются
+    // image.png (скриншоты), и без картинки нужную схему не найти.
     const extras = await this.listExtras(docs.map((d) => d.id));
-    const withExtras = (d: RecognitionDocument) => ({ ...d, ...(extras.get(d.id) || { preview_url: null, elements_count: 0 }) });
-
-    if (!isAdmin || !docs.length) return docs.map((d) => ({ ...withExtras(d), owner_email: '', own: true }));
-    // подписываем владельца, чтобы было видно, чья схема
-    const ids = [...new Set(docs.map((d) => d.owner_id))];
-    let emails = new Map<number, string>();
-    try {
-      const rows = await this.docsRepo.query(
-        `SELECT id, email FROM users WHERE id = ANY($1)`, [ids],
-      );
-      emails = new Map(rows.map((r: any) => [Number(r.id), String(r.email || '')]));
-    } catch { /* без email — не критично */ }
     return docs.map((d) => ({
-      ...withExtras(d),
-      owner_email: d.owner_id === userId ? '' : (emails.get(d.owner_id) || `id ${d.owner_id}`),
-      own: d.owner_id === userId,
+      ...d,
+      ...(extras.get(d.id) || { preview_url: null, elements_count: 0 }),
+      owner_email: '',
+      own: true,
     }));
   }
 
@@ -1493,7 +1467,8 @@ export class RecognitionService implements OnModuleInit {
     const page = await this.pagesRepo.findOne({ where: { sheet_id: sheetId } });
     if (!page) return { found: false };
     const doc = await this.docsRepo.findOne({ where: { id: page.document_id } });
-    if (!doc || (doc.owner_id !== userId && !(await this.isAdminUser(userId)))) return { found: false };
+    // только своя схема: кнопка «К схеме» не должна уводить в чужой документ
+    if (!doc || doc.owner_id !== userId) return { found: false };
     return {
       found: true,
       documentId: doc.id,
@@ -1938,13 +1913,16 @@ export class RecognitionService implements OnModuleInit {
     };
   }
 
+  /** Схема принадлежит только своему владельцу.
+   *
+   *  На обкатке админы открывали чужие схемы — так было удобно разбирать
+   *  вопросы Максима. Для продакшена это закрыто: чужие документы не видны в
+   *  списке и не открываются по прямой ссылке. Общий датасет для обучения
+   *  собирается на сервере и от этого не зависит. */
   private async checkDocOwner(id: number, userId: number) {
     const doc = await this.docsRepo.findOne({ where: { id } });
     if (!doc) throw new NotFoundException('Документ не найден');
-    // админы работают с общим набором схем (общий датасет для обучения)
-    if (doc.owner_id !== userId && !(await this.isAdminUser(userId))) {
-      throw new ForbiddenException('Нет доступа');
-    }
+    if (doc.owner_id !== userId) throw new ForbiddenException('Нет доступа');
     return doc;
   }
 

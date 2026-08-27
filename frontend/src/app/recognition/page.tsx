@@ -327,8 +327,7 @@ export default function RecognitionPage() {
     const list = docs || [];
     if (!q) return list;
     return list.filter((d: any) =>
-      String(d.filename || '').toLowerCase().includes(q) ||
-      String(d.owner_email || '').toLowerCase().includes(q));
+      String(d.filename || '').toLowerCase().includes(q));
   }, [docs, docQuery]);
 
   const classByCode = useMemo(
@@ -1070,7 +1069,6 @@ export default function RecognitionPage() {
                     {d.page_count} стр.
                     {d.elements_count ? ` · рамок: ${d.elements_count}` : ''}
                     {' · '}{new Date(d.createdAt).toLocaleDateString('ru-RU')}
-                    {d.owner_email ? ` · ${d.owner_email}` : ''}
                   </span>
                   <button
                     className="recog-docdel" title="Удалить документ"
@@ -1139,7 +1137,6 @@ export default function RecognitionPage() {
                         <b>{d.filename}</b>
                         <span>
                           {d.page_count} стр. · {new Date(d.createdAt).toLocaleDateString('ru-RU')}
-                          {d.owner_email ? ` · ${d.owner_email}` : ''}
                         </span>
                       </button>
                     ))}
