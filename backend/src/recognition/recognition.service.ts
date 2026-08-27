@@ -632,14 +632,40 @@ export class RecognitionService implements OnModuleInit {
       && !!(await this.activeModel(mode === 'twostage' ? 'detector' : 'single'))?.tiled;
     const maxEdgeLimit = tiledModel ? DETECT_MAX_EDGE_TILED : DETECT_MAX_EDGE;
 
-    // Кроп зоны из рендера страницы
+    // ── Маленькая зона: расширяем её живым фрагментом листа ──
+    //
+    // Максим (19.08) просил добивать выделенное белым полем до размера,
+    // нужного модели. Замер на его же схеме показал, что белое поле не
+    // помогает совсем: кроп 83×83 с белой подложкой — 0 рамок и в углу, и по
+    // центру холста; то же место, взятое окном 300×300 прямо со схемы, — 3
+    // рамки, окном 1280×1280 — 11. Модели нужен не фон, а окружение, на
+    // котором её учили. Поэтому зону мельче входа модели расширяем реальным
+    // куском листа вокруг неё, а из найденного оставляем только то, что
+    // попало в выделенную пользователем область.
+    let crop = { left, top, width, height };
+    let modelSide = 0;
+    if (mode === 'yolo' || mode === 'twostage') {
+      try {
+        modelSide = await modelInputSize(await this.activeModelPath(mode === 'twostage' ? 'detector' : 'single'));
+      } catch { /* размер входа не прочитался — работаем как раньше */ }
+    }
+    const expanded = modelSide > 0 && Math.max(width, height) < modelSide;
+    if (expanded) {
+      const side = Math.min(modelSide, page.width, page.height);
+      const cx = left + width / 2, cy = top + height / 2;
+      const l = Math.max(0, Math.min(Math.round(cx - side / 2), page.width - side));
+      const t = Math.max(0, Math.min(Math.round(cy - side / 2), page.height - side));
+      crop = { left: l, top: t, width: Math.min(side, page.width - l), height: Math.min(side, page.height - t) };
+    }
+
+    // Кроп из рендера страницы
     const sharp = require('sharp');
-    let pipeline = sharp(join(UPLOAD_DIR, page.image_file)).extract({ left, top, width, height });
-    const maxEdge = Math.max(width, height);
+    let pipeline = sharp(join(UPLOAD_DIR, page.image_file)).extract(crop);
+    const maxEdge = Math.max(crop.width, crop.height);
     if (maxEdge > maxEdgeLimit) {
       pipeline = pipeline.resize({
-        width: width >= height ? maxEdgeLimit : undefined,
-        height: height > width ? maxEdgeLimit : undefined,
+        width: crop.width >= crop.height ? maxEdgeLimit : undefined,
+        height: crop.height > crop.width ? maxEdgeLimit : undefined,
       });
     } else if (maxEdge < 640 && !tiledModel) {
       // Крошечная зона (один элемент): увеличиваем, чтобы LLM читала подписи.
@@ -647,8 +673,8 @@ export class RecognitionService implements OnModuleInit {
       // обучающих тайлов, поэтому зона уходит в исходном масштабе и
       // добивается полем уже в yoloDetect.
       pipeline = pipeline.resize({
-        width: width >= height ? 640 : undefined,
-        height: height > width ? 640 : undefined,
+        width: crop.width >= crop.height ? 640 : undefined,
+        height: crop.height > crop.width ? 640 : undefined,
         kernel: 'lanczos3',
       });
     }
@@ -708,21 +734,45 @@ export class RecognitionService implements OnModuleInit {
       (found.length ? ` (классы: ${[...new Set(found.map((f) => f.klass))].join(', ')})` : ''),
     );
 
-    // bbox кропа → bbox страницы
-    const toSave = found.map((el) => ({
+    // bbox кропа → bbox страницы. Считаем от КРОПА, а не от выделения: при
+    // расширении маленькой зоны это разные прямоугольники.
+    const cf = {
+      x: crop.left / page.width, y: crop.top / page.height,
+      w: crop.width / page.width, h: crop.height / page.height,
+    };
+    let mapped = found.map((el) => ({
       page_id: page.id,
       klass: this.resolveKlass(el.klass, cfg),
       designation: String(el.designation || '').slice(0, 60),
       fields: this.sanitizeFields(el.fields),
       bbox: {
-        x: z.x + Math.max(0, Math.min(1, el.bbox[0])) * z.w,
-        y: z.y + Math.max(0, Math.min(1, el.bbox[1])) * z.h,
-        w: Math.max(0.001, Math.min(1, el.bbox[2])) * z.w,
-        h: Math.max(0.001, Math.min(1, el.bbox[3])) * z.h,
+        x: cf.x + Math.max(0, Math.min(1, el.bbox[0])) * cf.w,
+        y: cf.y + Math.max(0, Math.min(1, el.bbox[1])) * cf.h,
+        w: Math.max(0.001, Math.min(1, el.bbox[2])) * cf.w,
+        h: Math.max(0.001, Math.min(1, el.bbox[3])) * cf.h,
       },
       confidence: Math.max(0, Math.min(1, Number(el.confidence) || 0)),
       status: 'auto',
     }));
+
+    if (expanded) {
+      // из расширенного окна берём только то, что пользователь и обводил:
+      // центр рамки внутри выделения либо она попала в него большей частью
+      const before = mapped.length;
+      mapped = mapped.filter((el) => {
+        const b = el.bbox;
+        const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+        if (cx >= z.x && cx <= z.x + z.w && cy >= z.y && cy <= z.y + z.h) return true;
+        const ix = Math.max(0, Math.min(b.x + b.w, z.x + z.w) - Math.max(b.x, z.x));
+        const iy = Math.max(0, Math.min(b.y + b.h, z.y + z.h) - Math.max(b.y, z.y));
+        return b.w * b.h > 0 && (ix * iy) / (b.w * b.h) >= 0.35;
+      });
+      this.logger.log(
+        `Зона мельче входа модели: расширена до ${crop.width}×${crop.height} px, ` +
+        `в выделение попало ${mapped.length} из ${before}`,
+      );
+    }
+    const toSave = mapped;
     const saved = toSave.length ? await this.elementsRepo.save(toSave) : [];
     return { elements: saved };
   }
