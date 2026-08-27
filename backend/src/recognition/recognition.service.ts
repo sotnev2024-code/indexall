@@ -643,6 +643,8 @@ export class RecognitionService implements OnModuleInit {
     // куском листа вокруг неё, а из найденного оставляем только то, что
     // попало в выделенную пользователем область.
     let crop = { left, top, width, height };
+    /** сколько элементов нашлось рядом, но не попало в выделение */
+    let nearby = 0;
     let modelSide = 0;
     if (mode === 'yolo' || mode === 'twostage') {
       try {
@@ -771,10 +773,21 @@ export class RecognitionService implements OnModuleInit {
         `Зона мельче входа модели: расширена до ${crop.width}×${crop.height} px, ` +
         `в выделение попало ${mapped.length} из ${before}`,
       );
+      // Молчать об этом нельзя: пользователь видит «ничего не нашлось» и
+      // считает, что сломалось распознавание, хотя аппараты просто рядом с
+      // выделением, а не внутри (разбор 27.08 — выделение легло на пустое
+      // поле, а шесть автоматов нашлись чуть ниже).
+      if (!mapped.length && before > 0) {
+        nearby = before;
+      }
     }
     const toSave = mapped;
     const saved = toSave.length ? await this.elementsRepo.save(toSave) : [];
-    return { elements: saved };
+    return {
+      elements: saved,
+      // подсказка фронту: рамки есть, но за границами выделения
+      hint: nearby ? `Рядом с выделением найдено элементов: ${nearby}, но за его границами. Обведите область чуть шире.` : undefined,
+    };
   }
 
   // ── Режимы распознавания ──────────────────────────────────────

@@ -729,8 +729,12 @@ export default function RecognitionPage() {
     try {
       const { data } = await recognitionApi.detect(page.id, zone, ac.signal);
       setDoc((d) => d ? { ...d, elements: [...d.elements, ...data.elements] } : d);
-      if (data.elements.length === 0) toast('В выбранной зоне ничего не нашлось — попробуйте другую область');
-      else toast.success(`Распознано элементов: ${data.elements.length}`);
+      if (data.elements.length === 0) {
+        // сервер подсказывает, если аппараты нашлись рядом с выделением:
+        // без этого пустой результат читается как «распознавание сломалось»
+        toast((data as any).hint || 'В выбранной зоне ничего не нашлось — попробуйте другую область',
+          { duration: (data as any).hint ? 7000 : 4000 });
+      } else toast.success(`Распознано элементов: ${data.elements.length}`);
     } catch (e: any) {
       // отмена по Esc/кнопке — это не ошибка
       if (e?.code === 'ERR_CANCELED' || e?.name === 'CanceledError' || ac.signal.aborted) {
