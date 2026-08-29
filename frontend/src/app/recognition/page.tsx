@@ -775,7 +775,9 @@ export default function RecognitionPage() {
       if (status === 'confirmed') {
         toast.success(pg?.sheet_id ? 'Подтверждено — лист спецификации обновлён' : 'Подтверждено — попадёт в лист спецификации');
       }
-      if (status === 'confirmed' || status === 'corrected') silentSheetSync(el);
+      if (status === 'auto') toast('Подтверждение снято — рамка снова жёлтая');
+      // снятие подтверждения тоже правит лист: элемент из него уходит
+      if (status) silentSheetSync(el);
     } catch { toast.error('Не удалось сохранить'); }
   }
 
@@ -1619,6 +1621,8 @@ function InspectorPanel({ el, cfg, catalogOpen, onHeadPointerDown, onClose, onSa
     return { klass, designation, fields: out, color };
   };
   const warn = el.confidence > 0 && el.confidence < LOW_CONF && el.status === 'auto';
+  /** рамка уже подтверждена или исправлена — кнопка меняет смысл на обратный */
+  const done = el.status !== 'auto';
 
   const productBlock = el.product_name ? (
     <div className="recog-product">
@@ -1659,7 +1663,16 @@ function InspectorPanel({ el, cfg, catalogOpen, onHeadPointerDown, onClose, onSa
           «Сохранить» убрана: она отличалась от «Подтвердить» только статусом.
           Блок липкий — остаётся на месте при прокрутке полей. */}
       <div className="recog-insp-btns recog-insp-btns-top">
-        <button className="btn-primary" onClick={() => onSave(collect(), 'confirmed')}>Подтвердить</button>
+        {/* У подтверждённой рамки кнопка зелёная и называется «Подтверждено»
+            (правка Максима 29.08): нажатие снимает подтверждение — рамка на
+            схеме снова становится жёлтой, кнопка — жёлтой «Подтвердить». */}
+        <button
+          className={done ? 'recog-insp-confirmed' : 'btn-primary'}
+          title={done ? 'Снять подтверждение — рамка вернётся в жёлтые' : 'Подтвердить рамку'}
+          onClick={() => onSave(collect(), done ? 'auto' : 'confirmed')}
+        >
+          {done ? 'Подтверждено' : 'Подтвердить'}
+        </button>
         <button className="recog-insp-del" style={{ marginTop: 0 }} onClick={onDelete}
           title="Удалить рамку (клавиша Delete)">Удалить</button>
       </div>
