@@ -732,17 +732,44 @@ export class RecognitionService implements OnModuleInit {
     }));
 
     if (expanded) {
+      const all = mapped;             // список до отбора — нужен запасному пути
       // из расширенного окна берём только то, что пользователь и обводил:
       // центр рамки внутри выделения либо она попала в него большей частью
       const before = mapped.length;
+      // Насколько рамка попала в выделение
+      const overlap = (b: Bbox) => {
+        const ix = Math.max(0, Math.min(b.x + b.w, z.x + z.w) - Math.max(b.x, z.x));
+        const iy = Math.max(0, Math.min(b.y + b.h, z.y + z.h) - Math.max(b.y, z.y));
+        return b.w * b.h > 0 ? (ix * iy) / (b.w * b.h) : 0;
+      };
+      // Допуск на промах детектора: он смещает рамку вверх-влево примерно на
+      // четверть её размера (замер на схемах Максима), поэтому у обведённого
+      // вплотную аппарата центр рамки вылезает за выделение. Считаем попавшим
+      // и такой случай — иначе выделение одного элемента почти всегда пустое.
       mapped = mapped.filter((el) => {
         const b = el.bbox;
         const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
-        if (cx >= z.x && cx <= z.x + z.w && cy >= z.y && cy <= z.y + z.h) return true;
-        const ix = Math.max(0, Math.min(b.x + b.w, z.x + z.w) - Math.max(b.x, z.x));
-        const iy = Math.max(0, Math.min(b.y + b.h, z.y + z.h) - Math.max(b.y, z.y));
-        return b.w * b.h > 0 && (ix * iy) / (b.w * b.h) >= 0.35;
+        const mx = b.w * 0.35, my = b.h * 0.35;
+        const inside = cx >= z.x - mx && cx <= z.x + z.w + mx && cy >= z.y - my && cy <= z.y + z.h + my;
+        return inside || overlap(b) >= 0.25;
       });
+      // Обвели один аппарат, а рамка детектора уехала целиком: берём ближайшую
+      // к центру выделения, если она рядом — не дальше самого выделения.
+      if (!mapped.length && before > 0) {
+        const zcx = z.x + z.w / 2, zcy = z.y + z.h / 2;
+        const reach = Math.max(z.w, z.h);
+        const near = all
+          .map((el) => {
+            const b = el.bbox;
+            return { el, d: Math.hypot(b.x + b.w / 2 - zcx, b.y + b.h / 2 - zcy) };
+          })
+          .filter((r) => r.d <= reach)
+          .sort((a, b) => a.d - b.d)[0];
+        if (near) {
+          mapped = [near.el];
+          this.logger.log('Ни одна рамка не попала в выделение — взяли ближайшую к его центру');
+        }
+      }
       this.logger.log(
         `Зона мельче входа модели: расширена до ${crop.width}×${crop.height} px, ` +
         `в выделение попало ${mapped.length} из ${before}`,
@@ -906,7 +933,9 @@ export class RecognitionService implements OnModuleInit {
         // рамка классификатора точнее рамки детектора (проверено на схемах
         // Максима: детектор смещает её вверх-влево на четверть) — берём её
         out[i].bbox = [c.bbox.x, c.bbox.y, c.bbox.w, c.bbox.h];
-        out[i].confidence = Math.max(out[i].confidence, c.conf);
+        // уверенность по слабейшей ступени: softmax классификатора почти
+        // всегда даёт 100%, и по нему нельзя отличить надёжное от сомнительного
+        out[i].confidence = Math.min(out[i].confidence, c.conf);
         fromZone++;
       } else {
         rest.push(i);
@@ -965,7 +994,10 @@ export class RecognitionService implements OnModuleInit {
         const slug = name ? slugFromLsValue(name) : '';
         if (slug && byCode.has(slug)) {
           out[i].klass = slug;
-          out[i].confidence = top1.conf;
+          // не подменяем число детектора: у сети-классификатора softmax
+          // насыщается (замер: 100,00% у всех шести проверенных кропов), и
+          // серый цвет «уверенность ниже 0,7» переставал срабатывать вообще
+          out[i].confidence = Math.min(out[i].confidence, top1.conf);
           done++;
         } else if (name) {
           // класс сети известен, а в конфиге такой метки нет — видно в логе,
@@ -1022,7 +1054,7 @@ export class RecognitionService implements OnModuleInit {
         }
         if (best && bs >= 0.2) {
           out[i].klass = this.mapKlass(best, cfg);
-          out[i].confidence = Math.max(out[i].confidence, best.conf);
+          out[i].confidence = Math.min(out[i].confidence, best.conf);
           done++;
         }
       } catch (e: any) {
