@@ -733,7 +733,11 @@ export default function RecognitionPage() {
         // без этого пустой результат читается как «распознавание сломалось»
         toast((data as any).hint || 'В выбранной зоне ничего не нашлось — попробуйте другую область',
           { duration: (data as any).hint ? 7000 : 4000 });
-      } else toast.success(`Распознано элементов: ${data.elements.length}`);
+      } else {
+        // сколько повторных рамок отсеклось — иначе счёт «найдено» непонятен
+        const d = (data as any).duplicates;
+        toast.success(`Распознано элементов: ${data.elements.length}` + (d ? ` · повторных пропущено: ${d}` : ''));
+      }
     } catch (e: any) {
       // отмена по Esc/кнопке — это не ошибка
       if (e?.code === 'ERR_CANCELED' || e?.name === 'CanceledError' || ac.signal.aborted) {

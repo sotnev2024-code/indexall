@@ -782,12 +782,34 @@ export class RecognitionService implements OnModuleInit {
         nearby = before;
       }
     }
-    const toSave = mapped;
+    // Дубли (просьба Максима 30.08): он обводит участок повторно, чтобы
+    // добавить пропущенный аппарат, и уже размеченные находятся заново —
+    // поверх старых ложатся вторые рамки. Считаем дублем пересечение больше
+    // половины меньшей из двух рамок: так ловится и «новая внутри старой»,
+    // и «старая внутри новой».
+    const existing = await this.elementsRepo.find({ where: { page_id: page.id } });
+    const isDuplicate = (b: Bbox) => existing.some((e) => {
+      const o = e.bbox as Bbox;
+      if (!o) return false;
+      const ix = Math.max(0, Math.min(b.x + b.w, o.x + o.w) - Math.max(b.x, o.x));
+      const iy = Math.max(0, Math.min(b.y + b.h, o.y + o.h) - Math.max(b.y, o.y));
+      const inter = ix * iy;
+      const min = Math.min(b.w * b.h, o.w * o.h);
+      return min > 0 && inter / min > 0.5;
+    });
+    const toSave = mapped.filter((el) => !isDuplicate(el.bbox));
+    const dups = mapped.length - toSave.length;
+    if (dups) this.logger.log(`Пропущено дублей (пересечение >50% с уже размеченными): ${dups}`);
     const saved = toSave.length ? await this.elementsRepo.save(toSave) : [];
     return {
       elements: saved,
-      // подсказка фронту: рамки есть, но за границами выделения
-      hint: nearby ? `Рядом с выделением найдено элементов: ${nearby}, но за его границами. Обведите область чуть шире.` : undefined,
+      // подсказка фронту: почему рамок нет или их меньше, чем нашлось
+      hint: nearby
+        ? `Рядом с выделением найдено элементов: ${nearby}, но за его границами. Обведите область чуть шире.`
+        : dups && !saved.length
+          ? `Здесь уже размечено: повторных рамок не добавлено (${dups}).`
+          : undefined,
+      duplicates: dups || undefined,
     };
   }
 
