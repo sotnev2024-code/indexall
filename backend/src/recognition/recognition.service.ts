@@ -36,6 +36,7 @@ import {
   yoloDetect, resetYoloSession, readModelClassNames, yoloSettings,
   modelInputSize, modelKind, classifyImage, YoloBox,
 } from './yolo';
+import { ocrImage, ocrAvailable, ocrVersion, OcrPiece } from './ocr';
 
 const execFileAsync = promisify(execFile);
 
@@ -67,6 +68,16 @@ const DETECT_MAX_EDGE = 2200;
 /** То же для тайловых моделей: масштаб 1:1 важнее размера картинки, а LLM
  *  в этих режимах не участвует — ограничение провайдера не действует. */
 const DETECT_MAX_EDGE_TILED = parseInt(process.env.RECOGNITION_MAX_EDGE_TILED || '4400', 10) || 4400;
+/**
+ * OCR вокруг найденных элементов (ТЗ Максима 27.08, пункт 1). По умолчанию
+ * выключен, чтобы включение было отдельным решением: RECOGNITION_OCR=1.
+ * Отступ вокруг рамки — RECOGNITION_OCR_PAD, по умолчанию 200 px, как просил.
+ */
+const OCR_ENABLED = /^(1|true|on|yes)$/i.test((process.env.RECOGNITION_OCR || '').trim());
+const OCR_PAD = parseInt(process.env.RECOGNITION_OCR_PAD || '200', 10) || 200;
+/** Потолок на один прогон: OCR идёт поэлементно, на слабом сервере это время */
+const OCR_MAX_ELEMENTS = parseInt(process.env.RECOGNITION_OCR_MAX || '40', 10) || 40;
+
 /** Поле, которым добиваем область до входа модели — белое, как бумага схемы */
 const PAD_COLOR = { r: 255, g: 255, b: 255 };
 
@@ -199,6 +210,12 @@ export class RecognitionService implements OnModuleInit {
           role: m.role || 'single', file: m.orig_name, tiled: !!m.tiled,
         })),
         settings: yoloSettings(),
+      },
+      // состояние OCR: включён ли, каким движком и с каким полем вокруг рамки
+      ocr: {
+        enabled: OCR_ENABLED,
+        pad_px: OCR_PAD,
+        engine: await ocrVersion(),
       },
       probe: null as any,
     };
@@ -800,6 +817,12 @@ export class RecognitionService implements OnModuleInit {
     const toSave = mapped.filter((el) => !isDuplicate(el.bbox));
     const dups = mapped.length - toSave.length;
     if (dups) this.logger.log(`Пропущено дублей (пересечение >50% с уже размеченными): ${dups}`);
+
+    // OCR вокруг каждой новой рамки: текст с координатами ляжет в элемент и
+    // станет входом для общего алгоритма определения параметров
+    if (OCR_ENABLED && toSave.length) {
+      await this.attachTexts(page, toSave);
+    }
     const saved = toSave.length ? await this.elementsRepo.save(toSave) : [];
     return {
       elements: saved,
@@ -972,6 +995,57 @@ export class RecognitionService implements OnModuleInit {
       `, осталось без класса ${out.filter((o) => o.klass === 'other').length}`,
     );
     return out;
+  }
+
+  /**
+   * Текст вокруг элементов (ТЗ Максима, пункт 1): вокруг каждой рамки берём
+   * поле в OCR_PAD пикселей с каждой стороны, распознаём и складываем куски
+   * строк с координатами в сам элемент. Координаты переводим в доли ЛИСТА,
+   * чтобы правила могли считать «слева от аппарата» и «под аппаратом».
+   */
+  private async attachTexts(
+    page: RecognitionPage,
+    els: Array<{ bbox: Bbox; texts?: OcrPiece[] }>,
+  ) {
+    if (!(await ocrAvailable())) {
+      this.logger.warn('OCR включён, но tesseract не найден в образе — текст не читается');
+      return;
+    }
+    const sharp = require('sharp');
+    const src = join(UPLOAD_DIR, page.image_file);
+    const W = page.width, H = page.height;
+    const started = Date.now();
+    let pieces = 0;
+
+    for (const el of els.slice(0, OCR_MAX_ELEMENTS)) {
+      const b = el.bbox;
+      const left = Math.max(0, Math.round(b.x * W) - OCR_PAD);
+      const top = Math.max(0, Math.round(b.y * H) - OCR_PAD);
+      const width = Math.min(W - left, Math.round(b.w * W) + 2 * OCR_PAD);
+      const height = Math.min(H - top, Math.round(b.h * H) + 2 * OCR_PAD);
+      if (width < 8 || height < 8) continue;
+      try {
+        const crop: Buffer = await sharp(src)
+          .extract({ left, top, width, height })
+          .jpeg({ quality: 92 }).toBuffer();
+        const found = await ocrImage(crop);
+        // доли окна → доли листа
+        el.texts = found.map((t) => ({
+          text: t.text, conf: t.conf,
+          x: (left + t.x * width) / W,
+          y: (top + t.y * height) / H,
+          w: (t.w * width) / W,
+          h: (t.h * height) / H,
+        }));
+        pieces += el.texts.length;
+      } catch (e: any) {
+        this.logger.warn(`OCR не обработал область: ${e?.message || e}`);
+      }
+    }
+    this.logger.log(
+      `OCR: обработано рамок ${Math.min(els.length, OCR_MAX_ELEMENTS)}, ` +
+      `найдено кусков текста ${pieces} за ${Date.now() - started} мс`,
+    );
   }
 
   /**

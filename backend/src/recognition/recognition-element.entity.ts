@@ -44,6 +44,12 @@ export class RecognitionElement {
   @Column({ type: 'float', default: 0 })
   confidence: number;
 
+  /** Текст, найденный OCR вокруг элемента (ТЗ Максима 27.08, пункт 1):
+   *  куски строк с координатами в долях страницы. Отсюда общий алгоритм
+   *  будет доставать обозначение, номинал и характеристику. */
+  @Column({ type: 'jsonb', default: '[]' })
+  texts: Array<{ text: string; conf: number; x: number; y: number; w: number; h: number }>;
+
   /** auto — гипотеза ИИ; confirmed — подтверждён; corrected — исправлен вручную */
   @Column({ default: 'auto' })
   status: string;

@@ -1681,6 +1681,22 @@ function InspectorPanel({ el, cfg, catalogOpen, onHeadPointerDown, onClose, onSa
           title="Удалить рамку (клавиша Delete)">Удалить</button>
       </div>
 
+      {/* Текст, найденный OCR вокруг элемента (ТЗ Максима, пункт 1). Пока
+          показываем как есть: правил разбора ещё нет, но видно, что читается
+          и с какой уверенностью — по этому и настраивать. */}
+      {!!el.texts?.length && (
+        <div className="recog-ocr">
+          <div className="recog-ocr-t">Текст рядом ({el.texts.length})</div>
+          <div className="recog-ocr-list">
+            {el.texts.slice(0, 12).map((t, i) => (
+              <span key={i} className="recog-ocr-piece" title={`уверенность ${Math.round(t.conf * 100)}%`}>
+                {t.text}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {productBlock}
       {!el.product_name && (
         <button className={`btn-outline recog-frombase${catalogOpen ? ' recog-frombase-on' : ''}`}

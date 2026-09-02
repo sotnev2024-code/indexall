@@ -3,6 +3,7 @@ FROM node:20-bullseye-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 make g++ libsqlite3-dev curl ca-certificates \
     poppler-utils \
+    tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

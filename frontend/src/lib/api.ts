@@ -322,6 +322,8 @@ export interface RecogElement {
   confidence: number;
   status: 'auto' | 'confirmed' | 'corrected';
   color: string;
+  /** текст, найденный OCR вокруг элемента: куски строк с координатами листа */
+  texts?: Array<{ text: string; conf: number; x: number; y: number; w: number; h: number }>;
   /* товар каталога («Добавить из базы») */
   product_name: string;
   brand: string;
