@@ -30,8 +30,11 @@ const OCR_LANG = (process.env.RECOGNITION_OCR_LANG || 'rus+eng').trim();
 /** Слова с уверенностью ниже порога — мусор от линий чертежа */
 const OCR_MIN_CONF = Math.min(0.95, Math.max(0.05,
   parseFloat(process.env.RECOGNITION_OCR_MIN_CONF || '') || 0.45));
-/** Подписи на чертеже мелкие; Tesseract уверенно читает буквы от ~20 px */
-const OCR_UPSCALE_TO = parseInt(process.env.RECOGNITION_OCR_UPSCALE || '1400', 10) || 1400;
+/** Подписи на чертеже мелкие; Tesseract уверенно читает буквы от ~20 px.
+ *  Замер на схеме Максима: увеличение до 800 px — 1,3 с и 17 осмысленных
+ *  кусков, до 1400 px — 1,8 с и столько же, причём кириллица путается с
+ *  латиницей. Поэтому держим середину. */
+const OCR_UPSCALE_TO = parseInt(process.env.RECOGNITION_OCR_UPSCALE || '900', 10) || 900;
 
 let available: boolean | null = null;
 
@@ -147,6 +150,9 @@ function groupIntoLines(words: Word[], W: number, H: number): OcrPiece[] {
       x: left / W, y: top / H, w: (right - left) / W, h: (bottom - top) / H,
     });
   }
+  // Отсев мусора: обрывки линий чертежа Tesseract отдаёт как «—», «|», «.».
+  // Оставляем куски, где есть буква или цифра и длина хотя бы два знака.
+  const meaningful = out.filter((p) => p.text.length >= 2 && /[0-9A-Za-zА-Яа-яЁё]/.test(p.text));
   // сверху вниз, слева направо — так удобнее читать и человеку, и правилам
-  return out.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+  return meaningful.sort((a, b) => (a.y - b.y) || (a.x - b.x));
 }

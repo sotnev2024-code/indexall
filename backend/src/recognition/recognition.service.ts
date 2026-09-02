@@ -1012,39 +1012,54 @@ export class RecognitionService implements OnModuleInit {
       return;
     }
     const sharp = require('sharp');
-    const src = join(UPLOAD_DIR, page.image_file);
     const W = page.width, H = page.height;
     const started = Date.now();
-    let pieces = 0;
 
-    for (const el of els.slice(0, OCR_MAX_ELEMENTS)) {
+    // Один прогон на всю область вместо прогона на каждый элемент: у соседних
+    // аппаратов поля в 200 px перекрываются, и один и тот же текст читался бы
+    // по десять раз. Область — общая рамка всех элементов плюс это же поле.
+    const minX = Math.min(...els.map((e) => e.bbox.x)) * W;
+    const minY = Math.min(...els.map((e) => e.bbox.y)) * H;
+    const maxX = Math.max(...els.map((e) => e.bbox.x + e.bbox.w)) * W;
+    const maxY = Math.max(...els.map((e) => e.bbox.y + e.bbox.h)) * H;
+    const left = Math.max(0, Math.round(minX) - OCR_PAD);
+    const top = Math.max(0, Math.round(minY) - OCR_PAD);
+    const width = Math.min(W - left, Math.round(maxX - minX) + 2 * OCR_PAD);
+    const height = Math.min(H - top, Math.round(maxY - minY) + 2 * OCR_PAD);
+    if (width < 8 || height < 8) return;
+
+    let pieces: OcrPiece[] = [];
+    try {
+      const crop: Buffer = await sharp(join(UPLOAD_DIR, page.image_file))
+        .extract({ left, top, width, height })
+        .jpeg({ quality: 92 }).toBuffer();
+      // доли окна → доли листа: правила должны считать «слева от аппарата»
+      pieces = (await ocrImage(crop)).map((t) => ({
+        text: t.text, conf: t.conf,
+        x: (left + t.x * width) / W,
+        y: (top + t.y * height) / H,
+        w: (t.w * width) / W,
+        h: (t.h * height) / H,
+      }));
+    } catch (e: any) {
+      this.logger.warn(`OCR не обработал область: ${e?.message || e}`);
+      return;
+    }
+
+    // раздаём куски элементам: берём то, что лежит не дальше поля OCR_PAD
+    const padX = OCR_PAD / W, padY = OCR_PAD / H;
+    let attached = 0;
+    for (const el of els) {
       const b = el.bbox;
-      const left = Math.max(0, Math.round(b.x * W) - OCR_PAD);
-      const top = Math.max(0, Math.round(b.y * H) - OCR_PAD);
-      const width = Math.min(W - left, Math.round(b.w * W) + 2 * OCR_PAD);
-      const height = Math.min(H - top, Math.round(b.h * H) + 2 * OCR_PAD);
-      if (width < 8 || height < 8) continue;
-      try {
-        const crop: Buffer = await sharp(src)
-          .extract({ left, top, width, height })
-          .jpeg({ quality: 92 }).toBuffer();
-        const found = await ocrImage(crop);
-        // доли окна → доли листа
-        el.texts = found.map((t) => ({
-          text: t.text, conf: t.conf,
-          x: (left + t.x * width) / W,
-          y: (top + t.y * height) / H,
-          w: (t.w * width) / W,
-          h: (t.h * height) / H,
-        }));
-        pieces += el.texts.length;
-      } catch (e: any) {
-        this.logger.warn(`OCR не обработал область: ${e?.message || e}`);
-      }
+      el.texts = pieces
+        .filter((t) => t.x + t.w >= b.x - padX && t.x <= b.x + b.w + padX
+                    && t.y + t.h >= b.y - padY && t.y <= b.y + b.h + padY)
+        .slice(0, 40);
+      attached += el.texts.length;
     }
     this.logger.log(
-      `OCR: обработано рамок ${Math.min(els.length, OCR_MAX_ELEMENTS)}, ` +
-      `найдено кусков текста ${pieces} за ${Date.now() - started} мс`,
+      `OCR: область ${width}×${height} px, кусков текста ${pieces.length}, ` +
+      `роздано элементам ${attached} за ${Date.now() - started} мс`,
     );
   }
 
