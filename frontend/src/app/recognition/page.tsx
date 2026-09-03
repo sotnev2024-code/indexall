@@ -206,6 +206,8 @@ export default function RecognitionPage() {
   const [docsError, setDocsError] = useState(false);
   /** отбор в списке документов: имён «image.png» накопились десятки */
   const [docQuery, setDocQuery] = useState('');
+  /** показывать ли распознанный OCR текст синими рамками на схеме */
+  const [showTexts, setShowTexts] = useState(true);
   const [clsCfg, setClsCfg] = useState<RecogClassConfig>(DEFAULT_CFG);
   const [doc, setDoc] = useState<RecogDocument | null>(null);
   const [pageId, setPageId] = useState<number | null>(null);
@@ -379,6 +381,21 @@ export default function RecognitionPage() {
   const page = useMemo(() => visiblePages.find((p) => p.id === pageId) || visiblePages[0] || null, [visiblePages, pageId]);
   const pageElements = useMemo(() => (doc?.elements || []).filter((e) => page && e.page_id === page.id), [doc, page]);
   const selEl = useMemo(() => pageElements.find((e) => e.id === selId) || null, [pageElements, selId]);
+  /** Уникальные куски текста OCR со всех рамок листа: один кусок привязан к
+   *  нескольким соседним элементам, а рисовать его нужно один раз. */
+  const ocrBoxes = useMemo(() => {
+    const seen = new Set<string>();
+    const out: NonNullable<RecogElement['texts']> = [];
+    for (const el of pageElements) {
+      for (const t of el.texts || []) {
+        const key = `${t.text}|${t.x.toFixed(4)}|${t.y.toFixed(4)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(t);
+      }
+    }
+    return out;
+  }, [pageElements]);
   /* зеркало выбранной рамки для обработчика горячих клавиш */
   const selElRef = useRef<RecogElement | null>(null); selElRef.current = selEl;
 
@@ -1240,6 +1257,17 @@ export default function RecognitionPage() {
                   : 'Колесо — прокрутка · Ctrl+колесо — масштаб · тянуть — перемещение · двойное нажатие + протянуть — распознать'}
               </span>
               <span className="recog-toolspacer" />
+              {/* показ распознанного текста: на плотных листах его много,
+                  поэтому даём выключатель (кусков текста — счётчик) */}
+              {ocrBoxes.length > 0 && (
+                <button
+                  className={`btn-outline recog-txt-toggle ${showTexts ? 'on' : ''}`}
+                  onClick={() => setShowTexts((v) => !v)}
+                  title="Текст, распознанный вокруг элементов, синими рамками на схеме"
+                >
+                  Текст: {ocrBoxes.length}
+                </button>
+              )}
               {recogMode !== 'llm' && (
                 <span className="recog-modebadge"
                   title="Режим распознавания меняется в панели «Модель Zeus и режим распознавания» на экране документов">
@@ -1368,6 +1396,22 @@ export default function RecognitionPage() {
                       </div>
                     );
                   })}
+                  {/* Распознанный OCR текст — синими рамками прямо на схеме
+                      (просьба Максима 03.09). Один и тот же кусок текста
+                      привязан к нескольким соседним элементам, поэтому рисуем
+                      уникальные: иначе рамки лягут друг на друга и утолщатся. */}
+                  {showTexts && page.width > 0 && ocrBoxes.map((t, i) => (
+                    <div
+                      key={`t${i}`}
+                      className="recog-txt"
+                      title={`${t.text} · уверенность ${Math.round(t.conf * 100)}%`}
+                      style={{
+                        left: t.x * page.width, top: t.y * page.height,
+                        width: t.w * page.width, height: t.h * page.height,
+                        borderWidth: Math.max(1, 1.2 / view.z),
+                      }}
+                    />
+                  ))}
                   {/* зона выделения — жёлтая рамка, толщина не растёт с зумом */}
                   {zoneDraft && (
                     <div className="recog-zonedraft" style={{
