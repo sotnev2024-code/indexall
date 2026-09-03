@@ -129,7 +129,14 @@ async function runTesseract(png: Buffer): Promise<Word[]> {
   return words;
 }
 
-/** Слова одной строки склеиваем в кусок текста с общей рамкой */
+/**
+ * Слова одной строки склеиваем в кусок текста с общей рамкой.
+ *
+ * Важно рвать строку по большому пробелу: в разреженном режиме Tesseract
+ * относит к одной строке слова из разных колонок чертежа, и общая рамка
+ * растягивается через всю пустоту между ними — на схеме это выглядело как
+ * синие полосы поперёк листа. Рвём там, где промежуток больше высоты строки.
+ */
 function groupIntoLines(words: Word[], W: number, H: number): OcrPiece[] {
   const byLine = new Map<string, Word[]>();
   for (const w of words) {
@@ -138,8 +145,8 @@ function groupIntoLines(words: Word[], W: number, H: number): OcrPiece[] {
     if (list) list.push(w); else byLine.set(key, [w]);
   }
   const out: OcrPiece[] = [];
-  for (const list of byLine.values()) {
-    list.sort((a, b) => a.left - b.left);
+  const push = (list: Word[]) => {
+    if (!list.length) return;
     const left = Math.min(...list.map((w) => w.left));
     const top = Math.min(...list.map((w) => w.top));
     const right = Math.max(...list.map((w) => w.left + w.width));
@@ -149,6 +156,20 @@ function groupIntoLines(words: Word[], W: number, H: number): OcrPiece[] {
       conf: list.reduce((s, w) => s + w.conf, 0) / list.length,
       x: left / W, y: top / H, w: (right - left) / W, h: (bottom - top) / H,
     });
+  };
+  for (const list of byLine.values()) {
+    list.sort((a, b) => a.left - b.left);
+    let chunk: Word[] = [];
+    for (const w of list) {
+      if (chunk.length) {
+        const prev = chunk[chunk.length - 1];
+        const gap = w.left - (prev.left + prev.width);
+        const limit = Math.max(prev.height, w.height) * 1.2;
+        if (gap > limit) { push(chunk); chunk = []; }
+      }
+      chunk.push(w);
+    }
+    push(chunk);
   }
   // Отсев мусора: обрывки линий чертежа Tesseract отдаёт как «—», «|», «.».
   // Оставляем куски, где есть буква или цифра и длина хотя бы два знака.
