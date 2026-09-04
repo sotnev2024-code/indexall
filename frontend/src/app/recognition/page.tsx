@@ -1731,6 +1731,11 @@ function CatalogParams({ el, categories, tiles, values, onValues, onPick, onClea
     onValues(next);
   };
 
+  /** человекочитаемое имя категории для выпадающего списка */
+  const catName = (slug: string) => sv(tiles.find((t) => t.slug === slug)?.name) || slug;
+  /** позиция, уже привязанная к рамке — её показываем выбранной в «Названии» */
+  const chosen = items.find((p) => sv(p?.name) === el.product_name);
+
   /** Какие значения ещё встречаются среди отобранных позиций: по ним гасим
    *  варианты, ведущие в пустоту. Производитель лежит не в атрибутах, а
    *  отдельным полем, поэтому собираем его руками. */
