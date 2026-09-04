@@ -113,6 +113,9 @@ const LS_CONFIG_KEY = 'recognition_ls_config';
 /** Режим распознавания: llm | shadow | cascade | yolo | twostage */
 const MODE_KEY = 'recognition_mode';
 const CATALOG_MAP_KEY = 'recognition_catalog_map';
+/** Поле рамки, в котором инспектор держит выбранную категорию базы.
+ *  Название общее с фронтом (CatalogParams), менять только вместе. */
+const CATALOG_CAT_FIELD = 'Категория базы';
 
 /**
  * Класс схемы → категории каталога (ТЗ Максима 04.09).
@@ -1133,12 +1136,28 @@ export class RecognitionService implements OnModuleInit {
           if (!mine.length) continue;
           const cats = (await this.getCatalogMap())[el.klass] || [];
           if (!cats.length) continue;
-          const key = cats.join(',');
-          if (!catCache.has(key)) catCache.set(key, await this.catalogValues(cats));
-          const guessed = parseFields(mine, catCache.get(key)!);
-          for (const [k, v] of Object.entries(guessed)) {
+
+          // Разбираем по каждой категории отдельно и берём ту, где подписи
+          // сошлись лучше. Иначе значение из литых («ВА-333Е») попадает в
+          // рамку, а инспектор открывается на модульных, и человек видит
+          // пустое поле при заполненном значении.
+          let bestSlug = cats[0];
+          let best: Record<string, string> = {};
+          for (const slug of cats) {
+            if (!catCache.has(slug)) catCache.set(slug, await this.catalogValues([slug]));
+            const got = parseFields(mine, catCache.get(slug)!);
+            if (Object.keys(got).length > Object.keys(best).length) { best = got; bestSlug = slug; }
+          }
+
+          for (const [k, v] of Object.entries(best)) {
             if (!el.fields) el.fields = {};
             if (!el.fields[k]) { el.fields[k] = v; filled++; }   // руками введённое не трогаем
+          }
+          // Категорию проставляем, только если сошлось хоть одно поле базы:
+          // одно обозначение вроде «QF13» о категории ничего не говорит.
+          const fromCatalog = Object.keys(best).some((k) => k !== 'Обозначение');
+          if (fromCatalog && el.fields && !el.fields[CATALOG_CAT_FIELD]) {
+            el.fields[CATALOG_CAT_FIELD] = bestSlug;
           }
         }
         // Логируем и нулевой результат: иначе непонятно, промахнулся разбор
