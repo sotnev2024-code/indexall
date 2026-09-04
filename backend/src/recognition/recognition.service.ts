@@ -37,6 +37,8 @@ import {
   modelInputSize, modelKind, classifyImage, YoloBox,
 } from './yolo';
 import { ocrImage, ocrAvailable, ocrVersion, OcrPiece } from './ocr';
+import { AUTOFILL_ENABLED, assignTexts, parseFields, CatalogValues } from './autofill';
+import { CatalogService } from '../catalog/catalog.service';
 
 const execFileAsync = promisify(execFile);
 
@@ -172,6 +174,7 @@ export class RecognitionService implements OnModuleInit {
     @InjectRepository(AppSetting) private settingsRepo: Repository<AppSetting>,
     @InjectRepository(RecognitionModelVersion) private modelsRepo: Repository<RecognitionModelVersion>,
     @InjectRepository(RecognitionShadowRun) private shadowRepo: Repository<RecognitionShadowRun>,
+    private readonly catalog: CatalogService,
   ) {}
 
   isConfigured(): boolean {
@@ -261,6 +264,7 @@ export class RecognitionService implements OnModuleInit {
         enabled: OCR_ENABLED,
         pad_px: OCR_PAD,
         engine: await ocrVersion(),
+        autofill: AUTOFILL_ENABLED,
       },
       probe: null as any,
     };
@@ -1042,6 +1046,24 @@ export class RecognitionService implements OnModuleInit {
     return out;
   }
 
+  /** Значения полей каталога для набора категорий: подставляем только то,
+   *  что в базе существует. Списки небольшие, но тянуть их на каждый элемент
+   *  незачем — вызывающий кэширует по набору категорий. */
+  private async catalogValues(slugs: string[]): Promise<CatalogValues> {
+    const out: CatalogValues = {};
+    for (const slug of slugs) {
+      let opts: { label: string; opts: string[] }[] = [];
+      try { opts = await this.catalog.getTileFilterOptions(slug); } catch { continue; }
+      for (const f of opts || []) {
+        if (!f?.label) continue;
+        const cur = out[f.label] || [];
+        for (const v of (f.opts || [])) if (v && !cur.includes(v)) cur.push(v);
+        out[f.label] = cur;
+      }
+    }
+    return out;
+  }
+
   /**
    * Текст вокруг элементов (ТЗ Максима, пункт 1): вокруг каждой рамки берём
    * поле в OCR_PAD пикселей с каждой стороны, распознаём и складываем куски
@@ -1050,7 +1072,7 @@ export class RecognitionService implements OnModuleInit {
    */
   private async attachTexts(
     page: RecognitionPage,
-    els: Array<{ bbox: Bbox; texts?: OcrPiece[] }>,
+    els: Array<{ bbox: Bbox; texts?: OcrPiece[]; klass?: string; fields?: Record<string, string> }>,
   ) {
     if (!(await ocrAvailable())) {
       this.logger.warn('OCR включён, но tesseract не найден в образе — текст не читается');
@@ -1089,6 +1111,33 @@ export class RecognitionService implements OnModuleInit {
     } catch (e: any) {
       this.logger.warn(`OCR не обработал область: ${e?.message || e}`);
       return;
+    }
+
+    // Подстановка параметров из подписей (ТЗ Максима, пункт 2). Каждый кусок
+    // текста достаётся ближайшему аппарату — иначе шапка панели попадает во
+    // все рамки разом и они получают одинаковые параметры.
+    if (AUTOFILL_ENABLED) {
+      try {
+        const own = assignTexts(els as any, pieces);
+        const catCache = new Map<string, CatalogValues>();
+        let filled = 0;
+        for (const el of els as any[]) {
+          const mine = own.get(el) || [];
+          if (!mine.length) continue;
+          const cats = (await this.getCatalogMap())[el.klass] || [];
+          if (!cats.length) continue;
+          const key = cats.join(',');
+          if (!catCache.has(key)) catCache.set(key, await this.catalogValues(cats));
+          const guessed = parseFields(mine, catCache.get(key)!);
+          for (const [k, v] of Object.entries(guessed)) {
+            if (!el.fields) el.fields = {};
+            if (!el.fields[k]) { el.fields[k] = v; filled++; }   // руками введённое не трогаем
+          }
+        }
+        if (filled) this.logger.log(`Подстановка параметров из подписей: заполнено ${filled} полей`);
+      } catch (e: any) {
+        this.logger.warn(`Подстановка параметров не удалась: ${e?.message || e}`);
+      }
     }
 
     // раздаём куски элементам: берём то, что лежит не дальше поля OCR_PAD

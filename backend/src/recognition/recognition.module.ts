@@ -11,6 +11,7 @@ import { Sheet } from '../sheets/sheet.entity';
 import { EquipmentRow } from '../equipment/equipment-row.entity';
 import { Folder } from '../folders/folder.entity';
 import { AppSetting } from '../admin/app-setting.entity';
+import { CatalogModule } from '../catalog/catalog.module';
 
 @Module({
   imports: [
@@ -25,6 +26,9 @@ import { AppSetting } from '../admin/app-setting.entity';
       Folder,
       AppSetting,
     ]),
+    // каталог нужен подстановке параметров: значения берём из базы,
+    // чтобы не выдумывать варианты, которых в ней нет
+    CatalogModule,
   ],
   controllers: [RecognitionController],
   providers: [RecognitionService],
