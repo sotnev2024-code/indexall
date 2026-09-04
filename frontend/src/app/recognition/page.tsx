@@ -403,6 +403,10 @@ export default function RecognitionPage() {
   }, [pageElements]);
   /* зеркало выбранной рамки для обработчика горячих клавиш */
   const selElRef = useRef<RecogElement | null>(null); selElRef.current = selEl;
+  /** Текст под курсором: всплывает над синей рамкой вместо списка в окне
+   *  элемента. Ключ держим в ref — иначе перерисовка на каждом движении мыши. */
+  const [txtHover, setTxtHover] = useState<{ text: string; conf: number; x: number; y: number } | null>(null);
+  const txtHoverKey = useRef('');
 
   /* ── плавающий инспектор: позиция и перетаскивание за шапку ── */
   const INSP_W = 420;
@@ -669,6 +673,23 @@ export default function RecognitionPage() {
 
   const onPointerMove = (e: React.PointerEvent) => {
     const d = drag.current;
+    // Наведение на синюю рамку — показываем её текст (правка Максима 04.09).
+    // Ловим курсор здесь, а не на самой рамке: рамки прозрачны для мыши,
+    // иначе они перехватывали бы начало выделения области.
+    if (!d && showTexts && page) {
+      const p = toPagePoint(e.clientX, e.clientY);
+      const hit = ocrBoxes.find((t) =>
+        p.x >= t.x * page.width - 2 && p.x <= (t.x + t.w) * page.width + 2 &&
+        p.y >= t.y * page.height - 2 && p.y <= (t.y + t.h) * page.height + 2);
+      const key = hit ? `${hit.text}|${hit.x}` : '';
+      if (key !== txtHoverKey.current) {
+        txtHoverKey.current = key;
+        setTxtHover(hit ? {
+          text: hit.text, conf: hit.conf,
+          x: hit.x * page.width, y: hit.y * page.height,
+        } : null);
+      }
+    }
     if (!d) return;
     if (d.kind === 'pan') {
       setView({ ...d.view, x: d.view.x + (e.clientX - d.start.x), y: d.view.y + (e.clientY - d.start.y) });
@@ -1409,7 +1430,6 @@ export default function RecognitionPage() {
                     <div
                       key={`t${i}`}
                       className="recog-txt"
-                      title={`${t.text} · уверенность ${Math.round(t.conf * 100)}%`}
                       style={{
                         left: t.x * page.width, top: t.y * page.height,
                         width: t.w * page.width, height: t.h * page.height,
@@ -1417,6 +1437,18 @@ export default function RecognitionPage() {
                       }}
                     />
                   ))}
+                  {/* Сам текст — всплывающей подсказкой при наведении, чтобы
+                      не занимать место в окне элемента. Масштаб гасим на 1/z:
+                      иначе подпись растёт вместе с зумом схемы. */}
+                  {showTexts && txtHover && (
+                    <div className="recog-txt-tip" style={{
+                      left: txtHover.x, top: txtHover.y,
+                      transform: `translateY(-100%) scale(${1 / view.z})`,
+                    }}>
+                      {txtHover.text}
+                      <span>{Math.round(txtHover.conf * 100)}%</span>
+                    </div>
+                  )}
                   {/* зона выделения — жёлтая рамка, толщина не растёт с зумом */}
                   {zoneDraft && (
                     <div className="recog-zonedraft" style={{
@@ -1941,21 +1973,9 @@ function InspectorPanel({ el, cfg, catalogOpen, catalogCats, catalogTiles, onPic
           title="Удалить рамку (клавиша Delete)">Удалить</button>
       </div>
 
-      {/* Текст, найденный OCR вокруг элемента (ТЗ Максима, пункт 1). Пока
-          показываем как есть: правил разбора ещё нет, но видно, что читается
-          и с какой уверенностью — по этому и настраивать. */}
-      {!!el.texts?.length && (
-        <div className="recog-ocr">
-          <div className="recog-ocr-t">Текст рядом ({el.texts.length})</div>
-          <div className="recog-ocr-list">
-            {el.texts.slice(0, 12).map((t, i) => (
-              <span key={i} className="recog-ocr-piece" title={`уверенность ${Math.round(t.conf * 100)}%`}>
-                {t.text}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Списка найденного текста здесь больше нет (правка Максима 04.09):
+          он занимал место и повторял то, что и так видно на схеме. Текст
+          остаётся в рабочем поле и всплывает при наведении на синюю рамку. */}
 
       {productBlock}
       {!el.product_name && (

@@ -56,10 +56,24 @@ function distance(b: Bbox, t: TextPiece): number {
 }
 
 /**
- * Каждый кусок текста отдаём ближайшему аппарату.
+ * Зона близости: рамка элемента плюс две её ширины и высоты в каждую
+ * сторону — правило Максима. Пересечение, а не полное вхождение: строка,
+ * начатая в зоне, считается своей целиком.
+ */
+function inZone(b: Bbox, t: TextPiece): boolean {
+  const padX = 2 * b.w, padY = 2 * b.h;
+  return t.x + t.w >= b.x - padX && t.x <= b.x + b.w + padX
+      && t.y + t.h >= b.y - padY && t.y <= b.y + b.h + padY;
+}
+
+/**
+ * Каждый кусок текста отдаём ближайшему аппарату — и только если кусок попал
+ * в его зону близости.
  *
- * Без этого шага подпись шапки панели попадала во все рамки разом, и четыре
- * автомата получали одинаковые параметры — проверено на схеме Максима.
+ * Без раздачи подпись шапки панели попадала во все рамки разом, и четыре
+ * автомата получали одинаковые параметры. Без зоны далёкий текст всё равно
+ * находил себе «ближайший» аппарат на другом конце листа — оба промаха
+ * проверены на схеме Максима.
  */
 export function assignTexts<T extends { bbox: Bbox; texts?: TextPiece[] }>(
   els: T[], pieces: TextPiece[],
@@ -70,6 +84,7 @@ export function assignTexts<T extends { bbox: Bbox; texts?: TextPiece[] }>(
     let best: T | null = null;
     let bestD = Infinity;
     for (const el of els) {
+      if (!inZone(el.bbox, t)) continue;
       const d = distance(el.bbox, t);
       if (d < bestD) { bestD = d; best = el; }
     }
