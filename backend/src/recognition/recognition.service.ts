@@ -1053,7 +1053,14 @@ export class RecognitionService implements OnModuleInit {
     const out: CatalogValues = {};
     for (const slug of slugs) {
       let opts: { label: string; opts: string[] }[] = [];
-      try { opts = await this.catalog.getTileFilterOptions(slug); } catch { continue; }
+      try {
+        opts = await this.catalog.getTileFilterOptions(slug);
+      } catch (e: any) {
+        // Молчать нельзя: без списков каталога подстановка тихо ничего не
+        // заполняет, и промах выглядит как «ИИ ничего не нашёл».
+        this.logger.warn(`Каталог не отдал фильтры «${slug}»: ${e?.message || e}`);
+        continue;
+      }
       for (const f of opts || []) {
         if (!f?.label) continue;
         const cur = out[f.label] || [];
@@ -1134,7 +1141,13 @@ export class RecognitionService implements OnModuleInit {
             if (!el.fields[k]) { el.fields[k] = v; filled++; }   // руками введённое не трогаем
           }
         }
-        if (filled) this.logger.log(`Подстановка параметров из подписей: заполнено ${filled} полей`);
+        // Логируем и нулевой результат: иначе непонятно, промахнулся разбор
+        // или подстановка вообще не дошла до элементов.
+        const catFields = [...catCache.values()].reduce((n, c) => n + Object.keys(c).length, 0);
+        this.logger.log(
+          `Подстановка параметров из подписей: заполнено ${filled} полей, ` +
+          `элементов ${els.length}, полей каталога ${catFields}`,
+        );
       } catch (e: any) {
         this.logger.warn(`Подстановка параметров не удалась: ${e?.message || e}`);
       }
