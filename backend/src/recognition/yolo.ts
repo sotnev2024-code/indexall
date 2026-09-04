@@ -38,6 +38,14 @@ const FALLBACK_INPUT = parseInt(process.env.RECOGNITION_YOLO_SIZE || '640', 10) 
  * приходит на вход огромным — и не находится вообще. Поэтому по умолчанию
  * выключено; включать вместе с переходом на тайловую модель:
  *   RECOGNITION_YOLO_TILES=1
+ *
+ * ВАЖНО, замер 04.09 на отложенной выборке датасета (7 листов, 183 рамки
+ * разметки, модель best-v1): нарезка НЕ помогает текущим моделям, а вредит —
+ * recall 11,5% против 50,8% и precision 4,9% против 73,2%. Рамок она находит
+ * втрое больше (428 против 127), но почти все мимо разметки. Считать находки
+ * без сверки с разметкой бесполезно: на титульном листе PDF, где аппаратов
+ * нет вообще, нарезка «находит» три штуки. Не включайте нарезку, пока
+ * активная модель не переобучена на тайлах.
  */
 const TILES_ENABLED = /^(1|true|on|yes)$/i.test((process.env.RECOGNITION_YOLO_TILES || '').trim());
 /**
@@ -99,6 +107,71 @@ export function yoloSettings() {
 }
 
 /**
+ * Значение поля из metadata_props ONNX. Ultralytics складывает туда imgsz,
+ * task, names и прочее подряд; читаем без protobuf-парсера — как и имена
+ * классов ниже. Ключ может встретиться и в описании модели, поэтому
+ * перебираем несколько вхождений, пока значение не разберётся.
+ */
+function readModelMetaField(
+  modelPath: string, key: string, parse: (chunk: string) => string | null, span = 64,
+): string | null {
+  try {
+    const buf = fs.readFileSync(modelPath);
+    let from = 0;
+    for (let i = 0; i < 8; i++) {
+      const idx = buf.indexOf(key, from);
+      if (idx < 0) break;
+      from = idx + key.length;
+      const value = parse(buf.slice(idx, idx + span).toString('latin1'));
+      if (value) return value;
+    }
+  } catch { /* метаданных нет — вызывающий использует запасной путь */ }
+  return null;
+}
+
+/**
+ * Размер входа из метаданных экспорта (imgsz). Читать его ОБЯЗАТЕЛЬНО: в
+ * onnxruntime-node 1.19 (версия из package-lock) свойства inputMetadata ещё
+ * нет, оно появилось в 1.20. Раньше размер молча оставался запасным 640, а
+ * все модели проекта экспортированы с imgsz=1280 — session.run падал с
+ * «Got invalid dimensions … Got: 640 Expected: 1280» на каждом запросе, и
+ * распознавание не находило ничего вообще.
+ */
+export function readModelImgsz(modelPath: string): number | null {
+  const raw = readModelMetaField(modelPath, 'imgsz', (chunk) => {
+    const m = chunk.match(/\[\s*(\d+)\s*,\s*(\d+)\s*\]/);
+    return m ? m[1] : null;
+  });
+  const side = raw ? parseInt(raw, 10) : NaN;
+  return Number.isFinite(side) && side >= 64 ? side : null;
+}
+
+/** Тип задачи из метаданных экспорта: detect / classify / segment / … */
+export function readModelTask(modelPath: string): string | null {
+  return readModelMetaField(modelPath, 'task', (chunk) => {
+    const m = chunk.match(/(detect|classify|segment|pose|obb)/);
+    return m ? m[1] : null;
+  }, 32);
+}
+
+/**
+ * Последняя страховка, если imgsz в метаданных нет: пробуем прогнать пустой
+ * тензор — onnxruntime в тексте ошибки сам называет ожидаемый размер
+ * («Got: 640 Expected: 1280»).
+ */
+async function probeInputSize(ort: any, session: any, first: number): Promise<number | null> {
+  try {
+    const t = new ort.Tensor('float32', new Float32Array(3 * first * first), [1, 3, first, first]);
+    await session.run({ [session.inputNames[0]]: t });
+    return first;
+  } catch (e: any) {
+    const m = String(e?.message || '').match(/Expected:\s*(\d+)/);
+    const side = m ? parseInt(m[1], 10) : NaN;
+    return Number.isFinite(side) && side >= 64 ? side : null;
+  }
+}
+
+/**
  * Имена классов из метаданных ONNX. Ultralytics пишет их строкой вида
  * "{0: 'circuit_breaker', 1: 'rcbo', …}" — вытаскиваем без protobuf-парсера,
  * чтобы не тянуть зависимость ради одного поля.
@@ -133,13 +206,20 @@ async function getSession(modelPath: string): Promise<Cached> {
     intraOpNumThreads: 2,
     interOpNumThreads: 1,
   });
-  // размер входа берём у самой модели: иначе рассинхрон с imgsz экспорта
-  let input = FALLBACK_INPUT;
+  // Размер входа берём у самой модели: иначе рассинхрон с imgsz экспорта.
+  // Порядок источников — от дешёвого к дорогому; inputMetadata оставляем
+  // первым на будущее (появится после обновления onnxruntime-node до 1.20+),
+  // но полагаться на него нельзя — в 1.19 его просто нет.
+  let input = 0;
   try {
     const dims = session.inputMetadata?.[0]?.shape || session.inputMetadata?.[0]?.dims;
     const side = Array.isArray(dims) ? dims[dims.length - 1] : null;
     if (typeof side === 'number' && side >= 64) input = side;
-  } catch { /* динамический вход — остаётся запасной размер */ }
+  } catch { /* динамический вход — идём дальше по списку источников */ }
+  if (!input) input = readModelImgsz(modelPath) || 0;
+  if (!input) input = (await probeInputSize(ort, session, FALLBACK_INPUT)) || 0;
+  if (!input) input = FALLBACK_INPUT;
+
   const entry: Cached = { path: modelPath, session, input, names: readModelClassNames(modelPath) };
   // держим на VPS не больше трёх моделей в памяти
   if (sessions.size >= MAX_SESSIONS) {
@@ -161,6 +241,12 @@ export type ModelKind = 'detect' | 'classify';
 
 export async function modelKind(modelPath: string): Promise<ModelKind> {
   const { session } = await getSession(modelPath);
+  // Метаданные экспорта — основной источник: outputMetadata в
+  // onnxruntime-node 1.19 отсутствует, и проверка по форме выхода молча
+  // считала классификатор детектором.
+  const task = readModelTask(modelPath);
+  if (task === 'classify') return 'classify';
+  if (task) return 'detect';
   try {
     const md = session.outputMetadata?.[0];
     const dims = md?.shape || md?.dims;
@@ -294,7 +380,7 @@ export async function yoloDetect(
   const ort = require('onnxruntime-node');
   const sharp = require('sharp');
   const { session, input: S, names } = await getSession(modelPath);
-  // нарезка задаётся моделью (Zeus 640 / Vision 1280 обучены на тайлах),
+  // нарезка задаётся моделью (флаг «обучена на тайлах»),
   // env-флаг остаётся общим значением по умолчанию
   const tilesWanted = opts?.tiles ?? TILES_ENABLED;
 

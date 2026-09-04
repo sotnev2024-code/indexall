@@ -2007,3 +2007,13 @@ a.recog-picker-pick { text-decoration: none; display: inline-flex; align-items: 
   background: rgba(47, 111, 237, .06); pointer-events: none; }
 .recog-txt-toggle { padding: 5px 10px; font-size: 12px; }
 .recog-txt-toggle.on { border-color: #2f6fed; color: #2f6fed; background: rgba(47, 111, 237, .08); }
+
+/* Подбор позиции из базы в окне элемента (ТЗ Максима 04.09) */
+.recog-basefit { margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: #fbfbfb; }
+.recog-basefit-t { font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .05em; margin-bottom: 8px; }
+.recog-basefit label { margin-top: 6px; }
+.recog-basefit select { width: 100%; }
+.recog-basefit-picked { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; }
+.recog-basefit-picked span { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recog-basefit-picked button { padding: 3px 8px !important; font-size: 11px !important; }

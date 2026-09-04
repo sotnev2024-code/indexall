@@ -52,6 +52,17 @@ export class RecognitionController {
     return this.service.saveLsConfig(xml);
   }
 
+  /** Класс схемы → категории каталога: по ним инспектор строит поля из базы */
+  @Get('catalog-map')
+  getCatalogMap() {
+    return this.service.getCatalogMap();
+  }
+
+  @Put('catalog-map')
+  saveCatalogMap(@Body() body: Record<string, string[]>) {
+    return this.service.saveCatalogMap(body);
+  }
+
   // ── Датасет ───────────────────────────────────────────────────
 
   @Get('dataset/stats')

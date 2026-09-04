@@ -33,7 +33,7 @@ import {
   slugFromLsValue,
 } from './recognition-classes';
 import {
-  yoloDetect, resetYoloSession, readModelClassNames, yoloSettings,
+  yoloDetect, resetYoloSession, readModelClassNames, readModelImgsz, yoloSettings,
   modelInputSize, modelKind, classifyImage, YoloBox,
 } from './yolo';
 import { ocrImage, ocrAvailable, ocrVersion, OcrPiece } from './ocr';
@@ -110,6 +110,25 @@ function parseClassMap(raw: string): string[] {
 const LS_CONFIG_KEY = 'recognition_ls_config';
 /** Режим распознавания: llm | shadow | cascade | yolo | twostage */
 const MODE_KEY = 'recognition_mode';
+const CATALOG_MAP_KEY = 'recognition_catalog_map';
+
+/**
+ * Класс схемы → категории каталога (ТЗ Максима 04.09).
+ *
+ * «Классы нейросети должны обозначать одну и более категорий в базе»: один
+ * автоматический выключатель на схеме может оказаться модульным или в литом
+ * корпусе, и человек выбирает, чем именно он является. Воздушные автоматы
+ * Максим назвал сам — их в каталоге пока нет, поэтому в списке их не будет.
+ *
+ * Значения по умолчанию; администратор меняет их через PUT catalog-map,
+ * не трогая код.
+ */
+const DEFAULT_CATALOG_MAP: Record<string, string[]> = {
+  circuit_breaker: ['auto', 'mold'],
+  circuit_breaker_with_neutral: ['auto', 'mold'],
+  rcbo: ['difauto'],
+  rccb: ['uzo'],
+};
 export const RECOGNITION_MODES = ['llm', 'shadow', 'cascade', 'yolo', 'twostage'] as const;
 
 /** Один элемент на одну область: рамка, вложенная в другую (≥70% своей
@@ -184,7 +203,29 @@ export class RecognitionService implements OnModuleInit {
     const activeAll = await this.modelsRepo.find({ where: { active: true } });
     const active = activeAll.find((m) => !m.role || m.role === 'single') || activeAll[0];
 
+    // Разбор 04.09: обе поломки, из-за которых «нейросеть перестала находить
+    // элементы», были видны только в файле модели, но не в диагностике.
+    // Выносим их наверх, чтобы в следующий раз не искать заново.
+    const activePath = active ? join(UPLOAD_DIR, active.filename) : null;
+    const activeClasses = activePath ? (readModelClassNames(activePath) || []) : [];
+    const activeImgsz = activePath ? readModelImgsz(activePath) : null;
+    const unusedClasses = activeClasses.filter((c) => /^unused_/i.test(String(c)));
+    const warnings: string[] = [];
+    if (activePath && !activeImgsz) {
+      warnings.push(
+        'У активной модели не читается imgsz — размер входа будет взят запасной, '
+        + 'и при несовпадении распознавание падает на каждом запросе',
+      );
+    }
+    if (unusedClasses.length) {
+      warnings.push(
+        `В активной модели ${unusedClasses.length} из ${activeClasses.length} классов помечены `
+        + 'unused_* — такие элементы придут как «Прочее» и не попадут в лист спецификации',
+      );
+    }
+
     const out: any = {
+      warnings,
       mode,
       api: {
         url: base || null,
@@ -200,9 +241,13 @@ export class RecognitionService implements OnModuleInit {
           ? {
               id: active.id,
               file: active.orig_name,
+              // размер входа из метаданных экспорта: должен совпадать с тем,
+              // в котором модель обучали, иначе session.run падает
+              input_size: activeImgsz,
               // «unused_N» здесь означает дыры в нумерации категорий конфига
               // на момент выгрузки датасета — класс придёт как «Прочее»
-              classes: readModelClassNames(join(UPLOAD_DIR, active.filename)) || [],
+              classes: activeClasses,
+              unused_classes: unusedClasses.length,
             }
           : null,
         // роли активных моделей — видно, собран ли поочерёдный конвейер
@@ -1989,6 +2034,36 @@ export class RecognitionService implements OnModuleInit {
     await this.modelsRepo.update(id, { active: true });
     resetYoloSession();
     return this.listModels();
+  }
+
+  /**
+   * Категории каталога для класса схемы. Фронт по ним строит поля инспектора
+   * из самой базы: у модульных автоматов атрибут называется «Кол-во полюсов»,
+   * у автоматов в литом корпусе — «Количествово полюсов», и списки значений
+   * тоже разные. Поэтому поля и варианты берутся из категории, а не из
+   * зашитого списка — «бывают только варианты, доступные в базе».
+   */
+  async getCatalogMap(): Promise<Record<string, string[]>> {
+    try {
+      const row = await this.settingsRepo.findOne({ where: { key: CATALOG_MAP_KEY } });
+      if (row?.value?.trim()) {
+        const parsed = JSON.parse(row.value);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch { /* повреждённая настройка — работаем на значениях по умолчанию */ }
+    return DEFAULT_CATALOG_MAP;
+  }
+
+  async saveCatalogMap(map: Record<string, string[]>) {
+    if (!map || typeof map !== 'object') throw new BadRequestException('Ожидается объект «класс → категории»');
+    const safe: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(map)) {
+      if (!Array.isArray(v)) continue;
+      const slugs = v.map((s) => String(s).trim()).filter(Boolean).slice(0, 10);
+      if (slugs.length) safe[String(k).trim()] = slugs;
+    }
+    await this.settingsRepo.save({ key: CATALOG_MAP_KEY, value: JSON.stringify(safe) });
+    return this.getCatalogMap();
   }
 
   /** class_mapping.json к модели: номер выхода классификатора → имя класса.

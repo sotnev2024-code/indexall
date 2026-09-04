@@ -395,6 +395,9 @@ export const recognitionApi = {
     api.get<{ found: boolean; documentId?: number; pageId?: number; title?: string; filename?: string }>(
       `/recognition/by-sheet/${sheetId}`),
   getClasses: () => api.get<RecogClassConfig>('/recognition/classes'),
+  /** класс схемы → категории каталога (поля инспектора строятся из базы) */
+  getCatalogMap: () => api.get<Record<string, string[]>>('/recognition/catalog-map'),
+  saveCatalogMap: (map: Record<string, string[]>) => api.put('/recognition/catalog-map', map),
   saveLsConfig: (xml: string) => api.put<RecogClassConfig>('/recognition/classes/ls-config', { xml }),
   datasetStats: () => api.get('/recognition/dataset/stats'),
   exportDataset: (from?: string, to?: string) =>

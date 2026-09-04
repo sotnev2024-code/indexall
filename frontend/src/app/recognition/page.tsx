@@ -209,6 +209,9 @@ export default function RecognitionPage() {
   /** показывать ли распознанный OCR текст синими рамками на схеме */
   const [showTexts, setShowTexts] = useState(true);
   const [clsCfg, setClsCfg] = useState<RecogClassConfig>(DEFAULT_CFG);
+  /** класс схемы → категории каталога: по ним инспектор строит поля из базы */
+  const [catalogMap, setCatalogMap] = useState<Record<string, string[]>>({});
+  const [catalogTiles, setCatalogTiles] = useState<any[]>([]);
   const [doc, setDoc] = useState<RecogDocument | null>(null);
   const [pageId, setPageId] = useState<number | null>(null);
   const [selId, setSelId] = useState<number | null>(null);
@@ -281,6 +284,8 @@ export default function RecognitionPage() {
         loadDocs();
         recognitionApi.status().then(({ data: d }) => setConfigured(d.configured)).catch(() => {});
         recognitionApi.getClasses().then(({ data: d }) => { if (d?.classes?.length) setClsCfg(d); }).catch(() => {});
+        recognitionApi.getCatalogMap().then(({ data: d }) => { if (d) setCatalogMap(d); }).catch(() => {});
+        catalogApi.getTiles().then(({ data: d }) => setCatalogTiles(Array.isArray(d) ? d : (d?.tiles || []))).catch(() => {});
         recognitionApi.listModels().then(({ data: d }) => { if (d?.mode) setRecogMode(d.mode); }).catch(() => {});
         // Приоритет: ?doc=&page= (переход с листа спецификации), иначе —
         // восстановление после F5 из sessionStorage.
@@ -1494,6 +1499,9 @@ export default function RecognitionPage() {
                 el={selEl}
                 cfg={clsCfg}
                 catalogOpen={pickerElId != null}
+                catalogCats={catalogMap[selEl.klass] || []}
+                catalogTiles={catalogTiles}
+                onPickProduct={(p) => applyProduct(selEl.id, p)}
                 onHeadPointerDown={startInspDrag}
                 onClose={() => { setPickerElId(null); setSelId(null); }}
                 onSave={(patch, status) => {
@@ -1627,11 +1635,150 @@ export default function RecognitionPage() {
 }
 
 /* ── Инспектор ── */
-function InspectorPanel({ el, cfg, catalogOpen, onHeadPointerDown, onClose, onSave, onDelete, onDuplicate, onPickCatalog, onClearProduct }: {
+/**
+ * Подбор позиции из базы прямо в окне элемента (ТЗ Максима 04.09).
+ *
+ * Класс схемы указывает на одну или несколько категорий каталога: один и тот
+ * же «автоматический выключатель» бывает модульным или в литом корпусе, и это
+ * выбирает человек. Поля и списки значений берутся из самой категории —
+ * у модульных атрибут зовётся «Кол-во полюсов», у литых «Количествово
+ * полюсов», а значения у них разные. Отсюда правило Максима: «бывают только
+ * варианты, доступные в базе».
+ *
+ * Итог сводится в «Название»: если подходит несколько позиций — выпадающий
+ * список. Артикул в этом меню не показываем, он ему здесь не нужен.
+ */
+function CatalogParams({ el, categories, tiles, onPick, onClear }: {
+  el: RecogElement;
+  categories: string[];
+  tiles: any[];
+  onPick: (p: PickedProduct) => void;
+  onClear: () => void;
+}) {
+  const [cat, setCat] = useState(categories[0] || '');
+  const [opts, setOpts] = useState<{ label: string; opts: string[] }[]>([]);
+  const [sel, setSel] = useState<Record<string, string>>({});
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const debounce = useRef<any>(null);
+
+  /* смена категории — заново берём набор полей из базы */
+  useEffect(() => {
+    if (!cat) return;
+    let alive = true;
+    setOpts([]); setSel({}); setItems([]);
+    catalogApi.getFilterOptions(cat)
+      .then(({ data }) => { if (alive) setOpts(Array.isArray(data) ? data : []); })
+      .catch(() => { if (alive) setOpts([]); });
+    return () => { alive = false; };
+  }, [cat]);
+
+  /* Значения, уже известные по схеме, подставляем в поля базы: OCR и модель
+     дают «3P», «250 А», а в каталоге это «3» и «250» — сверяем по цифрам и
+     буквам, иначе совпадений не будет почти никогда. */
+  useEffect(() => {
+    if (!opts.length) return;
+    const norm = (s: string) => String(s).toLowerCase().replace(/[^0-9a-zа-яё+]/gi, '');
+    const known = Object.values(el.fields || {}).map(norm).filter(Boolean);
+    const next: Record<string, string> = {};
+    for (const f of opts) {
+      const hit = (f.opts || []).find((o) => known.includes(norm(o)));
+      if (hit) next[f.label] = hit;
+    }
+    if (Object.keys(next).length) setSel((s) => ({ ...next, ...s }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opts]);
+
+  /* каждый выбор сужает список позиций */
+  useEffect(() => {
+    if (!cat) return;
+    if (debounce.current) clearTimeout(debounce.current);
+    debounce.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const filters: Record<string, string[]> = {};
+        for (const [k, v] of Object.entries(sel)) if (v) filters[k] = [v];
+        const brands = filters['Производитель'] || [];
+        const { data } = await catalogApi.filterProducts(cat, brands.length ? brands : undefined, filters);
+        setItems(Array.isArray(data) ? data : []);
+      } catch { setItems([]); }
+      finally { setLoading(false); }
+    }, 250);
+    return () => { if (debounce.current) clearTimeout(debounce.current); };
+  }, [cat, sel]);
+
+  const catName = (slug: string) => sv(tiles.find((t) => t.slug === slug)?.name) || slug;
+  const chosen = items.find((p) => sv(p?.name) === el.product_name);
+
+  return (
+    <div className="recog-basefit">
+      <div className="recog-basefit-t">Подбор по базе</div>
+
+      {categories.length > 1 && (
+        <div className="recog-fieldrow">
+          <label>Категория базы</label>
+          <select value={cat} onChange={(e) => setCat(e.target.value)}>
+            {categories.map((c) => <option key={c} value={c}>{catName(c)}</option>)}
+          </select>
+        </div>
+      )}
+
+      <div className="recog-fieldgrid">
+        {opts.slice(0, 8).map((f) => (
+          <div key={f.label} className="recog-fieldrow">
+            <label title={f.label}>{f.label}</label>
+            <select value={sel[f.label] || ''}
+              onChange={(e) => setSel((s) => ({ ...s, [f.label]: e.target.value }))}>
+              <option value="">— любое —</option>
+              {(f.opts || []).map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
+        ))}
+      </div>
+
+      <label>Название{items.length ? ` — подходит ${items.length}` : ''}</label>
+      <select
+        value={chosen ? sv(chosen.name) : ''}
+        onChange={(e) => {
+          const p = items.find((x) => sv(x?.name) === e.target.value);
+          if (!p) { onClear(); return; }
+          const { fields, product_class } = productAttrs(p);
+          onPick({
+            product_name: sv(p?.name).slice(0, 300),
+            brand: (sv(p?.brand) || sv(p?.manufacturer) || sv(p?.manufacturer?.name)).slice(0, 120),
+            article: sv(p?.article).slice(0, 120),
+            etm_code: (sv(p?.etm_code) || sv(p?.etmCode)).slice(0, 60),
+            price: sv(p?.price) || '0',
+            fields, product_class,
+          });
+        }}
+      >
+        <option value="">{loading ? 'Ищем в базе…' : items.length ? '— выберите позицию —' : 'Нет подходящих — снимите часть условий'}</option>
+        {items.slice(0, 200).map((p, i) => (
+          <option key={`${sv(p?.article)}-${i}`} value={sv(p?.name)}>{sv(p?.name)}</option>
+        ))}
+      </select>
+
+      {el.product_name && (
+        <div className="recog-basefit-picked">
+          <span>{el.product_name}</span>
+          <button className="btn-outline" onClick={onClear}>Убрать</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InspectorPanel({ el, cfg, catalogOpen, catalogCats, catalogTiles, onPickProduct, onHeadPointerDown, onClose, onSave, onDelete, onDuplicate, onPickCatalog, onClearProduct }: {
   el: RecogElement;
   cfg: RecogClassConfig;
   /** каталог раскрыт соседней колонкой в этом же окне */
   catalogOpen?: boolean;
+  /** категории базы для класса этого элемента */
+  catalogCats?: string[];
+  /** плитки каталога — нужны только для названий категорий */
+  catalogTiles?: any[];
+  onPickProduct: (p: PickedProduct) => void;
   onHeadPointerDown?: (e: React.PointerEvent) => void;
   onClose: () => void;
   onSave: (patch: Partial<RecogElement>, status?: string) => void;
@@ -1766,9 +1913,23 @@ function InspectorPanel({ el, cfg, catalogOpen, onHeadPointerDown, onClose, onSa
       <label>Обозначение (QF1, Гр.2…)</label>
       <input value={designation} onChange={(e) => setDesignation(e.target.value)} />
 
+      {/* Класс с категорией в базе: параметры и название берутся из каталога,
+          свой список значений здесь не нужен (ТЗ Максима 04.09) */}
+      {!!catalogCats?.length && (
+        <CatalogParams
+          el={el}
+          categories={catalogCats}
+          tiles={catalogTiles || []}
+          onPick={onPickProduct}
+          onClear={onClearProduct}
+        />
+      )}
+
       {/* Параметры в две колонки (правка Максима 18.08): значения короткие —
           «3P», «250 А», — и полосы на всю ширину занимали место зря, из-за
-          них окно не помещалось на экран целиком. */}
+          них окно не помещалось на экран целиком.
+          Для классов из каталога этот блок не нужен — там поля из базы. */}
+      {!catalogCats?.length && (
       <div className="recog-fieldgrid">
       {paramKeys.map((k) => {
         const v = fields[k] ?? '';
@@ -1804,6 +1965,7 @@ function InspectorPanel({ el, cfg, catalogOpen, onHeadPointerDown, onClose, onSa
         );
       })}
       </div>
+      )}
 
       {/* Цвет — под выпадающим меню (правка Максима 17.08): по умолчанию рамка
           красится по состоянию, палитра нужна редко и место занимала зря */}
