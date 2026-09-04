@@ -82,6 +82,27 @@ export function assignTexts<T extends { bbox: Bbox; texts?: TextPiece[] }>(
   return own;
 }
 
+/**
+ * Вхождение с допуском на одну ошибку символа.
+ *
+ * OCR на чертежах регулярно теряет по знаку: «ВА47-29» приходит как
+ * «BA4?-29», и точное сравнение не срабатывает, хотя человек читает серию
+ * без труда. Одна ошибка на строку длиной от пяти знаков — безопасный
+ * допуск: серии в каталоге различаются сильнее.
+ */
+function includesFuzzy(text: string, cand: string): boolean {
+  if (text.includes(cand)) return true;
+  if (cand.length < 5) return false;                // короткое — только точно
+  for (let i = 0; i + cand.length <= text.length; i++) {
+    let diff = 0;
+    for (let j = 0; j < cand.length; j++) {
+      if (text[i + j] !== cand[j] && ++diff > 1) break;
+    }
+    if (diff <= 1) return true;
+  }
+  return false;
+}
+
 /** Ищем значение поля среди списка каталога по нормализованному вхождению */
 function matchCatalog(texts: TextPiece[], values: string[], minLen = 3): string | null {
   const cand = values
@@ -91,7 +112,7 @@ function matchCatalog(texts: TextPiece[], values: string[], minLen = 3): string 
   for (const t of texts) {
     const nt = norm(t.text);
     if (!nt) continue;
-    const hit = cand.find((c) => nt.includes(c.n));
+    const hit = cand.find((c) => includesFuzzy(nt, c.n));
     if (hit) return hit.v;
   }
   return null;
@@ -157,7 +178,8 @@ export function parseFields(texts: TextPiece[], cat: CatalogValues): Record<stri
   // Значение обязано быть в ряду каталога: так отсекается мусор OCR.
   const amps = Object.keys(cat).find((k) => /номинальн.*ток/i.test(k));
   if (amps) {
-    const marked = /[iiі][нhрp]?\s*[=:]\s*(\d{1,4}(?:[.,]\d)?)/i;
+    // «I» на чертеже OCR отдаёт как I, l, | или 1 — принимаем все написания
+    const marked = /[il|1іІ][нhрp]?\s*[=:]\s*(\d{1,4}(?:[.,]\d)?)/i;
     const bare = /(?:^|[^0-9a-zа-я)])(\d{1,4}(?:[.,]\d)?)\s?[aа]\b/i;
     const tryFind = (list: string[], re: RegExp): string | null => {
       for (const t of list) {
