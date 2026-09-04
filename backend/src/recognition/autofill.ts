@@ -42,7 +42,9 @@ const LOOKALIKE: Record<string, string> = {
 export function norm(v: string): string {
   return String(v).toLowerCase()
     .split('').map((ch) => LOOKALIKE[ch] ?? ch).join('')
-    .replace(/[^0-9a-zа-я+.,]/g, '')
+    // «?» Tesseract ставит на месте знака, который не смог прочитать —
+    // оставляем как метку пропуска, дальше она работает как «любой знак»
+    .replace(/[^0-9a-zа-я+.,?]/g, '')
     .replace(/,/g, '.');
 }
 
@@ -83,22 +85,24 @@ export function assignTexts<T extends { bbox: Bbox; texts?: TextPiece[] }>(
 }
 
 /**
- * Вхождение с допуском на одну ошибку символа.
+ * Вхождение, где «?» в распознанном тексте заменяет любой знак.
  *
- * OCR на чертежах регулярно теряет по знаку: «ВА47-29» приходит как
- * «BA4?-29», и точное сравнение не срабатывает, хотя человек читает серию
- * без труда. Одна ошибка на строку длиной от пяти знаков — безопасный
- * допуск: серии в каталоге различаются сильнее.
+ * OCR теряет по знаку и честно помечает пропуск: «ВА47-29» приходит как
+ * «BA4?-29». Замер на схеме показал, почему нельзя пойти дальше и разрешить
+ * любое одно расхождение: «ВА-333Е» тогда совпадает с «ВА-333А» — обе серии
+ * есть в каталоге, и в поле молча встаёт чужая. Поэтому расхождение
+ * допускается только там, где сам движок признал, что не прочитал знак.
  */
-function includesFuzzy(text: string, cand: string): boolean {
+function includesGap(text: string, cand: string): boolean {
   if (text.includes(cand)) return true;
-  if (cand.length < 5) return false;                // короткое — только точно
+  if (!text.includes('?')) return false;
   for (let i = 0; i + cand.length <= text.length; i++) {
-    let diff = 0;
+    let ok = true;
     for (let j = 0; j < cand.length; j++) {
-      if (text[i + j] !== cand[j] && ++diff > 1) break;
+      const ch = text[i + j];
+      if (ch !== cand[j] && ch !== '?') { ok = false; break; }
     }
-    if (diff <= 1) return true;
+    if (ok) return true;
   }
   return false;
 }
@@ -112,7 +116,7 @@ function matchCatalog(texts: TextPiece[], values: string[], minLen = 3): string 
   for (const t of texts) {
     const nt = norm(t.text);
     if (!nt) continue;
-    const hit = cand.find((c) => includesFuzzy(nt, c.n));
+    const hit = cand.find((c) => includesGap(nt, c.n));
     if (hit) return hit.v;
   }
   return null;
@@ -143,8 +147,13 @@ export function parseFields(texts: TextPiece[], cat: CatalogValues): Record<stri
 
   // Обозначение: QF1, QF1.2, QS2, SF3 — с цифрой, иначе это шум OCR
   for (const t of joined) {
-    const m = String(t).match(/\b(QF|QS|SF|SB|KM|KV|QW)\s?-?\s?(\d+(?:[.,]\d+)?)\b/i);
-    if (m) { out['Обозначение'] = `${m[1].toUpperCase()}${m[2].replace(',', '.')}`; break; }
+    // «OF 15» и «0F15» — это QF15: Tesseract стабильно срезает хвост у Q
+    const m = String(t).match(/\b(QF|OF|ОF|0F|QS|SF|SB|KM|KV|QW)\s?-?\s?(\d+(?:[.,]\d+)?)\b/i);
+    if (m) {
+      const kind = m[1].toUpperCase().replace(/^[O0О]F$/, 'QF');
+      out['Обозначение'] = `${kind}${m[2].replace(',', '.')}`;
+      break;
+    }
   }
 
   // Серия и производитель — прямой сверкой со списками базы
@@ -198,7 +207,10 @@ export function parseFields(texts: TextPiece[], cat: CatalogValues): Record<stri
   const curve = Object.keys(cat).find((k) => /крив/i.test(k));
   if (curve) {
     for (const t of joined) {
-      const m = String(t).match(/(?:тип|хар[-.\s]?ка|хар\.?|char)\W{0,4}["'«]?\s?([ABCDKLZВСД])\b/i);
+      // «Тип "C"» приходит как «Tun "C"», «Пип "D"», «Hun "D"» — принимаем
+      // написания; от мусора защищает сверка буквы со списком каталога ниже
+      const m = String(t).match(
+        /(?:тип|tun|пип|hun|хар[-.\s]?ка|хар\.?|char)\W{0,4}["'«»“”]?\s?([ABCDKLZВСД])\b/i);
       if (!m) continue;
       const letter = norm(m[1]).toUpperCase();
       const hit = (cat[curve] || []).find((v) => norm(v).toUpperCase() === letter);
