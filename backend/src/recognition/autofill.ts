@@ -73,8 +73,12 @@ export function assignTexts<T extends { bbox: Bbox; texts?: TextPiece[] }>(
     }
     if (best) own.get(best)!.push(t);
   }
-  // текст слева и выше — первым: Максим просил считать левый приоритетным
-  for (const list of own.values()) list.sort((a, b) => (a.x - b.x) || (a.y - b.y));
+  // Ближний текст — первым: подпись своего аппарата всегда ближе подписи
+  // соседа, и это главный признак принадлежности. Приоритет левого текста,
+  // о котором писал Максим, применяем уже при разборе обозначения.
+  for (const [el, list] of own.entries()) {
+    list.sort((p1, p2) => distance(el.bbox, p1) - distance(el.bbox, p2));
+  }
   return own;
 }
 
@@ -146,16 +150,26 @@ export function parseFields(texts: TextPiece[], cat: CatalogValues): Record<stri
     }
   }
 
-  // Номинальный ток: «Iн=250 А», «In=32 A», «250 А». Значение обязано быть
-  // в ряду каталога — так отсекаются «кал 10» и прочие ошибки распознавания.
+  // Номинальный ток. Сначала подписи с явной пометкой тока — «Iн=250 А»,
+  // «Ip=32 A»: они однозначно про этот аппарат. Голое число вроде «250 А»
+  // берём только у самых близких кусков, иначе прилетает «5(10) A» от
+  // соседнего счётчика — ровно это и случилось на первом прогоне.
+  // Значение обязано быть в ряду каталога: так отсекается мусор OCR.
   const amps = Object.keys(cat).find((k) => /номинальн.*ток/i.test(k));
   if (amps) {
-    for (const t of joined) {
-      const m = String(t).match(/(?:^|[^0-9a-zа-я])(\d{1,4}(?:[.,]\d)?)\s?[AА]\b/i);
-      if (!m) continue;
-      const hit = matchNumber(parseFloat(m[1].replace(',', '.')), cat[amps] || []);
-      if (hit) { out[amps] = hit; break; }
-    }
+    const marked = /[iiі][нhрp]?\s*[=:]\s*(\d{1,4}(?:[.,]\d)?)/i;
+    const bare = /(?:^|[^0-9a-zа-я)])(\d{1,4}(?:[.,]\d)?)\s?[aа]\b/i;
+    const tryFind = (list: string[], re: RegExp): string | null => {
+      for (const t of list) {
+        const m = String(t).match(re);
+        if (!m) continue;
+        const hit = matchNumber(parseFloat(m[1].replace(',', '.')), cat[amps] || []);
+        if (hit) return hit;
+      }
+      return null;
+    };
+    const hit = tryFind(joined, marked) || tryFind(joined.slice(0, 4), bare);
+    if (hit) out[amps] = hit;
   }
 
   // Кривая отключения: «Тип "C"», «хар-ка B», «Хар. С»
