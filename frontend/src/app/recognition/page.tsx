@@ -1648,46 +1648,53 @@ export default function RecognitionPage() {
  * Итог сводится в «Название»: если подходит несколько позиций — выпадающий
  * список. Артикул в этом меню не показываем, он ему здесь не нужен.
  */
-function CatalogParams({ el, categories, tiles, onPick, onClear }: {
+function CatalogParams({ el, categories, tiles, values, onValues, onPick, onClear }: {
   el: RecogElement;
   categories: string[];
   tiles: any[];
+  /** условия подбора — хранятся в полях рамки, поэтому переживают закрытие */
+  values: Record<string, string>;
+  onValues: (next: Record<string, string>) => void;
   onPick: (p: PickedProduct) => void;
   onClear: () => void;
 }) {
-  const [cat, setCat] = useState(categories[0] || '');
+  const CAT_KEY = 'Категория базы';
+  const cat = values[CAT_KEY] && categories.includes(values[CAT_KEY]) ? values[CAT_KEY] : (categories[0] || '');
   const [opts, setOpts] = useState<{ label: string; opts: string[] }[]>([]);
-  const [sel, setSel] = useState<Record<string, string>>({});
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const debounce = useRef<any>(null);
+  const seeded = useRef('');
 
-  /* смена категории — заново берём набор полей из базы */
+  /* набор полей берём у выбранной категории: у модульных и литых он разный */
   useEffect(() => {
     if (!cat) return;
     let alive = true;
-    setOpts([]); setSel({}); setItems([]);
+    setOpts([]); setItems([]);
     catalogApi.getFilterOptions(cat)
       .then(({ data }) => { if (alive) setOpts(Array.isArray(data) ? data : []); })
       .catch(() => { if (alive) setOpts([]); });
     return () => { alive = false; };
   }, [cat]);
 
-  /* Значения, уже известные по схеме, подставляем в поля базы: OCR и модель
-     дают «3P», «250 А», а в каталоге это «3» и «250» — сверяем по цифрам и
-     буквам, иначе совпадений не будет почти никогда. */
+  /* Первый заход по этой категории: подставляем то, что уже известно со
+     схемы. Модель и OCR дают «3P» и «250 А», в каталоге это «3» и «250» —
+     сверяем по цифрам и буквам, иначе совпадений почти не будет. Ранее
+     выбранные условия не трогаем: они пришли в values из полей рамки. */
   useEffect(() => {
-    if (!opts.length) return;
-    const norm = (s: string) => String(s).toLowerCase().replace(/[^0-9a-zа-яё+]/gi, '');
+    if (!opts.length || seeded.current === cat) return;
+    seeded.current = cat;
+    const norm = (v: string) => String(v).toLowerCase().replace(/[^0-9a-zа-яё+]/gi, '');
     const known = Object.values(el.fields || {}).map(norm).filter(Boolean);
     const next: Record<string, string> = {};
     for (const f of opts) {
+      if (values[f.label]) continue;                 // уже выбрано человеком
       const hit = (f.opts || []).find((o) => known.includes(norm(o)));
       if (hit) next[f.label] = hit;
     }
-    if (Object.keys(next).length) setSel((s) => ({ ...next, ...s }));
+    if (Object.keys(next).length) onValues({ ...values, ...next });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opts]);
+  }, [opts, cat]);
 
   /* каждый выбор сужает список позиций */
   useEffect(() => {
@@ -1696,8 +1703,11 @@ function CatalogParams({ el, categories, tiles, onPick, onClear }: {
     debounce.current = setTimeout(async () => {
       setLoading(true);
       try {
+        const labels = new Set(opts.map((o) => o.label));
         const filters: Record<string, string[]> = {};
-        for (const [k, v] of Object.entries(sel)) if (v) filters[k] = [v];
+        for (const [k, v] of Object.entries(values)) {
+          if (v && labels.has(k)) filters[k] = [v];   // в базу шлём только её же поля
+        }
         const brands = filters['Производитель'] || [];
         const { data } = await catalogApi.filterProducts(cat, brands.length ? brands : undefined, filters);
         setItems(Array.isArray(data) ? data : []);
@@ -1705,10 +1715,21 @@ function CatalogParams({ el, categories, tiles, onPick, onClear }: {
       finally { setLoading(false); }
     }, 250);
     return () => { if (debounce.current) clearTimeout(debounce.current); };
-  }, [cat, sel]);
+  }, [cat, values, opts]);
 
-  const catName = (slug: string) => sv(tiles.find((t) => t.slug === slug)?.name) || slug;
-  const chosen = items.find((p) => sv(p?.name) === el.product_name);
+  /** сменили категорию — условия прошлой не имеют смысла, чистим их */
+  const changeCat = (next: string) => {
+    const keep: Record<string, string> = { [CAT_KEY]: next };
+    const labels = new Set(opts.map((o) => o.label));
+    for (const [k, v] of Object.entries(values)) if (!labels.has(k) && k !== CAT_KEY) keep[k] = v;
+    seeded.current = '';
+    onValues(keep);
+  };
+  const setOne = (label: string, v: string) => {
+    const next = { ...values, [CAT_KEY]: cat, [label]: v };
+    if (!v) delete next[label];
+    onValues(next);
+  };
 
   /** Какие значения ещё встречаются среди отобранных позиций: по ним гасим
    *  варианты, ведущие в пустоту. Производитель лежит не в атрибутах, а
@@ -1734,7 +1755,7 @@ function CatalogParams({ el, categories, tiles, onPick, onClear }: {
       {categories.length > 1 && (
         <div className="recog-fieldrow">
           <label>Категория базы</label>
-          <select value={cat} onChange={(e) => setCat(e.target.value)}>
+          <select value={cat} onChange={(e) => changeCat(e.target.value)}>
             {categories.map((c) => <option key={c} value={c}>{catName(c)}</option>)}
           </select>
         </div>
@@ -1747,13 +1768,13 @@ function CatalogParams({ el, categories, tiles, onPick, onClear }: {
           // значение оставляем всегда — иначе поле схлопнется само на себя.
           const avail = facet[f.label];
           const list = (avail && avail.size)
-            ? (f.opts || []).filter((o) => avail.has(o) || o === sel[f.label])
+            ? (f.opts || []).filter((o) => avail.has(o) || o === values[f.label])
             : (f.opts || []);
           return (
             <div key={f.label} className="recog-fieldrow">
               <label title={f.label}>{f.label}</label>
-              <select value={sel[f.label] || ''}
-                onChange={(e) => setSel((s) => ({ ...s, [f.label]: e.target.value }))}>
+              <select value={values[f.label] || ''}
+                onChange={(e) => setOne(f.label, e.target.value)}>
                 <option value="">— любое —</option>
                 {list.map((o) => <option key={o} value={o}>{o}</option>)}
               </select>
@@ -1834,12 +1855,29 @@ function InspectorPanel({ el, cfg, catalogOpen, catalogCats, catalogTiles, onPic
   /* Список параметров определяется типом элемента и меняется вместе с ним. */
   const paramKeys = paramKeysFor(klass, fields);
   const collect = (): Partial<RecogElement> => {
+    // У классов из каталога набор полей задаёт сама база, и он свой у каждой
+    // категории — фильтровать по зашитому списку нельзя, иначе выбранные
+    // условия подбора стёрлись бы при подтверждении.
+    if (catalogCats?.length) {
+      const all: Record<string, string> = {};
+      for (const [k, v] of Object.entries(fields)) {
+        const s = String(v ?? '').trim();
+        if (s) all[k] = s;
+      }
+      return { klass, designation, fields: all, color };
+    }
     const out: Record<string, string> = {};
     for (const k of paramKeys) {
       const v = String(fields[k] ?? '').trim();
       if (v) out[k] = v;                     // пустые поля набора не храним
     }
     return { klass, designation, fields: out, color };
+  };
+  /** Условия подбора храним в самой рамке: закрыл окно, открыл снова — они
+   *  на месте, и переживают перезагрузку страницы (просьба 05.09). */
+  const saveFields = (next: Record<string, string>) => {
+    setFields(next);
+    onSave({ fields: next });
   };
   const warn = el.confidence > 0 && el.confidence < LOW_CONF && el.status === 'auto';
   /** рамка уже подтверждена или исправлена — кнопка меняет смысл на обратный */
@@ -1946,6 +1984,8 @@ function InspectorPanel({ el, cfg, catalogOpen, catalogCats, catalogTiles, onPic
           el={el}
           categories={catalogCats}
           tiles={catalogTiles || []}
+          values={fields}
+          onValues={saveFields}
           onPick={onPickProduct}
           onClear={onClearProduct}
         />
