@@ -189,7 +189,9 @@ export function parseFields(texts: TextPiece[], cat: CatalogValues): Record<stri
   if (amps) {
     // «I» на чертеже OCR отдаёт как I, l, | или 1 — принимаем все написания
     const marked = /[il|1іІ][нhрp]?\s*[=:]\s*(\d{1,4}(?:[.,]\d)?)/i;
-    const bare = /(?:^|[^0-9a-zа-я)])(\d{1,4}(?:[.,]\d)?)\s?[aа]\b/i;
+    // Граница слова здесь не годится: \b считает границей только латиницу,
+    // и «250 А» с кириллической А не совпадало, тогда как «32 A» совпадало.
+    const bare = /(?:^|[^0-9a-zа-я)])(\d{1,4}(?:[.,]\d)?)\s?[aа](?![0-9a-zа-я])/i;
     const tryFind = (list: string[], re: RegExp): string | null => {
       for (const t of list) {
         const m = String(t).match(re);
