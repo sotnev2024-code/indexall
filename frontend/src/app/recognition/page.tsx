@@ -1710,6 +1710,23 @@ function CatalogParams({ el, categories, tiles, onPick, onClear }: {
   const catName = (slug: string) => sv(tiles.find((t) => t.slug === slug)?.name) || slug;
   const chosen = items.find((p) => sv(p?.name) === el.product_name);
 
+  /** Какие значения ещё встречаются среди отобранных позиций: по ним гасим
+   *  варианты, ведущие в пустоту. Производитель лежит не в атрибутах, а
+   *  отдельным полем, поэтому собираем его руками. */
+  const facet = useMemo(() => {
+    const m: Record<string, Set<string>> = {};
+    const add = (k: string, v: string) => { if (v) (m[k] = m[k] || new Set()).add(v); };
+    for (const p of items) {
+      let attrs: any = p?.attributes;
+      if (typeof attrs === 'string') { try { attrs = JSON.parse(attrs); } catch { attrs = null; } }
+      if (attrs && typeof attrs === 'object') {
+        for (const [k, v] of Object.entries(attrs)) add(k, sv(v));
+      }
+      add('Производитель', sv(p?.brand) || sv(p?.manufacturer) || sv(p?.manufacturer?.name));
+    }
+    return m;
+  }, [items]);
+
   return (
     <div className="recog-basefit">
       <div className="recog-basefit-t">Подбор по базе</div>
@@ -1724,16 +1741,25 @@ function CatalogParams({ el, categories, tiles, onPick, onClear }: {
       )}
 
       <div className="recog-fieldgrid">
-        {opts.slice(0, 8).map((f) => (
-          <div key={f.label} className="recog-fieldrow">
-            <label title={f.label}>{f.label}</label>
-            <select value={sel[f.label] || ''}
-              onChange={(e) => setSel((s) => ({ ...s, [f.label]: e.target.value }))}>
-              <option value="">— любое —</option>
-              {(f.opts || []).map((o) => <option key={o} value={o}>{o}</option>)}
-            </select>
-          </div>
-        ))}
+        {opts.slice(0, 8).map((f) => {
+          // Показываем только значения, которые есть у уже отобранных позиций,
+          // иначе легко собрать набор условий, дающий ноль. Своё выбранное
+          // значение оставляем всегда — иначе поле схлопнется само на себя.
+          const avail = facet[f.label];
+          const list = (avail && avail.size)
+            ? (f.opts || []).filter((o) => avail.has(o) || o === sel[f.label])
+            : (f.opts || []);
+          return (
+            <div key={f.label} className="recog-fieldrow">
+              <label title={f.label}>{f.label}</label>
+              <select value={sel[f.label] || ''}
+                onChange={(e) => setSel((s) => ({ ...s, [f.label]: e.target.value }))}>
+                <option value="">— любое —</option>
+                {list.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+          );
+        })}
       </div>
 
       <label>Название{items.length ? ` — подходит ${items.length}` : ''}</label>
@@ -1982,7 +2008,9 @@ function InspectorPanel({ el, cfg, catalogOpen, catalogCats, catalogTiles, onPic
               className={`recog-swatch ${color === c ? 'on' : ''}`}
               style={{ background: c }}
               title={c}
-              onClick={() => setColor(c)}
+              // цвет применяем сразу, не дожидаясь «Подтвердить»: иначе
+              // непонятно, что выбрал (правка 04.09)
+              onClick={() => { setColor(c); onSave({ color: c }); }}
             />
           ))}
           <button className="recog-swatch recog-swatch-add" title="Выбрать свой цвет из палитры"
@@ -1991,9 +2019,9 @@ function InspectorPanel({ el, cfg, catalogOpen, catalogCats, catalogTiles, onPic
           </button>
           <input id="recog-custom-color" type="color" hidden
             value={color || stateColor}
-            onChange={(e) => setColor(e.target.value)} />
+            onChange={(e) => { setColor(e.target.value); onSave({ color: e.target.value }); }} />
           {color && (
-            <button className="btn-outline recog-swatch-reset" onClick={() => setColor('')}>
+            <button className="btn-outline recog-swatch-reset" onClick={() => { setColor(''); onSave({ color: '' }); }}>
               Вернуть цвет состояния
             </button>
           )}
